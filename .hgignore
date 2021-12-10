@@ -1,0 +1,5 @@
+syntax: glob
+docs
+zig-cache
+zig-out
+*.bin
