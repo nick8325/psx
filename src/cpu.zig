@@ -150,6 +150,31 @@ pub fn decode(instr: u32) !Instruction {
 
 pub const Register = u5;
 
+pub const CPUDiff = struct {
+    cpu1: ?CPU,
+    cpu2: CPU,
+
+    pub fn init(cpu1: ?CPU, cpu2: CPU) CPUDiff {
+        return .{.cpu1 = cpu1, .cpu2 = cpu2};
+    }
+
+    pub fn format(
+        self: *const CPUDiff,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        if (self.cpu1) |cpu1| {
+            if (cpu1.pc != self.cpu2.pc)
+                try writer.print("PC={x}->{x} ", .{cpu1.pc, self.cpu2.pc});
+            for (cpu1.regs) |x, i| {
+                if (x != self.cpu2.regs[i])
+                    try writer.print("R{}={x}->{x} ", .{i, x, self.cpu2.regs[i]});
+            }
+        } else try self.cpu2.format(fmt, options, writer);
+    }
+};
+
 pub const CPU = struct {
     pc: u32,
     regs: [32]u32,
