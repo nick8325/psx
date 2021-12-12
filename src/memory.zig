@@ -5,11 +5,9 @@ pub var ram = [_]u32{0} ** 0x80000;
 pub var scratchpad = [_]u32{0} ** 0x100;
 pub var bios = utils.readArray(u32, "../SCPH1002.bin");
 
-fn abort(msg: anytype) noreturn {
-    @setRuntimeSafety(true);
-    std.log.err("{s}", .{msg});
-    unreachable;
-}
+pub const MemoryError = error {
+    UnknownAddress
+};
 
 const RAM = struct {
     start: u32,
@@ -40,7 +38,7 @@ const memory_map = .{
     RAM{.start = 0xbfc00000, .memory = bios[0..]},
 };
 
-pub fn read(addr: u32) u32 {
+pub fn read(addr: u32) !u32 {
     std.debug.assert(addr % 4 == 0);
 
     inline for (memory_map) |block| {
@@ -49,16 +47,19 @@ pub fn read(addr: u32) u32 {
             return block.read(addr);
     }
 
-    abort("unknown read");
+    std.log.err("read from unknown address {x}", .{addr});
+    return error.UnknownAddress;
 }
 
-pub fn write(addr: u32, value: u32) void {
+pub fn write(addr: u32, value: u32) !void {
     std.debug.assert(addr % 4 == 0);
 
     inline for (memory_map) |block| {
-        if (block.start <= addr and addr < block.end())
+        var start = block.start;
+        if (start <= addr and addr < block.end())
             return block.write(addr, value);
     }
 
-    abort("unknown write");
+    std.log.err("write to unknown address {x}", .{addr});
+    return error.UnknownAddress;
 }

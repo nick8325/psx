@@ -19,7 +19,16 @@ pub const Instruction = union(enum) {
         op: ImmediateOp,
         rs: Register,
         rd: Register,
-        imm: u16
+        imm: u16,
+
+        const Self = @This();
+        fn immzx(self: Self) u32 {
+            return @as(u32, self.imm);
+        }
+
+        fn immsx(self: Self) u32 {
+            return @bitCast(u32, @as(i32, @bitCast(i16, self.imm)));
+        }
     },
     jump: struct {
         op: JumpOp,
@@ -59,6 +68,7 @@ fn find(comptime T: type, opcode: @typeInfo(T).Enum.tag_type) ?T {
 }
 
 pub fn decode(instr: u32) !Instruction {
+    // This is really an SLL
     if (instr == 0) return Instruction{.nop = {}};
 
     const opcode = @intCast(u6, instr >> 26);
@@ -67,7 +77,7 @@ pub fn decode(instr: u32) !Instruction {
     const rd = @intCast(u5, (instr >> 11) & 0b11111);
     const shamt = @intCast(u5, (instr >> 6) & 0b11111);
     const funct = @intCast(u6, instr & 0b111111);
-    const imm = @intCast(u16, instr & 0xfff);
+    const imm = @intCast(u16, instr & 0xffff);
     const target = @intCast(u26, instr & 0x3ffffff);
 
     if (opcode == 0) {
@@ -116,11 +126,13 @@ pub const Register = u5;
 pub const CPU = struct {
     pc: u32,
     regs: [32]u32,
+    instruction: u32,
 
-    pub fn make(pc: u32) CPU {
-        return .{
+    pub fn init(pc: u32) !CPU {
+        return CPU {
             .pc = pc,
-            .regs = [_]u32{0} ** 32
+            .regs = [_]u32{0} ** 32,
+            .instruction = try memory.read(pc)
         };
     }
 
@@ -139,7 +151,7 @@ pub const CPU = struct {
         }
     }
 
-    pub fn get(self: *CPU, reg: Register) u32 {
+    pub fn get(self: *const CPU, reg: Register) u32 {
         return self.regs[reg];
     }
 
@@ -149,10 +161,36 @@ pub const CPU = struct {
     }
 
     pub fn step(self: *CPU) !void {
-        const instr = memory.read(self.pc);
+        const decoded = try decode(self.instruction);
         self.pc +%= 4;
-        std.log.info("{x} {}", .{instr, try decode(instr)});
+        self.instruction = try memory.read(self.pc);
+
+        std.log.info("{}", .{decoded});
+        try self.execute(decoded);
+    }
+
+    pub fn execute(self: *CPU, instr: Instruction) !void {
+        switch(instr) {
+            .nop => {},
+            .shift => |info| {
+                switch(info.op) {
+                    .SLL => self.set(info.rd, self.get(info.rs) << info.amount)
+                }
+            },
+            .imm => |info| switch(info.op) {
+                .LUI => self.set(info.rd, info.immzx() << 16),
+                .ORI => self.set(info.rd, self.get(info.rs) | info.imm),
+                .SW => try memory.write(self.get(info.rs) +% info.immsx(), self.get(info.rd))
+            },
+            .jump => |info| {
+                switch(info.op) {
+                    .J => self.pc = (self.pc & 0xf0000000) | (@as(u32, info.target) << 2)
+                }
+            },
+            else => {
+                std.log.err("unknown instruction {}", .{instr});
+                return error.UnknownInstruction;
+            }
+        }
     }
 };
-
-pub var cpu = CPU.make(0xbfc00000);
