@@ -1,14 +1,9 @@
 const std = @import("std");
+const utils = @import("utils.zig");
+
 pub var ram = [_]u32{0} ** 0x80000;
 pub var scratchpad = [_]u32{0} ** 0x100;
-
-fn read_bios(comptime path: []const u8) [0x20000]u32 {
-    const cstr = @embedFile(path);
-    const bytes = @bitCast([0x80001]u8, cstr.*);
-    return @bitCast([0x20000]u32, bytes[0..0x80000].*);
-}
-
-pub var bios = read_bios("../SCPH1002.bin");
+pub var bios = utils.readArray(u32, "../SCPH1002.bin");
 
 fn abort(msg: anytype) noreturn {
     @setRuntimeSafety(true);
