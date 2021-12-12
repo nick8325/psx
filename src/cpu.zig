@@ -36,8 +36,8 @@ pub const Instruction = union(enum) {
     }
 };
 
-pub const SpecialOp = enum {
-    blah
+pub const SpecialOp = enum(u6) {
+    OR = 0b100101
 };
 
 pub const ShiftOp = enum(u6) {
@@ -47,6 +47,7 @@ pub const ShiftOp = enum(u6) {
 pub const ImmediateOp = enum(u6) {
     LUI = 0b001111,
     ORI = 0b001101,
+    ADDIU = 0b001001,
     SW = 0b101011
 };
 
@@ -93,6 +94,13 @@ pub fn decode(instr: u32) !Instruction {
                 .rs = rt,
                 .rd = rd,
                 .amount = shamt
+            }};
+        } else if (find(SpecialOp, funct)) |op| {
+            return Instruction{.special = .{
+                .op = op,
+                .rs1 = rs,
+                .rs2 = rt,
+                .rd = rd
             }};
         } else {
             std.log.err("unknown funct {x} in {x}", .{funct, instr});
@@ -172,24 +180,20 @@ pub const CPU = struct {
     pub fn execute(self: *CPU, instr: Instruction) !void {
         switch(instr) {
             .nop => {},
-            .shift => |info| {
-                switch(info.op) {
-                    .SLL => self.set(info.rd, self.get(info.rs) << info.amount)
-                }
+            .special => |info| switch(info.op) {
+                .OR => self.set(info.rd, self.get(info.rs1) | self.get(info.rs2))
+            },
+            .shift => |info| switch(info.op) {
+                .SLL => self.set(info.rd, self.get(info.rs) << info.amount)
             },
             .imm => |info| switch(info.op) {
                 .LUI => self.set(info.rd, info.immzx() << 16),
                 .ORI => self.set(info.rd, self.get(info.rs) | info.imm),
+                .ADDIU => self.set(info.rd, self.get(info.rs) +% info.immsx()),
                 .SW => try memory.write(self.get(info.rs) +% info.immsx(), self.get(info.rd))
             },
-            .jump => |info| {
-                switch(info.op) {
-                    .J => self.pc = (self.pc & 0xf0000000) | (@as(u32, info.target) << 2)
-                }
-            },
-            else => {
-                std.log.err("unknown instruction {}", .{instr});
-                return error.UnknownInstruction;
+            .jump => |info| switch(info.op) {
+                .J => self.pc = (self.pc & 0xf0000000) | (@as(u32, info.target) << 2)
             }
         }
     }

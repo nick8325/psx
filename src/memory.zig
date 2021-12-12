@@ -61,5 +61,5 @@ pub fn write(addr: u32, value: u32) !void {
     }
 
     std.log.err("write to unknown address {x}", .{addr});
-    return error.UnknownAddress;
+//    return error.UnknownAddress;
 }
