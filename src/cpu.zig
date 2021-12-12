@@ -33,7 +33,26 @@ pub const Instruction = union(enum) {
     jump: struct {
         op: JumpOp,
         target: u26
+    },
+
+    pub fn format(
+        self: Instruction,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        switch (self) {
+            .nop => try writer.print("NOP", .{}),
+            .special => |info| try writer.print("{s} r{}, r{}, r{}", .{@tagName(info.op), info.rd, info.rs1, info.rs2}),
+            .shift => |info| try writer.print("{s} r{}, r{}, ${}", .{@tagName(info.op), info.rd, info.rs, info.amount}),
+            .imm => |info| try writer.print("{s} r{}, r{}, $0x{x}", .{@tagName(info.op), info.rd, info.rs, info.imm}),
+            .jump => |info| try writer.print("{s} $0x{x}", .{@tagName(info.op), info.target})
+        }
     }
+
 };
 
 pub const SpecialOp = enum(u6) {
@@ -145,7 +164,7 @@ pub const CPU = struct {
     }
 
     pub fn format(
-        self: CPU,
+        self: *const CPU,
         comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
