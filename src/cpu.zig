@@ -90,12 +90,16 @@ pub const Instruction = union(enum) {
 
 /// List of register-type instructions.
 pub const RegisterOp = enum(u6) {
-    OR = 0b100101
+    OR = 0b100101,
+    SLTU = 0b101011,
+    ADDU = 0b100001,
+    JR = 0b001000
 };
 
 /// List of shift-type instructions.
 pub const ShiftOp = enum(u6) {
-    SLL = 0b000000
+    SLL = 0b000000,
+    SRL = 0b000010
 };
 
 /// List of immediate-type instructions.
@@ -105,12 +109,17 @@ pub const ImmediateOp = enum(u6) {
     ADDIU = 0b001001,
     SW = 0b101011,
     BNE = 0b000101,
-    ADDI = 0b001000
+    ADDI = 0b001000,
+    LW = 0b100011,
+    SH = 0b101001,
+    ANDI = 0b001100,
+    SB = 0b101000
 };
 
 /// List of jump-type instructions.
 pub const JumpOp = enum(u6) {
-    J = 0b000010
+    J = 0b000010,
+    JAL = 0b000011
 };
 
 /// Errors returned by the decode function.
@@ -137,6 +146,11 @@ pub fn decode(instr: u32) !Instruction {
         if (utils.intToEnum(RegisterOp, funct)) |op| {
             if (shift != 0) {
                 std.log.err("register op with nonzero shift in {x}", .{instr});
+                return error.UnknownInstruction;
+            }
+
+            if (op == .JR and (rt.val != 0 or rd.val != 0)) {
+                std.log.err("JR with nonzero rt or rd in {x}", .{instr});
                 return error.UnknownInstruction;
             }
 
@@ -285,14 +299,20 @@ pub const CPU = struct {
         switch(instr) {
             .nop => {},
             .reg => |info| switch(info.op) {
-                .OR => self.set(info.dest, self.get(info.src1) | self.get(info.src2))
+                .OR => self.set(info.dest, self.get(info.src1) | self.get(info.src2)),
+                .SLTU => self.set(info.dest, if (self.get(info.src1) < self.get(info.src2)) 1 else 0),
+                .ADDU => self.set(info.dest, self.get(info.src1) + self.get(info.src2)),
+                .JR => {
+                    new_pc = self.get(info.src1);
+                }
             },
             .shift => |info| switch(info.op) {
-                .SLL => self.set(info.dest, self.get(info.src) << info.amount)
+                .SLL => self.set(info.dest, self.get(info.src) << info.amount),
+                .SRL => self.set(info.dest, self.get(info.src) >> info.amount)
             },
             .imm => |info| switch(info.op) {
                 .LUI => self.set(info.dest, info.zImm() << 16),
-                .ORI => self.set(info.dest, self.get(info.src) | info.imm),
+                .ORI => self.set(info.dest, self.get(info.src) | info.zImm()),
                 .ADDIU => self.set(info.dest, self.get(info.src) +% info.sImm()),
                 .ADDI => {
                     const src1 = @bitCast(i32, self.get(info.src));
@@ -304,14 +324,23 @@ pub const CPU = struct {
                         self.set(info.dest, @bitCast(u32, dest));
                 },
                 .SW => try memory.write(self.get(info.src) +% info.sImm(), self.get(info.dest)),
+                .LW => self.set(info.dest, try memory.read(self.get(info.src) +% info.sImm())),
                 .BNE => {
                     if (self.get(info.src) != self.get(info.dest))
                         new_pc = self.next_pc +% (info.sImm() << 2);
-                }
+                },
+                // TODO: improve memory handling in order to do this
+                .SH => std.log.err("SH not implemented", .{}),
+                .SB => std.log.err("SB not implemented", .{}),
+                .ANDI => self.set(info.dest, self.get(info.src) & info.zImm())
             },
             .jump => |info| switch(info.op) {
                 .J => {
                     new_pc = (self.next_pc & 0xf0000000) | (@as(u32, info.target) << 2);
+                },
+                .JAL => {
+                    new_pc = (self.next_pc & 0xf0000000) | (@as(u32, info.target) << 2);
+                    self.set(.{.val = 31}, self.next_pc +% 4);
                 }
             },
             .mtc => |info| switch(info.cop) {
