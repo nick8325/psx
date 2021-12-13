@@ -1,8 +1,9 @@
 const std = @import("std");
 const memory = @import("memory.zig");
+const utils = @import("utils.zig");
 
 /// A register is a 5-bit integer.
-pub const Register = struct { val: u5; };
+pub const Register = struct { val: u5 };
 
 /// A decoded instruction.
 pub const Instruction = union(enum) {
@@ -45,6 +46,8 @@ pub const Instruction = union(enum) {
         op: JumpOp,
         target: u26,
 
+        const Self = @This();
+
         /// Resolve the jump target as an absolute jump.
         fn absTarget(self: Self, pc: u32) u32 {
             return (pc & 0xf0000000) | (@as(u32, self.target) << 2);
@@ -62,9 +65,9 @@ pub const Instruction = union(enum) {
 
         switch (self) {
             .nop => try writer.print("NOP", .{}),
-            .special => |info| try writer.print("{s} r{}, r{}, r{}", .{@tagName(info.op), info.dest, info.source1, info.source2}),
-            .shift => |info| try writer.print("{s} r{}, r{}, ${}", .{@tagName(info.op), info.dest, info.source, info.amount}),
-            .imm => |info| try writer.print("{s} r{}, r{}, $0x{x}", .{@tagName(info.op), info.dest, info.source, info.imm}),
+            .reg => |info| try writer.print("{s} r{}, r{}, r{}", .{@tagName(info.op), info.dest.val, info.source1.val, info.source2.val}),
+            .shift => |info| try writer.print("{s} r{}, r{}, ${}", .{@tagName(info.op), info.dest.val, info.source.val, info.amount}),
+            .imm => |info| try writer.print("{s} r{}, r{}, $0x{x}", .{@tagName(info.op), info.dest.val, info.source.val, info.imm}),
             .jump => |info| try writer.print("{s} $0x{x}", .{@tagName(info.op), info.target})
         }
     }
@@ -113,7 +116,7 @@ pub fn decode(instr: u32) !Instruction {
     const target = @intCast(u26, instr & 0x3ffffff);
 
     // NOP is coded as SLL r0, r0, $0, but let's treat it specially
-    if (instr == 0) return Instruction{.nop = {}};
+    if (instr == 0) return Instruction{.nop = {}}
     else if (opcode == 0) { // Actual opcode is found in funct
         if (utils.intToEnum(RegisterOp, funct)) |op| {
             if (shift != 0) {
@@ -128,7 +131,7 @@ pub fn decode(instr: u32) !Instruction {
                 .dest = rd
             }};
         } else if (utils.intToEnum(ShiftOp, funct)) |op| {
-            if (rs != 0) {
+            if (rs.val != 0) {
                 std.log.err("shift with nonzero rs in {x}", .{instr});
                 return error.UnknownInstruction;
             }
@@ -144,7 +147,7 @@ pub fn decode(instr: u32) !Instruction {
             return error.UnknownInstruction;
         }
     } else if (utils.intToEnum(ImmediateOp, opcode)) |op| {
-        if (op == .LUI and rs != 0) {
+        if (op == .LUI and rs.val != 0) {
             std.log.err("lui with nonzero rs in {x}", .{instr});
             return error.UnknownInstruction;
         }
@@ -202,13 +205,13 @@ pub const CPU = struct {
 
     /// Get the value of a register.
     pub fn get(self: *const CPU, reg: Register) u32 {
-        return self.regs[reg];
+        return self.regs[reg.val];
     }
 
     /// Set the value of a register.
     /// Writes to register 0 are ignored.
     pub fn set(self: *CPU, reg: Register, val: u32) void {
-        self.regs[reg] = val;
+        self.regs[reg.val] = val;
         self.regs[0] = 0;
     }
 
@@ -237,10 +240,10 @@ pub const CPU = struct {
                 .SLL => self.set(info.dest, self.get(info.source) << info.amount)
             },
             .imm => |info| switch(info.op) {
-                .LUI => self.set(info.dest, info.immzx() << 16),
+                .LUI => self.set(info.dest, info.zImm() << 16),
                 .ORI => self.set(info.dest, self.get(info.source) | info.imm),
-                .ADDIU => self.set(info.dest, self.get(info.source) +% info.immsx()),
-                .SW => try memory.write(self.get(info.source) +% info.immsx(), self.get(info.dest))
+                .ADDIU => self.set(info.dest, self.get(info.source) +% info.sImm()),
+                .SW => try memory.write(self.get(info.source) +% info.sImm(), self.get(info.dest))
             },
             .jump => |info| switch(info.op) {
                 .J => self.pc = (self.pc & 0xf0000000) | (@as(u32, info.target) << 2)
