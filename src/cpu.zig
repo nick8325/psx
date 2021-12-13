@@ -214,20 +214,18 @@ pub const ExecutionError = error {
 pub const CPU = struct {
     /// Current PC.
     pc: u32,
+    /// Next value of PC. Used to implement branch delay slot.
+    next_pc: u32,
     /// Registers.
     regs: [32]u32,
-    /// The next instruction to be executed.
-    /// Used to implement the branch delay slot.
-    /// The instruction at PC will be executed after this one.
-    instruction: u32,
     /// Coprocessor 0 registers.
     cop0: [32]u32,
 
     pub fn init(pc: u32) CPU {
         return CPU {
             .pc = pc,
+            .next_pc = pc +% 4,
             .regs = [_]u32{0} ** 32,
-            .instruction = 0,
             .cop0 = [_]u32{0} ** 32,
         };
     }
@@ -274,20 +272,16 @@ pub const CPU = struct {
 
     /// Fetch and execute the next instruction.
     pub fn step(self: *CPU) !void {
-        const decoded = try decode(self.instruction);
-
-        // Fetch the next instruction and advance PC.
-        // Do this before executing the instruction so that
-        // jump instructions can set PC correctly.
-        self.instruction = try memory.read(self.pc);
-        self.pc +%= 4;
-
-        std.log.info("{}", .{decoded});
-        try self.execute(decoded);
+        const instr = try decode(try memory.read(self.pc));
+        std.log.info("{}", .{instr});
+        // The execute function is in charge of updating pc and next_pc.
+        try self.execute(instr);
     }
 
     /// Execute a single, decoded instruction.
     pub fn execute(self: *CPU, instr: Instruction) !void {
+        var new_pc: u32 = self.next_pc +% 4;
+
         switch(instr) {
             .nop => {},
             .reg => |info| switch(info.op) {
@@ -311,13 +305,14 @@ pub const CPU = struct {
                 },
                 .SW => try memory.write(self.get(info.src) +% info.sImm(), self.get(info.dest)),
                 .BNE => {
-                    // TO DO: check if this branches to the right place
                     if (self.get(info.src) != self.get(info.dest))
-                        self.pc +%= info.sImm() << 2;
+                        new_pc = self.next_pc +% (info.sImm() << 2);
                 }
             },
             .jump => |info| switch(info.op) {
-                .J => self.pc = (self.pc & 0xf0000000) | (@as(u32, info.target) << 2)
+                .J => {
+                    new_pc = (self.next_pc & 0xf0000000) | (@as(u32, info.target) << 2);
+                }
             },
             .mtc => |info| switch(info.cop) {
                 0 => self.setCOP0(info.dest, self.get(info.src)),
@@ -332,6 +327,9 @@ pub const CPU = struct {
                 }
             }
         }
+
+        self.pc = self.next_pc;
+        self.next_pc = new_pc;
     }
 };
 
@@ -354,6 +352,8 @@ pub const CPUDiff = struct {
         if (self.cpu1) |cpu1| {
             if (cpu1.pc != self.cpu2.pc)
                 try writer.print("PC={x}->{x} ", .{cpu1.pc, self.cpu2.pc});
+            if (cpu1.next_pc != self.cpu2.next_pc)
+                try writer.print("NEW_PC={x}->{x} ", .{cpu1.next_pc, self.cpu2.next_pc});
             for (cpu1.regs) |x, i| {
                 if (x != self.cpu2.regs[i])
                     try writer.print("R{}={x}->{x} ", .{i, x, self.cpu2.regs[i]});
