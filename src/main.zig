@@ -5,7 +5,7 @@ const memory = @import("memory.zig");
 
 pub fn main() !void {
     var old_cpu: ?CPU = null;
-    var cpu = try CPU.init(0xbfc00000);
+    var cpu = CPU.init(0xbfc00000);
     while (true) {
         std.log.info("{}", .{CPUDiff.init(old_cpu, cpu)});
         old_cpu = cpu;
