@@ -1,28 +1,29 @@
 const std = @import("std");
 const utils = @import("utils.zig");
 
-pub var ram = [_]u32{0} ** 0x80000;
-pub var scratchpad = [_]u32{0} ** 0x100;
-pub var bios = utils.readArray(u32, "../SCPH1002.bin");
+pub var ram = [_]u8{0} ** 0x200000;
+pub var scratchpad = [_]u8{0} ** 0x400;
+pub var bios = utils.readArray(u8, "../SCPH1002.bin");
 
 pub const MemoryError = error {
-    UnknownAddress
+    UnknownAddress,
+    UnalignedAccess
 };
 
 const RAM = struct {
     start: u32,
-    memory: []u32,
+    memory: []u8,
 
-    fn read(self: RAM, addr: u32) u32 {
-        return self.memory[(addr - self.start) / 4];
+    fn read(self: RAM, comptime T: type, addr: u32) T {
+        return std.mem.bytesAsSlice(T, self.memory)[(addr - self.start)/@sizeOf(T)];
     }
 
-    fn write(self: RAM, addr: u32, value: u32) void {
-        self.memory[(addr - self.start) / 4] = value;
+    fn write(self: RAM, comptime T: type, addr: u32, value: T) void {
+        std.mem.bytesAsSlice(T, self.memory)[(addr - self.start)/@sizeOf(T)] = value;
     }
 
     fn end(self: RAM) u32 {
-        return self.start + @intCast(u32, self.memory.len)*4;
+        return self.start + @intCast(u32, self.memory.len);
     }
 };
 
@@ -38,26 +39,32 @@ const memory_map = .{
     RAM{.start = 0xbfc00000, .memory = bios[0..]},
 };
 
-pub fn read(addr: u32) !u32 {
-    std.debug.assert(addr % 4 == 0);
+pub fn read(comptime T: type, addr: u32) !T {
+    if (addr % @sizeOf(T) != 0) {
+        std.log.err("read of aligned address {x} at size {}", .{addr, @sizeOf(T)});
+        return error.UnalignedAccess;
+    }
 
     inline for (memory_map) |block| {
         var start = block.start;
         if (start <= addr and addr < block.end())
-            return block.read(addr);
+            return block.read(T, addr);
     }
 
     std.log.err("read from unknown address {x}", .{addr});
     return error.UnknownAddress;
 }
 
-pub fn write(addr: u32, value: u32) !void {
-    std.debug.assert(addr % 4 == 0);
+pub fn write(comptime T: type, addr: u32, value: T) !void {
+    if (addr % @sizeOf(T) != 0) {
+        std.log.err("read of aligned address {x} at size {}", .{addr, @sizeOf(T)});
+        return error.UnalignedAccess;
+    }
 
     inline for (memory_map) |block| {
         var start = block.start;
         if (start <= addr and addr < block.end())
-            return block.write(addr, value);
+            return block.write(T, addr, value);
     }
 
     std.log.err("write to unknown address {x}", .{addr});

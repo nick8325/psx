@@ -113,7 +113,9 @@ pub const ImmediateOp = enum(u6) {
     LW = 0b100011,
     SH = 0b101001,
     ANDI = 0b001100,
-    SB = 0b101000
+    SB = 0b101000,
+    LB = 0b100000,
+    BEQ = 0b00100,
 };
 
 /// List of jump-type instructions.
@@ -286,7 +288,7 @@ pub const CPU = struct {
 
     /// Fetch and execute the next instruction.
     pub fn step(self: *CPU) !void {
-        const instr = try decode(try memory.read(self.pc));
+        const instr = try decode(try memory.read(u32, self.pc));
         std.log.info("{}", .{instr});
         // The execute function is in charge of updating pc and next_pc.
         try self.execute(instr);
@@ -323,16 +325,20 @@ pub const CPU = struct {
                     else
                         self.set(info.dest, @bitCast(u32, dest));
                 },
-                .SW => try memory.write(self.get(info.src) +% info.sImm(), self.get(info.dest)),
-                .LW => self.set(info.dest, try memory.read(self.get(info.src) +% info.sImm())),
+                .SW => try memory.write(u32, self.get(info.src) +% info.sImm(), self.get(info.dest)),
+                .LW => self.set(info.dest, try memory.read(u32, self.get(info.src) +% info.sImm())),
                 .BNE => {
                     if (self.get(info.src) != self.get(info.dest))
                         new_pc = self.next_pc +% (info.sImm() << 2);
                 },
-                // TODO: improve memory handling in order to do this
-                .SH => std.log.err("SH not implemented", .{}),
-                .SB => std.log.err("SB not implemented", .{}),
-                .ANDI => self.set(info.dest, self.get(info.src) & info.zImm())
+                .BEQ => {
+                    if (self.get(info.src) == self.get(info.dest))
+                        new_pc = self.next_pc +% (info.sImm() << 2);
+                },
+                .SH => try memory.write(u16, self.get(info.src) +% info.sImm(), @intCast(u16, self.get(info.dest) & 0xffff)),
+                .SB => try memory.write(u8, self.get(info.src) +% info.sImm(), @intCast(u8, self.get(info.dest) & 0xff)),
+                .ANDI => self.set(info.dest, self.get(info.src) & info.zImm()),
+                .LB => self.set(info.dest, @bitCast(u32, @intCast(i32, try memory.read(i8, self.get(info.src) +% info.sImm())))),
             },
             .jump => |info| switch(info.op) {
                 .J => {
