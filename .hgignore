@@ -1,5 +1,6 @@
 syntax: glob
 docs
+tools
 zig-cache
 zig-out
 *.bin

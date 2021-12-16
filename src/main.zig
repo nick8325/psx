@@ -1,14 +1,16 @@
 const std = @import("std");
-const CPU = @import("cpu.zig").CPU;
-const CPUDiff = @import("cpu.zig").CPUDiff;
+const CPU = @import("cpu.zig");
 const memory = @import("memory.zig");
 
 pub fn main() !void {
-    var old_cpu: ?CPU = null;
-    var cpu = CPU.init(0xbfc00000);
+    var old_cpu: ?CPU.CPU = null;
+    var cpu = CPU.CPU.init(0xbfc00000);
     while (true) {
-        std.log.info("{}", .{CPUDiff.init(old_cpu, cpu)});
+        const instr = CPU.decode(try memory.read(u32, cpu.pc));
         old_cpu = cpu;
+        defer {
+            std.log.info("{} {}", .{instr, CPU.CPUDiff.init(old_cpu, cpu)});
+        }
         try cpu.step();
     }
 }

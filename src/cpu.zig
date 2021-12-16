@@ -289,7 +289,6 @@ pub const CPU = struct {
     /// Fetch and execute the next instruction.
     pub fn step(self: *CPU) !void {
         const instr = try decode(try memory.read(u32, self.pc));
-        std.log.info("{}", .{instr});
         // The execute function is in charge of updating pc and next_pc.
         try self.execute(instr);
     }
@@ -387,8 +386,6 @@ pub const CPUDiff = struct {
         if (self.cpu1) |cpu1| {
             if (cpu1.pc != self.cpu2.pc)
                 try writer.print("PC={x}->{x} ", .{cpu1.pc, self.cpu2.pc});
-            if (cpu1.next_pc != self.cpu2.next_pc)
-                try writer.print("NEW_PC={x}->{x} ", .{cpu1.next_pc, self.cpu2.next_pc});
             for (cpu1.regs) |x, i| {
                 if (x != self.cpu2.regs[i])
                     try writer.print("R{}={x}->{x} ", .{i, x, self.cpu2.regs[i]});
