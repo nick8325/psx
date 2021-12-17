@@ -19,3 +19,7 @@ pub fn intToEnum(comptime T: type, opcode: std.meta.Tag(T)) ?T {
     return null;
 }
 
+/// Test if a given bit is set.
+pub fn testBit(comptime T: type, val: T, comptime bit: usize) bool {
+    return (val & (1 << bit)) != 0;
+}

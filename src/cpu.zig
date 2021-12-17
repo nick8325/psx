@@ -222,9 +222,161 @@ pub fn decode(instr: u32) !Instruction {
 
 /// Errors returned during execution
 pub const ExecutionError = error {
-    InvalidCOP,
+    InvalidCOP, // TODO: we return this also on e.g. reads/writes of unknown COP0 registers - is this right?
     Overflow
 };
+
+pub const COP0 = struct {
+    const SR = struct {
+        value: u32,
+
+        const Self = @This();
+
+        // 1 bit: this bit is not allowed to be modified
+        const mask:  u32 = 0b00001111101111000000000011000000;
+        // Initial value of SR.
+        const init_value: u32 = 0b00000000010000000000000000101010;
+
+        pub fn init() Self {
+            // BEV=1, KU[*]=1, everything else 0
+            return .{.value = init_value};
+        }
+
+        pub fn get(self: Self) u32 {
+            return self.value;
+        }
+
+        pub fn set(self: *Self, val: u32) !void {
+            if ((val & mask) != (init_value & mask)) {
+                std.log.err("write to read-only bit in COP0.SR", .{});
+
+                var i: usize = 0;
+                var bit: u32 = 1;
+                while (i < 32) {
+                    if ((mask & bit) != 0 and (val & bit) != (init_value & bit))
+                        std.log.err("bit {} is {x}, should be {x}", .{i, val & bit, init_value & bit});
+                    i += 1;
+                    bit *%= 2;
+                }
+                return error.InvalidCOP;
+            }
+
+            self.value = val;
+        }
+
+        pub fn cu(self: Self) [4]bool {
+            return .{
+                utils.testBit(self.value, 28),
+                utils.testBit(self.value, 29),
+                utils.testBit(self.value, 30),
+                utils.testBit(self.value, 31)
+            };
+        }
+
+        pub fn bev(self: Self) bool {
+            return utils.testBit(self.value, 22);
+        }
+
+        pub fn swc(self: Self) bool {
+            return utils.testBit(self.value, 17);
+        }
+        pub fn isc(self: Self) bool {
+            return utils.testBit(self.value, 16);
+        }
+
+        pub fn im(self: Self) [8] bool {
+            return .{
+                utils.testBit(self.value, 8),
+                utils.testBit(self.value, 9),
+                utils.testBit(self.value, 10),
+                utils.testBit(self.value, 11),
+                utils.testBit(self.value, 12),
+                utils.testBit(self.value, 13),
+                utils.testBit(self.value, 14),
+                utils.testBit(self.value, 15)
+            };
+        }
+
+        pub fn ku(self: Self) [3] bool {
+            return .{
+                utils.testBit(self.value, 5),
+                utils.testBit(self.value, 3),
+                utils.testBit(self.value, 1)
+            };
+        }
+
+        pub fn ie(self: Self) [3] bool {
+            return .{
+                utils.testBit(self.value, 4),
+                utils.testBit(self.value, 2),
+                utils.testBit(self.value, 0)
+            };
+        }
+    };
+
+    sr: SR,
+    cause: u32,
+    epc: u32,
+    badvaddr: u32,
+    // We don't really use these ones, but they can be get and set.
+    // Details from Nocash PSX.
+    bpc: u32,
+    bda: u32,
+    dcic: u32,
+    bdam: u32,
+    bpcm: u32,
+
+    fn init() COP0 {
+        return .{
+            .sr = SR.init(),
+            .cause = 0,
+            .epc = 0,
+            .badvaddr = 0,
+            .bpc = 0,
+            .bda = 0,
+            .dcic = 0,
+            .bdam = 0,
+            .bpcm = 0
+        };
+    }
+
+    pub fn get(self: *const COP0, reg: CoRegister) !u32 {
+        switch(reg.val) {
+            3 => return self.bpc,
+            5 => return self.bda,
+            7 => return self.dcic,
+            9 => return self.bdam,
+            11 => return self.bpcm,
+            8 => return self.badvaddr,
+            12 => return self.sr.get(),
+            13 => return self.cause,
+            14 => return self.epc,
+            15 => return 2, // PRId - value from Nocash PSX
+            else => {
+                std.log.err("unknown COP0 register read {}", .{reg.val});
+                return error.InvalidCOP;
+            }
+        }
+    }
+
+    pub fn set(self: *COP0, reg: CoRegister, val: u32) !void {
+        switch (reg.val) {
+            3 => self.bpc = val,
+            5 => self.bda = val,
+            6 => {}, // JUMPDEST
+            7 => self.dcic = val,
+            9 => self.bdam = val,
+            11 => self.bpcm = val,
+            12 => try self.sr.set(val),
+            13 => {},
+            14 => {},
+            else => {
+                std.log.err("unknown COP0 register write {}", .{reg.val});
+                return error.InvalidCOP;
+            }
+        }
+    }
+  };
 
 /// The state of the CPU.
 pub const CPU = struct {
@@ -234,15 +386,15 @@ pub const CPU = struct {
     next_pc: u32,
     /// Registers.
     regs: [32]u32,
-    /// Coprocessor 0 registers.
-    cop0: [32]u32,
+    /// COP0 registers.
+    cop0: COP0,
 
     pub fn init(pc: u32) CPU {
         return CPU {
             .pc = pc,
             .next_pc = pc +% 4,
-            .regs = [_]u32{0} ** 32,
-            .cop0 = [_]u32{0} ** 32,
+            .regs = .{0} ** 32,
+            .cop0 = COP0.init()
         };
     }
 
@@ -259,9 +411,10 @@ pub const CPU = struct {
         for (self.regs) |x, i| {
             try writer.print("R{}={x} ", .{i, x});
         }
-        for (self.cop0) |x, i| {
-            try writer.print("COP0.R{}={x} ", .{i, x});
-        }
+        try writer.print("COP0.SR={x} ", .{self.cop0.sr.get()});
+        try writer.print("COP0.CAUSE={x} ", .{self.cop0.cause});
+        try writer.print("COP0.EPC={x} ", .{self.cop0.epc});
+        try writer.print("COP0.BADVADDR={x} ", .{self.cop0.badvaddr});
     }
 
     /// Get the value of a register.
@@ -274,16 +427,6 @@ pub const CPU = struct {
     pub fn set(self: *CPU, reg: Register, val: u32) void {
         self.regs[reg.val] = val;
         self.regs[0] = 0;
-    }
-
-    /// Get the value of a COP0 register.
-    pub fn getCOP0(self: *const CPU, reg: CoRegister) u32 {
-        return self.cop0[reg.val];
-    }
-
-    /// Set the value of a COP0 register.
-    pub fn setCOP0(self: *CPU, reg: CoRegister, val: u32) void {
-        self.cop0[reg.val] = val;
     }
 
     /// Fetch and execute the next instruction.
@@ -337,7 +480,7 @@ pub const CPU = struct {
                 .SH => try memory.write(u16, self.get(info.src) +% info.sImm(), @intCast(u16, self.get(info.dest) & 0xffff)),
                 .SB => try memory.write(u8, self.get(info.src) +% info.sImm(), @intCast(u8, self.get(info.dest) & 0xff)),
                 .ANDI => self.set(info.dest, self.get(info.src) & info.zImm()),
-                .LB => self.set(info.dest, @bitCast(u32, @intCast(i32, try memory.read(i8, self.get(info.src) +% info.sImm())))),
+                .LB => self.set(info.dest, @bitCast(u32, @as(i32, try memory.read(i8, self.get(info.src) +% info.sImm())))),
             },
             .jump => |info| switch(info.op) {
                 .J => {
@@ -349,13 +492,13 @@ pub const CPU = struct {
                 }
             },
             .mtc => |info| switch(info.cop) {
-                0 => self.setCOP0(info.dest, self.get(info.src)),
+                0 => try self.cop0.set(info.dest, self.get(info.src)),
                 else => {
                     std.log.err("invalid cop {} in {x}", .{info.cop, instr});
                 }
             },
             .mfc => |info| switch(info.cop) {
-                0 => self.set(info.dest, self.getCOP0(info.src)),
+                0 => self.set(info.dest, try self.cop0.get(info.src)),
                 else => {
                     std.log.err("invalid cop {} in {x}", .{info.cop, instr});
                 }
@@ -390,10 +533,14 @@ pub const CPUDiff = struct {
                 if (x != self.cpu2.regs[i])
                     try writer.print("R{}={x}->{x} ", .{i, x, self.cpu2.regs[i]});
             }
-            for (cpu1.cop0) |x, i| {
-                if (x != self.cpu2.cop0[i])
-                    try writer.print("COP0.R{}={x}->{x} ", .{i, x, self.cpu2.cop0[i]});
-            }
+            if (cpu1.cop0.sr.get() != self.cpu2.cop0.sr.get())
+                try writer.print("COP0.SR={x}->{x} ", .{cpu1.cop0.sr.get(), self.cpu2.cop0.sr.get()});
+            if (cpu1.cop0.cause != self.cpu2.cop0.cause)
+                try writer.print("COP0.CAUSE={x}->{x} ", .{cpu1.cop0.cause, self.cpu2.cop0.cause});
+            if (cpu1.cop0.epc != self.cpu2.cop0.epc)
+                try writer.print("COP0.EPC={x}->{x} ", .{cpu1.cop0.epc, self.cpu2.cop0.epc});
+            if (cpu1.cop0.badvaddr != self.cpu2.cop0.badvaddr)
+                try writer.print("COP0.BADVADDR={x}->{x} ", .{cpu1.cop0.badvaddr, self.cpu2.cop0.badvaddr});
         } else try self.cpu2.format(fmt, options, writer);
     }
 };

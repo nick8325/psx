@@ -8,9 +8,7 @@ pub fn main() !void {
     while (true) {
         const instr = CPU.decode(try memory.read(u32, cpu.pc));
         old_cpu = cpu;
-        defer {
-            std.log.info("{} {}", .{instr, CPU.CPUDiff.init(old_cpu, cpu)});
-        }
+        defer std.log.info("{} {}", .{instr, CPU.CPUDiff.init(old_cpu, cpu)});
         try cpu.step();
     }
 }
