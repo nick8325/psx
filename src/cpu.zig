@@ -226,6 +226,7 @@ pub const ExecutionError = error {
     Overflow
 };
 
+/// The state of the system coprocessor.
 pub const COP0 = struct {
     const SR = struct {
         value: u32,
@@ -264,15 +265,6 @@ pub const COP0 = struct {
             self.value = val;
         }
 
-        pub fn cu(self: Self) [4]bool {
-            return .{
-                utils.testBit(self.value, 28),
-                utils.testBit(self.value, 29),
-                utils.testBit(self.value, 30),
-                utils.testBit(self.value, 31)
-            };
-        }
-
         pub fn bev(self: Self) bool {
             return utils.testBit(self.value, 22);
         }
@@ -297,19 +289,11 @@ pub const COP0 = struct {
             };
         }
 
-        pub fn ku(self: Self) [3] bool {
-            return .{
-                utils.testBit(self.value, 5),
-                utils.testBit(self.value, 3),
-                utils.testBit(self.value, 1)
-            };
-        }
-
         pub fn ie(self: Self) [3] bool {
             return .{
-                utils.testBit(self.value, 4),
+                utils.testBit(self.value, 0),
                 utils.testBit(self.value, 2),
-                utils.testBit(self.value, 0)
+                utils.testBit(self.value, 4)
             };
         }
     };
@@ -368,8 +352,11 @@ pub const COP0 = struct {
             9 => self.bdam = val,
             11 => self.bpcm = val,
             12 => try self.sr.set(val),
-            13 => {},
-            14 => {},
+            13 => {
+                // According to "Playstation Emulation Guide",
+                // bits 8 and 9 are writable.
+                self.cause = (self.cause & ~@as(u32, 0x30)) | (val & 0x30);
+            },
             else => {
                 std.log.err("unknown COP0 register write {}", .{reg.val});
                 return error.InvalidCOP;
