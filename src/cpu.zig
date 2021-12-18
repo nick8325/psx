@@ -234,7 +234,7 @@ pub const COP0 = struct {
         const Self = @This();
 
         // 1 bit: this bit is not allowed to be modified
-        const mask:  u32 = 0b00001111101111000000000011000000;
+        const mask:  u32 = 0b00001111101101000000000011000000;
         // Initial value of SR.
         const init_value: u32 = 0b00000000010000000000000000101010;
 
@@ -269,9 +269,14 @@ pub const COP0 = struct {
             return utils.testBit(self.value, 22);
         }
 
+        pub fn cm(self: Self) bool {
+            return utils.testBit(self.value, 19);
+        }
+
         pub fn swc(self: Self) bool {
             return utils.testBit(self.value, 17);
         }
+
         pub fn isc(self: Self) bool {
             return utils.testBit(self.value, 16);
         }
