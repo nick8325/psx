@@ -11,6 +11,3 @@ memory map:
 0xc-: kernel mode, cached, identity mapped
 
 p45: cop0 registers
-
-- does it even implement kmode? bios starts by setting sr to 10000 -
-  user mode, user transfer to cop0 disabled
