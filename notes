@@ -11,3 +11,7 @@ memory map:
 0xc-: kernel mode, cached, identity mapped
 
 p45: cop0 registers
+
+- main memory is mapped every 2MB from 0 to 16MB
+- then at 0x20000000 (mirrored at +2MB) - nocash says isn't on a
+  real machine
