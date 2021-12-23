@@ -41,7 +41,7 @@ const memory_map = .{
 
 pub fn read(comptime T: type, addr: u32) !T {
     if (addr % @sizeOf(T) != 0) {
-        std.log.err("read of aligned address {x} at size {}", .{addr, @sizeOf(T)});
+        std.log.err("read of unaligned address {x} at size {}", .{addr, @sizeOf(T)});
         return error.UnalignedAccess;
     }
 
@@ -57,7 +57,7 @@ pub fn read(comptime T: type, addr: u32) !T {
 
 pub fn write(comptime T: type, addr: u32, value: T) !void {
     if (addr % @sizeOf(T) != 0) {
-        std.log.err("read of aligned address {x} at size {}", .{addr, @sizeOf(T)});
+        std.log.err("write of unaligned address {x} at size {}", .{addr, @sizeOf(T)});
         return error.UnalignedAccess;
     }
 
@@ -68,5 +68,4 @@ pub fn write(comptime T: type, addr: u32, value: T) !void {
     }
 
     std.log.err("write to unknown address {x}", .{addr});
-//    return error.UnknownAddress;
 }
