@@ -442,7 +442,9 @@ pub const CPU = struct {
             return error.MemoryProtectionError;
 
         if (addr < 0x80000000) // KUSEG
-            return addr + 0x40000000
+            // Officially this gets translated to addr + 1GB,
+            // but let's just identity map it
+            return addr
         else if (addr < 0xa0000000) // KSEG0
             return addr - 0x80000000
         else if (addr < 0xc0000000) // KSEG1
