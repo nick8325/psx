@@ -29,15 +29,16 @@ const RAM = struct {
 
 const memory_map = .{
     RAM{.start = 0, .memory = ram[0..]},
-    RAM{.start = 0x80000000, .memory = ram[0..]},
-    RAM{.start = 0xa0000000, .memory = ram[0..]},
+    RAM{.start = 0x40000000, .memory = ram[0..]},
     RAM{.start = 0x1f800000, .memory = scratchpad[0..]},
-    RAM{.start = 0x9f800000, .memory = scratchpad[0..]},
-    RAM{.start = 0xbf800000, .memory = scratchpad[0..]},
+    RAM{.start = 0x5f800000, .memory = scratchpad[0..]},
     RAM{.start = 0x1fc00000, .memory = bios[0..]},
-    RAM{.start = 0x9fc00000, .memory = bios[0..]},
-    RAM{.start = 0xbfc00000, .memory = bios[0..]},
+    RAM{.start = 0x5fc00000, .memory = bios[0..]},
 };
+
+pub fn fetch(addr: u32) !u32 {
+    return read(u32, addr);
+}
 
 pub fn read(comptime T: type, addr: u32) !T {
     if (addr % @sizeOf(T) != 0) {

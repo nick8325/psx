@@ -223,7 +223,8 @@ pub fn decode(instr: u32) !Instruction {
 /// Errors returned during execution
 pub const ExecutionError = error {
     InvalidCOP, // TODO: we return this also on e.g. reads/writes of unknown COP0 registers - is this right?
-    Overflow
+    Overflow,
+    MemoryProtectionError
 };
 
 pub const COP0 = struct {
@@ -235,7 +236,7 @@ pub const COP0 = struct {
         // 1 bit: this bit is not allowed to be modified
         const mask:  u32 = 0b00001111101101000000000011000000;
         // Initial value of SR.
-        const init_value: u32 = 0b00000000010000000000000000101010;
+        const init_value: u32 = 0b00000000010000000000000000000000;
 
         pub fn init() Self {
             // BEV=1, KU[*]=1, everything else 0
@@ -266,55 +267,55 @@ pub const COP0 = struct {
 
         pub fn cu(self: Self) [4]bool {
             return .{
-                utils.testBit(self.value, 28),
-                utils.testBit(self.value, 29),
-                utils.testBit(self.value, 30),
-                utils.testBit(self.value, 31)
+                utils.testBit(u32, self.value, 28),
+                utils.testBit(u32, self.value, 29),
+                utils.testBit(u32, self.value, 30),
+                utils.testBit(u32, self.value, 31)
             };
         }
 
         pub fn bev(self: Self) bool {
-            return utils.testBit(self.value, 22);
+            return utils.testBit(u32, self.value, 22);
         }
 
         pub fn cm(self: Self) bool {
-            return utils.testBit(self.value, 19);
+            return utils.testBit(u32, self.value, 19);
         }
 
         pub fn swc(self: Self) bool {
-            return utils.testBit(self.value, 17);
+            return utils.testBit(u32, self.value, 17);
         }
 
         pub fn isc(self: Self) bool {
-            return utils.testBit(self.value, 16);
+            return utils.testBit(u32, self.value, 16);
         }
 
         pub fn im(self: Self) [8] bool {
             return .{
-                utils.testBit(self.value, 8),
-                utils.testBit(self.value, 9),
-                utils.testBit(self.value, 10),
-                utils.testBit(self.value, 11),
-                utils.testBit(self.value, 12),
-                utils.testBit(self.value, 13),
-                utils.testBit(self.value, 14),
-                utils.testBit(self.value, 15)
+                utils.testBit(u32, self.value, 8),
+                utils.testBit(u32, self.value, 9),
+                utils.testBit(u32, self.value, 10),
+                utils.testBit(u32, self.value, 11),
+                utils.testBit(u32, self.value, 12),
+                utils.testBit(u32, self.value, 13),
+                utils.testBit(u32, self.value, 14),
+                utils.testBit(u32, self.value, 15)
             };
         }
 
         pub fn ku(self: Self) [3] bool {
             return .{
-                utils.testBit(self.value, 5),
-                utils.testBit(self.value, 3),
-                utils.testBit(self.value, 1)
+                utils.testBit(u32, self.value, 5),
+                utils.testBit(u32, self.value, 3),
+                utils.testBit(u32, self.value, 1)
             };
         }
 
         pub fn ie(self: Self) [3] bool {
             return .{
-                utils.testBit(self.value, 4),
-                utils.testBit(self.value, 2),
-                utils.testBit(self.value, 0)
+                utils.testBit(u32, self.value, 4),
+                utils.testBit(u32, self.value, 2),
+                utils.testBit(u32, self.value, 0)
             };
         }
     };
@@ -434,9 +435,40 @@ pub const CPU = struct {
         self.regs[0] = 0;
     }
 
+    /// Resolve a virtual address to a physical address,
+    /// also checking access permissions.
+    pub fn resolve_address(self: *const CPU, addr: u32) !u32 {
+        if (addr >= 0x80000000 and self.cop0.sr.ku()[0])
+            return error.MemoryProtectionError;
+
+        if (addr < 0x80000000) // KUSEG
+            return addr + 0x40000000
+        else if (addr < 0xa0000000) // KSEG0
+            return addr - 0x80000000
+        else if (addr < 0xc0000000) // KSEG1
+            return addr - 0xa0000000
+        else // KSEG2
+            return addr;
+    }
+
+    /// Fetch the next instruction.
+    pub fn fetch(self: *const CPU) !u32 {
+        return memory.fetch(try self.resolve_address(self.pc));
+    }
+
+    /// Read from a given memory address.
+    pub fn read(self: *const CPU, comptime T: type, addr: u32) !T {
+        return memory.read(T, try self.resolve_address(addr));
+    }
+
+    /// Write to a given memory address.
+    pub fn write(self: *const CPU, comptime T: type, addr: u32, value: T) !void {
+        return memory.write(T, try self.resolve_address(addr), value);
+    }
+
     /// Fetch and execute the next instruction.
     pub fn step(self: *CPU) !void {
-        const instr = try decode(try memory.read(u32, self.pc));
+        const instr = try decode(try self.fetch());
         // The execute function is in charge of updating pc and next_pc.
         try self.execute(instr);
     }
@@ -472,8 +504,8 @@ pub const CPU = struct {
                     else
                         self.set(info.dest, @bitCast(u32, dest));
                 },
-                .SW => try memory.write(u32, self.get(info.src) +% info.sImm(), self.get(info.dest)),
-                .LW => self.set(info.dest, try memory.read(u32, self.get(info.src) +% info.sImm())),
+                .SW => try self.write(u32, self.get(info.src) +% info.sImm(), self.get(info.dest)),
+                .LW => self.set(info.dest, try self.read(u32, self.get(info.src) +% info.sImm())),
                 .BNE => {
                     if (self.get(info.src) != self.get(info.dest))
                         new_pc = self.next_pc +% (info.sImm() << 2);
@@ -482,10 +514,10 @@ pub const CPU = struct {
                     if (self.get(info.src) == self.get(info.dest))
                         new_pc = self.next_pc +% (info.sImm() << 2);
                 },
-                .SH => try memory.write(u16, self.get(info.src) +% info.sImm(), @intCast(u16, self.get(info.dest) & 0xffff)),
-                .SB => try memory.write(u8, self.get(info.src) +% info.sImm(), @intCast(u8, self.get(info.dest) & 0xff)),
+                .SH => try self.write(u16, self.get(info.src) +% info.sImm(), @intCast(u16, self.get(info.dest) & 0xffff)),
+                .SB => try self.write(u8, self.get(info.src) +% info.sImm(), @intCast(u8, self.get(info.dest) & 0xff)),
                 .ANDI => self.set(info.dest, self.get(info.src) & info.zImm()),
-                .LB => self.set(info.dest, @bitCast(u32, @as(i32, try memory.read(i8, self.get(info.src) +% info.sImm())))),
+                .LB => self.set(info.dest, @bitCast(u32, @as(i32, try self.read(i8, self.get(info.src) +% info.sImm())))),
             },
             .jump => |info| switch(info.op) {
                 .J => {
