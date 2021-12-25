@@ -93,7 +93,10 @@ pub const RegisterOp = enum(u6) {
     OR = 0b100101,
     SLTU = 0b101011,
     ADDU = 0b100001,
-    JR = 0b001000
+    JR = 0b001000,
+    AND = 0b100100,
+    ADD = 0b100000,
+    SUBU = 0b100011
 };
 
 /// List of shift-type instructions.
@@ -483,8 +486,19 @@ pub const CPU = struct {
             .nop => {},
             .reg => |info| switch(info.op) {
                 .OR => self.set(info.dest, self.get(info.src1) | self.get(info.src2)),
+                .AND => self.set(info.dest, self.get(info.src1) & self.get(info.src2)),
                 .SLTU => self.set(info.dest, if (self.get(info.src1) < self.get(info.src2)) 1 else 0),
-                .ADDU => self.set(info.dest, self.get(info.src1) + self.get(info.src2)),
+                .ADDU => self.set(info.dest, self.get(info.src1) +% self.get(info.src2)),
+                .ADD => {
+                    const src1 = @bitCast(i32, self.get(info.src1));
+                    const src2 = @bitCast(i32, self.get(info.src2));
+                    var dest: i32 = undefined;
+                    if (@addWithOverflow(i32, src1, src2, &dest))
+                        return error.Overflow
+                    else
+                        self.set(info.dest, @bitCast(u32, dest));
+                },
+                .SUBU => self.set(info.dest, self.get(info.src1) -% self.get(info.src2)),
                 .JR => {
                     new_pc = self.get(info.src1);
                 }
