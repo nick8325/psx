@@ -7,6 +7,29 @@ pub const Register = struct { val: u5 };
 /// A coprocessor register.
 pub const CoRegister = struct { val: u5 };
 
+pub const JumpTarget = struct {
+    target: u26,
+
+    /// Resolve the jump target as an absolute jump.
+    fn absTarget(self: JumpTarget, pc: u32) u32 {
+        return (pc & 0xf0000000) | (@as(u32, self.target) << 2);
+    }
+};
+
+pub const Immediate = struct {
+    value: u16,
+
+    /// Return the operand zero-extended to 32 bits.
+    fn zImm(self: Immediate) u32 {
+        return @as(u32, self.imm);
+    }
+
+    /// Return the operand sign-extended to 32 bits.
+    fn sImm(self: Immediate) u32 {
+        return @bitCast(u32, @as(i32, @bitCast(i16, self.imm)));
+    }
+};
+
 /// A decoded instruction.
 pub const Instruction = union(enum) {
     /// No-operation.
@@ -89,42 +112,84 @@ pub const Instruction = union(enum) {
 };
 
 /// List of register-type instructions.
+/// Opcode is stored in 'func' field; 'op' field is 0.
 pub const RegisterOp = enum(u6) {
-    OR = 0b100101,
-    SLTU = 0b101011,
-    ADDU = 0b100001,
-    JR = 0b001000,
-    AND = 0b100100,
-    ADD = 0b100000,
-    SUBU = 0b100011
+    SLLV = 0,
+    SRLV = 2,
+    SRAV = 3,
+    JR = 8,
+    JALR = 9,
+    SYSCALL = 12,
+    BREAK = 13,
+    MFHI = 16,
+    MTHI = 17,
+    MFLO = 18,
+    MTLO = 19,
+    MULT = 24,
+    MULTU = 25,
+    DIV = 26,
+    DIVU = 27,
+    ADD = 32,
+    ADDU = 33,
+    SUB = 34,
+    SUBU = 35,
+    AND = 36,
+    OR = 37,
+    XOR = 38,
+    NOR = 39,
+    SLT = 42,
+    SLTU = 43,
 };
 
 /// List of shift-type instructions.
+/// Like register-type, but uses the 'shift amount' field.
 pub const ShiftOp = enum(u6) {
-    SLL = 0b000000,
-    SRL = 0b000010
+    SLL = 4,
+    SRL = 6,
+    SRA = 7,
 };
 
-/// List of immediate-type instructions.
-pub const ImmediateOp = enum(u6) {
-    LUI = 0b001111,
-    ORI = 0b001101,
-    ADDIU = 0b001001,
-    SW = 0b101011,
-    BNE = 0b000101,
-    ADDI = 0b001000,
-    LW = 0b100011,
-    SH = 0b101001,
-    ANDI = 0b001100,
-    SB = 0b101000,
-    LB = 0b100000,
-    BEQ = 0b00100,
+/// List of "register immediate"-type instructions.
+/// Opcode is stored in 'func' field; 'op' field is 1.
+pub const RegImmOp = enum(u5) {
+    BLTZ = 0,
+    BGEZ = 1,
+    BGEZAL = 16,
+    BLTZAL = 17,
 };
 
 /// List of jump-type instructions.
 pub const JumpOp = enum(u6) {
-    J = 0b000010,
-    JAL = 0b000011
+    J = 2,
+    JAL = 3,
+};
+
+/// List of immediate-type instructions.
+pub const ImmediateOp = enum(u6) {
+    BEQ = 4,
+    BNE = 5,
+    BLEZ = 6,
+    BGTZ = 7,
+    ADDI = 8,
+    ADDIU = 9,
+    SUBI = 10,
+    SUBIU = 11,
+    ANDI = 12,
+    ORI = 13,
+    XORI = 14,
+    LUI = 15,
+    LB = 32,
+    LH = 33,
+    LWL = 34,
+    LW = 35,
+    LBU = 36,
+    LHU = 37,
+    LWR = 38,
+    SB = 40,
+    SH = 41,
+    SWL = 42,
+    SW = 43,
+    SWR = 46,
 };
 
 /// Errors returned by the decode function.
