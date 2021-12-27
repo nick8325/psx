@@ -139,15 +139,15 @@ pub const Instruction = union(enum) {
             const tag = comptime std.meta.stringToEnum(@typeInfo(Instruction).Union.tag_type.?, alt.name).?;
 
             switch (self) {
-                tag => |info| {
+                tag => |args| {
                     var first = true;
 
                     inline for (std.meta.fields(alt.field_type)) |field| {
-                        const val = @field(info, field.name);
+                        const arg = @field(args, field.name);
                         if (first)
-                            try writer.print(" {}", .{val})
+                            try writer.print(" {}", .{arg})
                         else
-                            try writer.print(", {}", .{val});
+                            try writer.print(", {}", .{arg});
                         first = false;
                     }
                 },
