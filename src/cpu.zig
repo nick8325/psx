@@ -2,323 +2,35 @@ const std = @import("std");
 const memory = @import("memory.zig");
 const utils = @import("utils.zig");
 
-/// A register is a 5-bit integer.
-pub const Register = struct {
-    val: u5,
+//////////////////////////////////////////////////////////////////////
+// Instruction decoding.
+//////////////////////////////////////////////////////////////////////
 
-    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
-        try writer.print("r{}", .{self.val});
-    }
+/// Errors returned by the decode function.
+pub const DecodingError = error {
+    UnknownInstruction
 };
 
-/// A coprocessor register.
-pub const CoRegister = struct {
-    val: u5,
+/// Decode an instruction.
+pub fn decode(instr: u32) !Instruction {
+    const parts = InstructionParts.make(instr);
 
-    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
-        try writer.print("c{}", .{self.val});
-    }
-};
-
-/// The operand of a jump-type instruction.
-const JumpTarget = struct {
-    val: u26,
-
-    /// Resolve the jump target as an absolute jump.
-    fn absTarget(self: JumpTarget, pc: u32) u32 {
-        return (pc & 0xf0000000) | (@as(u32, self.val) << 2);
+    inline for (@typeInfo(Instruction).Union.fields) |field| {
+        if (field.field_type.decode(parts)) |val|
+            return @unionInit(Instruction, field.name, val);
     }
 
-    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
-        try writer.print("$0x{x}", .{self.val});
-    }
-};
-
-/// A signed immediate operand.
-const SignedImmediate = struct {
-    val: u32,
-
-    fn make(val: u16) SignedImmediate {
-        return .{.val = @bitCast(u32, @as(i32, @bitCast(i16, val)))};
-    }
-
-    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
-        try writer.print("$0x{x}", .{self.val});
-    }
-};
-
-/// An unsigned immediate operand.
-const UnsignedImmediate = struct {
-    val: u32,
-
-    fn make(val: u16) UnsignedImmediate {
-        return .{.val = @as(u32, val)};
-    }
-
-    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
-        try writer.print("$0x{x}", .{self.val});
-    }
-};
-
-const InstructionBits = struct {
-    // Every instruction has a val and opcode and:
-    // - rs+rt+rd+shift+func, or
-    // - rs+rt+simm, or
-    // - rs+rt+uimm, or
-    // - target.
-    val: u32,
-    opcode: u6,
-    rs: Register,
-    rt: Register,
-    rd: Register,
-    shift: u5,
-    func: u6,
-    simm: SignedImmediate,
-    uimm: UnsignedImmediate,
-    target: JumpTarget,
-
-    fn decode(instr: u32) InstructionBits {
-        return .{
-            .val = instr,
-            .opcode = @intCast(u6, instr >> 26),
-            .rs = Register{.val = @intCast(u5, (instr >> 21) & 0b11111)},
-            .rt = Register{.val = @intCast(u5, (instr >> 16) & 0b11111)},
-            .rd = Register{.val = @intCast(u5, (instr >> 11) & 0b11111)},
-            .shift = @intCast(u5, (instr >> 6) & 0b11111),
-            .func = @intCast(u6, instr & 0b111111),
-            .simm = SignedImmediate.make(@intCast(u16, instr & 0xffff)),
-            .uimm = UnsignedImmediate.make(@intCast(u16, instr & 0xffff)),
-            .target = JumpTarget{.val = @intCast(u26, instr & 0x3ffffff)},
-        };
-    }
-};
-
-/// Instruction decoder for instructions with "don't-care" rs/rt/rd/shift.
-fn DontCareType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 0 and op.func == func)
-                return Self{}
-            else
-                return null;
-        }
-    };
+    std.log.err("unknown instruction {x}: {}", .{instr, parts});
+    return error.UnknownInstruction;
 }
 
-/// Instruction decoder for register-type instructions.
-fn RegisterType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
-
-        dest: Register,
-        src1: Register,
-        src2: Register,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 0 and op.func == func and op.shift == 0)
-                return Self{.dest = op.rd, .src1 = op.rs, .src2 = op.rt}
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for register-type instructions with rs only.
-fn RSType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
-
-        src: Register,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 0 and op.func == func and op.rt.val == 0 and op.rd.val == 0 and op.shift == 0)
-                return Self{.src = op.rs}
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for register-type instructions with rd only.
-fn RDType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
-
-        dest: Register,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 0 and op.func == func and op.rs.val == 0 and op.rt.val == 0 and op.shift == 0)
-                return Self{.dest = op.rd}
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for register-type instructions with rs and rd only.
-fn RSDType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
-
-        src: Register,
-        dest: Register,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 0 and op.func == func and op.rt.val == 0 and op.shift == 0)
-                return Self{.src = op.rs, .dest = op.rd}
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for register-type instructions with rs and rt only.
-fn RSTType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
-
-        src1: Register,
-        src2: Register,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 0 and op.func == func and op.rd.val == 0 and op.shift == 0)
-                return Self{.src1 = op.rs, .src2 = op.rt}
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for shift-type instructions.
-fn ShiftType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
-
-        dest: Register,
-        src: Register,
-        amount: u5,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 0 and op.func == func and op.rs.val == 0)
-                return Self{.dest = op.rd, .src = op.rs, .amount = op.shift}
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for signed immediate-type instructions.
-fn SignedImmediateType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
-
-        src: Register,
-        dest: Register,
-        imm: SignedImmediate,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == opcode)
-                return Self{ .src = op.rs, .dest = op.rt, .imm = op.simm }
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for unsigned immediate-type instructions.
-fn UnsignedImmediateType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
-
-        src: Register,
-        dest: Register,
-        imm: UnsignedImmediate,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == opcode)
-                return Self{ .src = op.rs, .dest = op.rt, .imm = op.uimm }
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for immediate-type branch instructions.
-fn BranchType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
-
-        src1: Register,
-        src2: Register,
-        imm: SignedImmediate,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == opcode)
-                return Self{ .src1 = op.rs, .src2 = op.rt, .imm = op.simm }
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for immediate-type branch-against-zero instructions.
-fn BranchZeroType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
-
-        src: Register,
-        imm: SignedImmediate,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == opcode and op.rt.val == 0)
-                return Self{ .src = op.rs, .imm = op.simm }
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for "REGIMM"-type branch instructions.
-fn RegImmBranchType(comptime kind: u5) type {
-    return struct {
-        const Self = @This();
-
-        src: Register,
-        offset: SignedImmediate,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 1 and op.rt.val == kind)
-                return Self{.src = op.rs, .offset = op.simm}
-            else
-                return null;
-        }
-    };
-}
-
-/// Instruction decoder for jump-type instructions.
-fn JumpType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
-
-        target: JumpTarget,
-
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == opcode)
-                return Self{.target = op.target}
-            else
-                return null;
-        }
-    };
-}
-
+/// A decoded instruction.
 pub const Instruction = union(enum) {
     NOP: struct {
         const Self = @This();
 
-        fn decode(op: InstructionBits) ?Self {
-            if (op.val == 0)
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.val == 0)
                 return Self{}
             else
                 return null;
@@ -376,9 +88,9 @@ pub const Instruction = union(enum) {
         dest: Register,
         imm: UnsignedImmediate,
 
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 15)
-                return Self{ .dest = op.rt, .imm = op.uimm }
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 15)
+                return Self{ .dest = parts.rt, .imm = parts.uimm }
             else
                 return null;
         }
@@ -401,9 +113,9 @@ pub const Instruction = union(enum) {
         dest: Register,
         src: CoRegister,
 
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 16 and op.rs.val == 0 and op.shift == 0 and op.func == 0)
-                return Self{.dest = op.rt, .src = .{.val = op.rd.val}}
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 16 and parts.rs.val == 0 and parts.shift == 0 and parts.func == 0)
+                return Self{.dest = parts.rt, .src = .{.val = parts.rd.val}}
             else
                 return null;
         }
@@ -413,9 +125,9 @@ pub const Instruction = union(enum) {
         dest: CoRegister,
         src: Register,
 
-        fn decode(op: InstructionBits) ?Self {
-            if (op.opcode == 16 and op.rs.val == 4 and op.shift == 0 and op.func == 0)
-                return Self{.src = op.rt, .dest = .{.val = op.rd.val}}
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 16 and parts.rs.val == 4 and parts.shift == 0 and parts.func == 0)
+                return Self{.src = parts.rt, .dest = .{.val = parts.rd.val}}
             else
                 return null;
         }
@@ -446,186 +158,327 @@ pub const Instruction = union(enum) {
     }
 };
 
-/// Errors returned by the decode function.
-pub const DecodingError = error {
-    UnknownInstruction
+/// The low-level decoding of an instruction.
+const InstructionParts = struct {
+    // Every instruction has a val and opcode and:
+    // - rs+rt+rd+shift+func, or
+    // - rs+rt+simm, or
+    // - rs+rt+uimm, or
+    // - target.
+    val: u32,
+    opcode: u6,
+    rs: Register,
+    rt: Register,
+    rd: Register,
+    shift: u5,
+    func: u6,
+    simm: SignedImmediate,
+    uimm: UnsignedImmediate,
+    target: JumpTarget,
+
+    fn make(instr: u32) InstructionParts {
+        return .{
+            .val = instr,
+            .opcode = @intCast(u6, instr >> 26),
+            .rs = Register{.val = @intCast(u5, (instr >> 21) & 0b11111)},
+            .rt = Register{.val = @intCast(u5, (instr >> 16) & 0b11111)},
+            .rd = Register{.val = @intCast(u5, (instr >> 11) & 0b11111)},
+            .shift = @intCast(u5, (instr >> 6) & 0b11111),
+            .func = @intCast(u6, instr & 0b111111),
+            .simm = SignedImmediate.make(@intCast(u16, instr & 0xffff)),
+            .uimm = UnsignedImmediate.make(@intCast(u16, instr & 0xffff)),
+            .target = JumpTarget{.val = @intCast(u26, instr & 0x3ffffff)},
+        };
+    }
 };
 
-/// Decode an instruction.
-pub fn decode(instr: u32) !Instruction {
-    const op = InstructionBits.decode(instr);
+/// The operand of a jump-type instruction.
+const JumpTarget = struct {
+    val: u26,
 
-    inline for (@typeInfo(Instruction).Union.fields) |field| {
-        if (field.field_type.decode(op)) |val|
-            return @unionInit(Instruction, field.name, val);
+    /// Resolve the jump target as an absolute jump.
+    fn absTarget(self: JumpTarget, pc: u32) u32 {
+        return (pc & 0xf0000000) | (@as(u32, self.val) << 2);
     }
 
-    std.log.err("unknown instruction {x}: {}", .{instr, op});
-    return error.UnknownInstruction;
+    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
+        try writer.print("$0x{x}", .{self.val});
+    }
+};
+
+/// A signed immediate operand.
+const SignedImmediate = struct {
+    val: u32,
+
+    fn make(val: u16) SignedImmediate {
+        return .{.val = @bitCast(u32, @as(i32, @bitCast(i16, val)))};
+    }
+
+    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
+        try writer.print("$0x{x}", .{self.val});
+    }
+};
+
+/// An unsigned immediate operand.
+const UnsignedImmediate = struct {
+    val: u32,
+
+    fn make(val: u16) UnsignedImmediate {
+        return .{.val = @as(u32, val)};
+    }
+
+    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
+        try writer.print("$0x{x}", .{self.val});
+    }
+};
+
+/// Instruction decoder for instructions with "don't-care" rs/rt/rd/shift.
+fn DontCareType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 0 and parts.func == func)
+                return Self{}
+            else
+                return null;
+        }
+    };
 }
+
+/// Instruction decoder for register-type instructions.
+fn RegisterType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
+
+        dest: Register,
+        src1: Register,
+        src2: Register,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 0 and parts.func == func and parts.shift == 0)
+                return Self{.dest = parts.rd, .src1 = parts.rs, .src2 = parts.rt}
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for register-type instructions with rs only.
+fn RSType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
+
+        src: Register,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 0 and parts.func == func and parts.rt.val == 0 and parts.rd.val == 0 and parts.shift == 0)
+                return Self{.src = parts.rs}
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for register-type instructions with rd only.
+fn RDType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
+
+        dest: Register,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 0 and parts.func == func and parts.rs.val == 0 and parts.rt.val == 0 and parts.shift == 0)
+                return Self{.dest = parts.rd}
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for register-type instructions with rs and rd only.
+fn RSDType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
+
+        src: Register,
+        dest: Register,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 0 and parts.func == func and parts.rt.val == 0 and parts.shift == 0)
+                return Self{.src = parts.rs, .dest = parts.rd}
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for register-type instructions with rs and rt only.
+fn RSTType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
+
+        src1: Register,
+        src2: Register,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 0 and parts.func == func and parts.rd.val == 0 and parts.shift == 0)
+                return Self{.src1 = parts.rs, .src2 = parts.rt}
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for shift-type instructions.
+fn ShiftType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
+
+        dest: Register,
+        src: Register,
+        amount: u5,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 0 and parts.func == func and parts.rs.val == 0)
+                return Self{.dest = parts.rd, .src = parts.rs, .amount = parts.shift}
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for signed immediate-type instructions.
+fn SignedImmediateType(comptime opcode: u6) type {
+    return struct {
+        const Self = @This();
+
+        src: Register,
+        dest: Register,
+        imm: SignedImmediate,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == opcode)
+                return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.simm }
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for unsigned immediate-type instructions.
+fn UnsignedImmediateType(comptime opcode: u6) type {
+    return struct {
+        const Self = @This();
+
+        src: Register,
+        dest: Register,
+        imm: UnsignedImmediate,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == opcode)
+                return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.uimm }
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for immediate-type branch instructions.
+fn BranchType(comptime opcode: u6) type {
+    return struct {
+        const Self = @This();
+
+        src1: Register,
+        src2: Register,
+        imm: SignedImmediate,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == opcode)
+                return Self{ .src1 = parts.rs, .src2 = parts.rt, .imm = parts.simm }
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for immediate-type branch-against-zero instructions.
+fn BranchZeroType(comptime opcode: u6) type {
+    return struct {
+        const Self = @This();
+
+        src: Register,
+        imm: SignedImmediate,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == opcode and parts.rt.val == 0)
+                return Self{ .src = parts.rs, .imm = parts.simm }
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for "REGIMM"-type branch instructions.
+fn RegImmBranchType(comptime kind: u5) type {
+    return struct {
+        const Self = @This();
+
+        src: Register,
+        offset: SignedImmediate,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == 1 and parts.rt.val == kind)
+                return Self{.src = parts.rs, .offset = parts.simm}
+            else
+                return null;
+        }
+    };
+}
+
+/// Instruction decoder for jump-type instructions.
+fn JumpType(comptime opcode: u6) type {
+    return struct {
+        const Self = @This();
+
+        target: JumpTarget,
+
+        fn decode(parts: InstructionParts) ?Self {
+            if (parts.opcode == opcode)
+                return Self{.target = parts.target}
+            else
+                return null;
+        }
+    };
+}
+
+//////////////////////////////////////////////////////////////////////
+// Processor state and execution.
+//////////////////////////////////////////////////////////////////////
+
+/// A register is a 5-bit integer.
+pub const Register = struct {
+    val: u5,
+
+    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
+        try writer.print("r{}", .{self.val});
+    }
+};
+
+/// A coprocessor register.
+pub const CoRegister = struct {
+    val: u5,
+
+    pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
+        try writer.print("c{}", .{self.val});
+    }
+};
 
 /// Errors returned during execution
 pub const ExecutionError = error {
     InvalidCOP, // TODO: we return this also on e.g. reads/writes of unknown COP0 registers - is this right?
     Overflow,
     MemoryProtectionError
-};
-
-pub const COP0 = struct {
-    const SR = struct {
-        value: u32,
-
-        const Self = @This();
-
-        // 1 bit: this bit is not allowed to be modified
-        const mask:  u32 = 0b00001111101101000000000011000000;
-        // Initial value of SR.
-        const init_value: u32 = 0b00000000010000000000000000000000;
-
-        pub fn init() Self {
-            // BEV=1, everything else 0
-            return .{.value = init_value};
-        }
-
-        pub fn get(self: Self) u32 {
-            return self.value;
-        }
-
-        pub fn set(self: *Self, val: u32) !void {
-            if ((val & mask) != (init_value & mask)) {
-                std.log.err("write to read-only bit in COP0.SR", .{});
-
-                var i: usize = 0;
-                var bit: u32 = 1;
-                while (i < 32) {
-                    if ((mask & bit) != 0 and (val & bit) != (init_value & bit))
-                        std.log.err("bit {} is {x}, should be {x}", .{i, val & bit, init_value & bit});
-                    i += 1;
-                    bit *%= 2;
-                }
-                return error.InvalidCOP;
-            }
-
-            self.value = val;
-        }
-
-        pub fn cu(self: Self) [4]bool {
-            return .{
-                utils.testBit(u32, self.value, 28),
-                utils.testBit(u32, self.value, 29),
-                utils.testBit(u32, self.value, 30),
-                utils.testBit(u32, self.value, 31)
-            };
-        }
-
-        pub fn bev(self: Self) bool {
-            return utils.testBit(u32, self.value, 22);
-        }
-
-        pub fn cm(self: Self) bool {
-            return utils.testBit(u32, self.value, 19);
-        }
-
-        pub fn swc(self: Self) bool {
-            return utils.testBit(u32, self.value, 17);
-        }
-
-        pub fn isc(self: Self) bool {
-            return utils.testBit(u32, self.value, 16);
-        }
-
-        pub fn im(self: Self) [8] bool {
-            return .{
-                utils.testBit(u32, self.value, 8),
-                utils.testBit(u32, self.value, 9),
-                utils.testBit(u32, self.value, 10),
-                utils.testBit(u32, self.value, 11),
-                utils.testBit(u32, self.value, 12),
-                utils.testBit(u32, self.value, 13),
-                utils.testBit(u32, self.value, 14),
-                utils.testBit(u32, self.value, 15)
-            };
-        }
-
-        pub fn ku(self: Self) [3] bool {
-            return .{
-                utils.testBit(u32, self.value, 5),
-                utils.testBit(u32, self.value, 3),
-                utils.testBit(u32, self.value, 1)
-            };
-        }
-
-        pub fn ie(self: Self) [3] bool {
-            return .{
-                utils.testBit(u32, self.value, 4),
-                utils.testBit(u32, self.value, 2),
-                utils.testBit(u32, self.value, 0)
-            };
-        }
-    };
-
-    sr: SR,
-    cause: u32,
-    epc: u32,
-    badvaddr: u32,
-    // We don't really use these ones, but they can be get and set.
-    // Details from Nocash PSX.
-    bpc: u32,
-    bda: u32,
-    dcic: u32,
-    bdam: u32,
-    bpcm: u32,
-
-    fn init() COP0 {
-        return .{
-            .sr = SR.init(),
-            .cause = 0,
-            .epc = 0,
-            .badvaddr = 0,
-            .bpc = 0,
-            .bda = 0,
-            .dcic = 0,
-            .bdam = 0,
-            .bpcm = 0
-        };
-    }
-
-    pub fn get(self: *const COP0, reg: CoRegister) !u32 {
-        switch(reg.val) {
-            3 => return self.bpc,
-            5 => return self.bda,
-            7 => return self.dcic,
-            9 => return self.bdam,
-            11 => return self.bpcm,
-            8 => return self.badvaddr,
-            12 => return self.sr.get(),
-            13 => return self.cause,
-            14 => return self.epc,
-            15 => return 2, // PRId - value from Nocash PSX
-            else => {
-                std.log.err("unknown COP0 register read {}", .{reg.val});
-                return error.InvalidCOP;
-            }
-        }
-    }
-
-    pub fn set(self: *COP0, reg: CoRegister, val: u32) !void {
-        switch (reg.val) {
-            3 => self.bpc = val,
-            5 => self.bda = val,
-            6 => {}, // JUMPDEST
-            7 => self.dcic = val,
-            9 => self.bdam = val,
-            11 => self.bpcm = val,
-            12 => try self.sr.set(val),
-            13 => {},
-            14 => {},
-            else => {
-                std.log.err("unknown COP0 register write {}", .{reg.val});
-                return error.InvalidCOP;
-            }
-        }
-    }
 };
 
 /// The state of the CPU.
@@ -785,6 +638,168 @@ pub const CPU = struct {
         self.next_pc = new_pc;
     }
 };
+
+/// The system coprocessor.
+pub const COP0 = struct {
+    const SR = struct {
+        value: u32,
+
+        const Self = @This();
+
+        // 1 bit: this bit is not allowed to be modified
+        const mask:  u32 = 0b00001111101101000000000011000000;
+        // Initial value of SR.
+        const init_value: u32 = 0b00000000010000000000000000000000;
+
+        pub fn init() Self {
+            // BEV=1, everything else 0
+            return .{.value = init_value};
+        }
+
+        pub fn get(self: Self) u32 {
+            return self.value;
+        }
+
+        pub fn set(self: *Self, val: u32) !void {
+            if ((val & mask) != (init_value & mask)) {
+                std.log.err("write to read-only bit in COP0.SR", .{});
+
+                var i: usize = 0;
+                var bit: u32 = 1;
+                while (i < 32) {
+                    if ((mask & bit) != 0 and (val & bit) != (init_value & bit))
+                        std.log.err("bit {} is {x}, should be {x}", .{i, val & bit, init_value & bit});
+                    i += 1;
+                    bit *%= 2;
+                }
+                return error.InvalidCOP;
+            }
+
+            self.value = val;
+        }
+
+        pub fn cu(self: Self) [4]bool {
+            return .{
+                utils.testBit(u32, self.value, 28),
+                utils.testBit(u32, self.value, 29),
+                utils.testBit(u32, self.value, 30),
+                utils.testBit(u32, self.value, 31)
+            };
+        }
+
+        pub fn bev(self: Self) bool {
+            return utils.testBit(u32, self.value, 22);
+        }
+
+        pub fn cm(self: Self) bool {
+            return utils.testBit(u32, self.value, 19);
+        }
+
+        pub fn swc(self: Self) bool {
+            return utils.testBit(u32, self.value, 17);
+        }
+
+        pub fn isc(self: Self) bool {
+            return utils.testBit(u32, self.value, 16);
+        }
+
+        pub fn im(self: Self) [8] bool {
+            return .{
+                utils.testBit(u32, self.value, 8),
+                utils.testBit(u32, self.value, 9),
+                utils.testBit(u32, self.value, 10),
+                utils.testBit(u32, self.value, 11),
+                utils.testBit(u32, self.value, 12),
+                utils.testBit(u32, self.value, 13),
+                utils.testBit(u32, self.value, 14),
+                utils.testBit(u32, self.value, 15)
+            };
+        }
+
+        pub fn ku(self: Self) [3] bool {
+            return .{
+                utils.testBit(u32, self.value, 5),
+                utils.testBit(u32, self.value, 3),
+                utils.testBit(u32, self.value, 1)
+            };
+        }
+
+        pub fn ie(self: Self) [3] bool {
+            return .{
+                utils.testBit(u32, self.value, 4),
+                utils.testBit(u32, self.value, 2),
+                utils.testBit(u32, self.value, 0)
+            };
+        }
+    };
+
+    sr: SR,
+    cause: u32,
+    epc: u32,
+    badvaddr: u32,
+    // We don't really use these ones, but they can be get and set.
+    // Details from Nocash PSX.
+    bpc: u32,
+    bda: u32,
+    dcic: u32,
+    bdam: u32,
+    bpcm: u32,
+
+    fn init() COP0 {
+        return .{
+            .sr = SR.init(),
+            .cause = 0,
+            .epc = 0,
+            .badvaddr = 0,
+            .bpc = 0,
+            .bda = 0,
+            .dcic = 0,
+            .bdam = 0,
+            .bpcm = 0
+        };
+    }
+
+    pub fn get(self: *const COP0, reg: CoRegister) !u32 {
+        switch(reg.val) {
+            3 => return self.bpc,
+            5 => return self.bda,
+            7 => return self.dcic,
+            9 => return self.bdam,
+            11 => return self.bpcm,
+            8 => return self.badvaddr,
+            12 => return self.sr.get(),
+            13 => return self.cause,
+            14 => return self.epc,
+            15 => return 2, // PRId - value from Nocash PSX
+            else => {
+                std.log.err("unknown COP0 register read {}", .{reg.val});
+                return error.InvalidCOP;
+            }
+        }
+    }
+
+    pub fn set(self: *COP0, reg: CoRegister, val: u32) !void {
+        switch (reg.val) {
+            3 => self.bpc = val,
+            5 => self.bda = val,
+            6 => {}, // JUMPDEST
+            7 => self.dcic = val,
+            9 => self.bdam = val,
+            11 => self.bpcm = val,
+            12 => try self.sr.set(val),
+            13 => {},
+            14 => {},
+            else => {
+                std.log.err("unknown COP0 register write {}", .{reg.val});
+                return error.InvalidCOP;
+            }
+        }
+    }
+};
+
+//////////////////////////////////////////////////////////////////////
+// Miscellaneous.
+//////////////////////////////////////////////////////////////////////
 
 /// Printing the value CPUDiff.init(cpu1, cpu2)
 /// shows the difference in CPU state between cpu1 and cpu2.
