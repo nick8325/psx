@@ -8,7 +8,7 @@ pub fn main() !void {
     while (true) {
         const instr = CPU.decode(try cpu.fetch());
         old_cpu = cpu;
-        defer std.log.info("{} {}", .{instr, CPU.CPUDiff.init(old_cpu, cpu)});
+        defer std.log.debug("{} {}", .{instr, CPU.CPUDiff.init(old_cpu, cpu)});
         try cpu.step();
     }
 }
