@@ -236,15 +236,15 @@ const InstructionParts = struct {
     fn make(instr: u32) InstructionParts {
         return .{
             .val = instr,
-            .opcode = @intCast(u6, instr >> 26),
-            .rs = Register{.val = @intCast(u5, (instr >> 21) & 0b11111)},
-            .rt = Register{.val = @intCast(u5, (instr >> 16) & 0b11111)},
-            .rd = Register{.val = @intCast(u5, (instr >> 11) & 0b11111)},
-            .shift = @intCast(u5, (instr >> 6) & 0b11111),
-            .func = @intCast(u6, instr & 0b111111),
-            .simm = SignedImmediate.make(@intCast(u16, instr & 0xffff)),
-            .uimm = UnsignedImmediate.make(@intCast(u16, instr & 0xffff)),
-            .target = JumpTarget{.val = @intCast(u26, instr & 0x3ffffff)},
+            .opcode = @truncate(u6, instr >> 26),
+            .rs = Register{.val = @truncate(u5, (instr >> 21))},
+            .rt = Register{.val = @truncate(u5, (instr >> 16))},
+            .rd = Register{.val = @truncate(u5, (instr >> 11))},
+            .shift = @truncate(u5, instr >> 6),
+            .func = @truncate(u6, instr),
+            .simm = SignedImmediate.make(@truncate(u16, instr)),
+            .uimm = UnsignedImmediate.make(@truncate(u16, instr)),
+            .target = JumpTarget{.val = @truncate(u26, instr)},
         };
     }
 };
@@ -665,8 +665,8 @@ pub const CPU = struct {
                 if (@bitCast(i32, self.get(info.src)) > 0)
                     new_pc = self.next_pc +% (info.imm.val << 2);
             },
-            .SH => |info| try self.write(u16, self.get(info.src) +% info.imm.val, @intCast(u16, self.get(info.dest) & 0xffff)),
-            .SB => |info| try self.write(u8, self.get(info.src) +% info.imm.val, @intCast(u8, self.get(info.dest) & 0xff)),
+            .SH => |info| try self.write(u16, self.get(info.src) +% info.imm.val, @truncate(u16, self.get(info.dest))),
+            .SB => |info| try self.write(u8, self.get(info.src) +% info.imm.val, @truncate(u8, self.get(info.dest))),
             .ANDI => |info| self.set(info.dest, self.get(info.src) & info.imm.val),
             .LB => |info| self.seti(info.dest, @as(i32, try self.read(i8, self.get(info.src) +% info.imm.val))),
             .LBU => |info| self.set(info.dest, @as(u32, try self.read(u8, self.get(info.src) +% info.imm.val))),
