@@ -12,7 +12,7 @@ pub const DecodingError = error {
 };
 
 /// Decode an instruction.
-pub fn decode(instr: u32) DecodingError!Instruction {
+pub inline fn decode(instr: u32) DecodingError!Instruction {
     const parts = InstructionParts.make(instr);
 
     return switch (parts.opcode) {
