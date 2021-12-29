@@ -534,13 +534,20 @@ pub const CPU = struct {
 
     /// Resolve a virtual address to a physical address,
     /// also checking access permissions.
-    pub fn resolve_address(self: *const CPU, addr: u32) !u32 {
+    pub fn resolve_address(self: *const CPU, addr: u32, code: bool) !u32 {
         if (addr >= 0x80000000 and self.cop0.sr.ku()[0])
             return error.MemoryProtectionError;
 
+        // If "isolate cache" bit is set, high bits are discarded and
+        // low bits are used to index into scratchpad (only for data,
+        // not code).
+        if (!code and self.cop0.sr.isc())
+            // TODO: allow scratchpad to be disabled too
+            return (addr & 0x3ff) + 0x1f800000;
+
         if (addr < 0x80000000) // KUSEG
             // Officially this gets translated to addr + 1GB,
-            // but let's just identity map it
+            // but let's just identity map it for simplicity
             return addr
         else if (addr < 0xa0000000) // KSEG0
             return addr - 0x80000000
@@ -552,17 +559,17 @@ pub const CPU = struct {
 
     /// Fetch the next instruction.
     pub fn fetch(self: *const CPU) !u32 {
-        return memory.fetch(try self.resolve_address(self.pc));
+        return memory.fetch(try self.resolve_address(self.pc, true));
     }
 
     /// Read from a given memory address.
     pub fn read(self: *const CPU, comptime T: type, addr: u32) !T {
-        return memory.read(T, try self.resolve_address(addr));
+        return memory.read(T, try self.resolve_address(addr, false));
     }
 
     /// Write to a given memory address.
     pub fn write(self: *const CPU, comptime T: type, addr: u32, value: T) !void {
-        return memory.write(T, try self.resolve_address(addr), value);
+        return memory.write(T, try self.resolve_address(addr, false), value);
     }
 
     /// Fetch and execute the next instruction.
@@ -592,9 +599,11 @@ pub const CPU = struct {
                     self.set(info.dest, @bitCast(u32, dest));
             },
             .SUBU => |info| self.set(info.dest, self.get(info.src1) -% self.get(info.src2)),
+            .SUBIU => |info| self.set(info.dest, self.get(info.src) -% info.imm.val),
             .JR => |info| new_pc = self.get(info.src),
             .SLL => |info| self.set(info.dest, self.get(info.src) << info.amount),
             .SRL => |info| self.set(info.dest, self.get(info.src) >> info.amount),
+            .SRA => |info| self.set(info.dest, @bitCast(u32, @bitCast(i32, self.get(info.src)) >> info.amount)),
             .LUI => |info| self.set(info.dest, info.imm.val << 16),
             .ORI => |info| self.set(info.dest, self.get(info.src) | info.imm.val),
             .ADDIU => |info| self.set(info.dest, self.get(info.src) +% info.imm.val),
@@ -603,6 +612,15 @@ pub const CPU = struct {
                 const src2 = @bitCast(i32, info.imm.val);
                 var dest: i32 = undefined;
                 if (@addWithOverflow(i32, src1, src2, &dest))
+                    return error.Overflow
+                else
+                    self.set(info.dest, @bitCast(u32, dest));
+            },
+            .SUBI => |info| {
+                const src1 = @bitCast(i32, self.get(info.src));
+                const src2 = @bitCast(i32, info.imm.val);
+                var dest: i32 = undefined;
+                if (@subWithOverflow(i32, src1, src2, &dest))
                     return error.Overflow
                 else
                     self.set(info.dest, @bitCast(u32, dest));
@@ -617,11 +635,25 @@ pub const CPU = struct {
                 if (self.get(info.src1) == self.get(info.src2))
                     new_pc = self.next_pc +% (info.imm.val << 2);
             },
+            .BLEZ => |info| {
+                if (@bitCast(i32, self.get(info.src)) <= 0)
+                    new_pc = self.next_pc +% (info.imm.val << 2);
+            },
+            .BGTZ => |info| {
+                if (@bitCast(i32, self.get(info.src)) > 0)
+                    new_pc = self.next_pc +% (info.imm.val << 2);
+            },
             .SH => |info| try self.write(u16, self.get(info.src) +% info.imm.val, @intCast(u16, self.get(info.dest) & 0xffff)),
             .SB => |info| try self.write(u8, self.get(info.src) +% info.imm.val, @intCast(u8, self.get(info.dest) & 0xff)),
             .ANDI => |info| self.set(info.dest, self.get(info.src) & info.imm.val),
             .LB => |info| self.set(info.dest, @bitCast(u32, @as(i32, try self.read(i8, self.get(info.src) +% info.imm.val)))),
+            .LBU => |info| self.set(info.dest, @as(u32, try self.read(u8, self.get(info.src) +% info.imm.val))),
+            .LHU => |info| self.set(info.dest, @as(u32, try self.read(u16, self.get(info.src) +% info.imm.val))),
             .J => |info| new_pc = info.target.absTarget(self.next_pc),
+            .JALR => |info| {
+                new_pc = self.get(info.src);
+                self.set(.{.val = 31}, self.next_pc +% 4);
+            },
             .JAL => |info| {
                 new_pc = info.target.absTarget(self.next_pc);
                 self.set(.{.val = 31}, self.next_pc +% 4);
