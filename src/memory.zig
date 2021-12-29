@@ -60,7 +60,7 @@ pub fn write(comptime T: type, addr: u32, value: T) !void {
     }
 
     std.log.err("write to unknown address {x}", .{addr});
-//    return error.UnknownAddress;
+    return error.UnknownAddress;
 }
 
 const RAM = struct {

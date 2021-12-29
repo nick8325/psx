@@ -12,75 +12,136 @@ pub const DecodingError = error {
 };
 
 /// Decode an instruction.
-pub fn decode(instr: u32) !Instruction {
+pub fn decode(instr: u32) DecodingError!Instruction {
     const parts = InstructionParts.make(instr);
 
-    inline for (@typeInfo(Instruction).Union.fields) |field| {
-        if (field.field_type.decode(parts)) |val|
-            return @unionInit(Instruction, field.name, val);
-    }
-
-    std.log.err("unknown instruction {x}: {}", .{instr, parts});
-    return error.UnknownInstruction;
+    return switch (parts.opcode) {
+        0 => switch (parts.func) {
+            0 => if (instr == 0) Instruction.decode(.NOP, parts) else Instruction.decode(.SLL, parts),
+            2 => Instruction.decode(.SRL, parts),
+            3 => Instruction.decode(.SRA, parts),
+            4 => Instruction.decode(.SLLV, parts),
+            6 => Instruction.decode(.SRLV, parts),
+            7 => Instruction.decode(.SRAV, parts),
+            8 => Instruction.decode(.JR, parts),
+            9 => Instruction.decode(.JALR, parts),
+            12 => Instruction.decode(.SYSCALL, parts),
+            13 => Instruction.decode(.BREAK, parts),
+            16 => Instruction.decode(.MFHI, parts),
+            17 => Instruction.decode(.MTHI, parts),
+            18 => Instruction.decode(.MFLO, parts),
+            19 => Instruction.decode(.MTLO, parts),
+            24 => Instruction.decode(.MULT, parts),
+            25 => Instruction.decode(.MULTU, parts),
+            26 => Instruction.decode(.DIV, parts),
+            27 => Instruction.decode(.DIVU, parts),
+            32 => Instruction.decode(.ADD, parts),
+            33 => Instruction.decode(.ADDU, parts),
+            34 => Instruction.decode(.SUB, parts),
+            35 => Instruction.decode(.SUBU, parts),
+            36 => Instruction.decode(.AND, parts),
+            37 => Instruction.decode(.OR, parts),
+            38 => Instruction.decode(.XOR, parts),
+            39 => Instruction.decode(.NOR, parts),
+            42 => Instruction.decode(.SLT, parts),
+            43 => Instruction.decode(.SLTU, parts),
+            else => error.UnknownInstruction
+        },
+        1 => switch (parts.rt.val) {
+            0 => Instruction.decode(.BLTZ, parts),
+            1 => Instruction.decode(.BGEZ, parts),
+            16 => Instruction.decode(.BLTZAL, parts),
+            17 => Instruction.decode(.BGEZAL, parts),
+            else => error.UnknownInstruction
+        },
+        2 => Instruction.decode(.J, parts),
+        3 => Instruction.decode(.JAL, parts),
+        4 => Instruction.decode(.BEQ, parts),
+        5 => Instruction.decode(.BNE, parts),
+        6 => Instruction.decode(.BLEZ, parts),
+        7 => Instruction.decode(.BGTZ, parts),
+        8 => Instruction.decode(.ADDI, parts),
+        9 => Instruction.decode(.ADDIU, parts),
+        10 => Instruction.decode(.SUBI, parts),
+        11 => Instruction.decode(.SUBIU, parts),
+        12 => Instruction.decode(.ANDI, parts),
+        13 => Instruction.decode(.ORI, parts),
+        14 => Instruction.decode(.XORI, parts),
+        15 => Instruction.decode(.LUI, parts),
+        32 => Instruction.decode(.LB, parts),
+        33 => Instruction.decode(.LH, parts),
+        34 => Instruction.decode(.LWL, parts),
+        35 => Instruction.decode(.LW, parts),
+        36 => Instruction.decode(.LBU, parts),
+        37 => Instruction.decode(.LHU, parts),
+        38 => Instruction.decode(.LWR, parts),
+        40 => Instruction.decode(.SB, parts),
+        41 => Instruction.decode(.SH, parts),
+        42 => Instruction.decode(.SWL, parts),
+        43 => Instruction.decode(.SW, parts),
+        46 => Instruction.decode(.SWR, parts),
+        16 => switch (parts.rs.val) {
+            0 => Instruction.decode(.MFC0, parts),
+            4 => Instruction.decode(.MTC0, parts),
+            else => error.UnknownInstruction
+        },
+        else => error.UnknownInstruction
+    };
 }
 
 /// A decoded instruction.
 pub const Instruction = union(enum) {
-    NOP: struct {
-        const Self = @This();
+    /// Decode a particular instruction given an InstructionParts.
+    fn decode(comptime tag: @typeInfo(Instruction).Union.tag_type.?, parts: InstructionParts) !Instruction {
+        return @unionInit(Instruction, @tagName(tag), try std.meta.TagPayload(Instruction, tag).decode(parts));
+    }
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.val == 0)
-                return Self{}
-            else
-                return null;
-        }
-    },
-    SLL: ShiftType(0),
-    SRL: ShiftType(2),
-    SRA: ShiftType(3),
-    SLLV: RegisterType(4),
-    SRLV: RegisterType(6),
-    SRAV: RegisterType(7),
-    JR: RSType(8),
-    JALR: RSDType(9),
-    SYSCALL: DontCareType(12),
-    BREAK: DontCareType(13),
-    MFHI: RDType(16),
-    MTHI: RSType(17),
-    MFLO: RDType(18),
-    MTLO: RSType(19),
-    MULT: RSTType(24),
-    MULTU: RSTType(25),
-    DIV: RSTType(26),
-    DIVU: RSTType(27),
-    ADD: RegisterType(32),
-    ADDU: RegisterType(33),
-    SUB: RegisterType(34),
-    SUBU: RegisterType(35),
-    AND: RegisterType(36),
-    OR: RegisterType(37),
-    XOR: RegisterType(38),
-    NOR: RegisterType(39),
-    SLT: RegisterType(42),
-    SLTU: RegisterType(43),
-    BLTZ: RegImmBranchType(0),
-    BGEZ: RegImmBranchType(1),
-    BLTZAL: RegImmBranchType(16),
-    BGEZAL: RegImmBranchType(17),
-    J: JumpType(2),
-    JAL: JumpType(3),
-    BEQ: BranchType(4),
-    BNE: BranchType(5),
-    BLEZ: BranchZeroType(6),
-    BGTZ: BranchZeroType(7),
-    ADDI: SignedImmediateType(8),
-    ADDIU: SignedImmediateType(9),
-    SUBI: SignedImmediateType(10),
-    SUBIU: SignedImmediateType(11),
-    ANDI: UnsignedImmediateType(12),
-    ORI: UnsignedImmediateType(13),
-    XORI: UnsignedImmediateType(14),
+    NOP: DontCareType,
+    SLL: ShiftType,
+    SRL: ShiftType,
+    SRA: ShiftType,
+    SLLV: RegisterType,
+    SRLV: RegisterType,
+    SRAV: RegisterType,
+    JR: RSType,
+    JALR: RSDType,
+    SYSCALL: DontCareType,
+    BREAK: DontCareType,
+    MFHI: RDType,
+    MTHI: RSType,
+    MFLO: RDType,
+    MTLO: RSType,
+    MULT: RSTType,
+    MULTU: RSTType,
+    DIV: RSTType,
+    DIVU: RSTType,
+    ADD: RegisterType,
+    ADDU: RegisterType,
+    SUB: RegisterType,
+    SUBU: RegisterType,
+    AND: RegisterType,
+    OR: RegisterType,
+    XOR: RegisterType,
+    NOR: RegisterType,
+    SLT: RegisterType,
+    SLTU: RegisterType,
+    BLTZ: RegImmBranchType,
+    BGEZ: RegImmBranchType,
+    BLTZAL: RegImmBranchType,
+    BGEZAL: RegImmBranchType,
+    J: JumpType,
+    JAL: JumpType,
+    BEQ: BranchType,
+    BNE: BranchType,
+    BLEZ: BranchZeroType,
+    BGTZ: BranchZeroType,
+    ADDI: SignedImmediateType,
+    ADDIU: SignedImmediateType,
+    SUBI: SignedImmediateType,
+    SUBIU: SignedImmediateType,
+    ANDI: UnsignedImmediateType,
+    ORI: UnsignedImmediateType,
+    XORI: UnsignedImmediateType,
     LUI: struct {
         /// ImmediateType(15, false) but rs is unused
         const Self = @This();
@@ -88,36 +149,33 @@ pub const Instruction = union(enum) {
         dest: Register,
         imm: UnsignedImmediate,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 15)
-                return Self{ .dest = parts.rt, .imm = parts.uimm }
-            else
-                return null;
+        fn decode(parts: InstructionParts) !Self {
+            return Self{ .dest = parts.rt, .imm = parts.uimm };
         }
     },
-    LB: SignedImmediateType(32),
-    LH: SignedImmediateType(33),
-    LWL: SignedImmediateType(34),
-    LW: SignedImmediateType(35),
-    LBU: SignedImmediateType(36),
-    LHU: SignedImmediateType(37),
-    LWR: SignedImmediateType(38),
-    SB: SignedImmediateType(40),
-    SH: SignedImmediateType(41),
-    SWL: SignedImmediateType(42),
-    SW: SignedImmediateType(43),
-    SWR: SignedImmediateType(46),
+    LB: SignedImmediateType,
+    LH: SignedImmediateType,
+    LWL: SignedImmediateType,
+    LW: SignedImmediateType,
+    LBU: SignedImmediateType,
+    LHU: SignedImmediateType,
+    LWR: SignedImmediateType,
+    SB: SignedImmediateType,
+    SH: SignedImmediateType,
+    SWL: SignedImmediateType,
+    SW: SignedImmediateType,
+    SWR: SignedImmediateType,
 
     MFC0: struct {
         const Self = @This();
         dest: Register,
         src: CoRegister,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 16 and parts.rs.val == 0 and parts.shift == 0 and parts.func == 0)
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.shift == 0 and parts.func == 0)
                 return Self{.dest = parts.rt, .src = .{.val = parts.rd.val}}
             else
-                return null;
+                return error.UnknownInstruction;
         }
     },
     MTC0: struct {
@@ -125,11 +183,11 @@ pub const Instruction = union(enum) {
         dest: CoRegister,
         src: Register,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 16 and parts.rs.val == 4 and parts.shift == 0 and parts.func == 0)
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.shift == 0 and parts.func == 0)
                 return Self{.src = parts.rt, .dest = .{.val = parts.rd.val}}
             else
-                return null;
+                return error.UnknownInstruction;
         }
     },
 
@@ -154,7 +212,6 @@ pub const Instruction = union(enum) {
                 else => {}
             }
         }
-
     }
 };
 
@@ -237,224 +294,180 @@ const UnsignedImmediate = struct {
 };
 
 /// Instruction decoder for instructions with "don't-care" rs/rt/rd/shift.
-fn DontCareType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
+const DontCareType = struct {
+    const Self = @This();
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 0 and parts.func == func)
-                return Self{}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(_: InstructionParts) !Self {
+        return Self{};
+    }
+};
 
 /// Instruction decoder for register-type instructions.
-fn RegisterType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
+const RegisterType = struct {
+    const Self = @This();
 
-        dest: Register,
-        src1: Register,
-        src2: Register,
+    dest: Register,
+    src1: Register,
+    src2: Register,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 0 and parts.func == func and parts.shift == 0)
-                return Self{.dest = parts.rd, .src1 = parts.rs, .src2 = parts.rt}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        if (parts.shift == 0)
+            return Self{.dest = parts.rd, .src1 = parts.rs, .src2 = parts.rt}
+        else
+            return error.UnknownInstruction;
+    }
+};
 
 /// Instruction decoder for register-type instructions with rs only.
-fn RSType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
+const RSType = struct {
+    const Self = @This();
 
-        src: Register,
+    src: Register,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 0 and parts.func == func and parts.rt.val == 0 and parts.rd.val == 0 and parts.shift == 0)
-                return Self{.src = parts.rs}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        if (parts.rt.val == 0 and parts.rd.val == 0 and parts.shift == 0)
+            return Self{.src = parts.rs}
+        else
+            return error.UnknownInstruction;
+    }
+};
 
 /// Instruction decoder for register-type instructions with rd only.
-fn RDType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
+const RDType = struct {
+    const Self = @This();
 
-        dest: Register,
+    dest: Register,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 0 and parts.func == func and parts.rs.val == 0 and parts.rt.val == 0 and parts.shift == 0)
-                return Self{.dest = parts.rd}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        if (parts.rs.val == 0 and parts.rt.val == 0 and parts.shift == 0)
+            return Self{.dest = parts.rd}
+        else
+            return error.UnknownInstruction;
+    }
+};
 
 /// Instruction decoder for register-type instructions with rs and rd only.
-fn RSDType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
+const RSDType = struct {
+    const Self = @This();
 
-        src: Register,
-        dest: Register,
+    src: Register,
+    dest: Register,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 0 and parts.func == func and parts.rt.val == 0 and parts.shift == 0)
-                return Self{.src = parts.rs, .dest = parts.rd}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        if (parts.rt.val == 0 and parts.shift == 0)
+            return Self{.src = parts.rs, .dest = parts.rd}
+        else
+            return error.UnknownInstruction;
+    }
+};
 
 /// Instruction decoder for register-type instructions with rs and rt only.
-fn RSTType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
+const RSTType = struct {
+    const Self = @This();
 
-        src1: Register,
-        src2: Register,
+    src1: Register,
+    src2: Register,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 0 and parts.func == func and parts.rd.val == 0 and parts.shift == 0)
-                return Self{.src1 = parts.rs, .src2 = parts.rt}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        if (parts.rd.val == 0 and parts.shift == 0)
+            return Self{.src1 = parts.rs, .src2 = parts.rt}
+        else
+            return error.UnknownInstruction;
+    }
+};
 
 /// Instruction decoder for shift-type instructions.
-fn ShiftType(comptime func: u6) type {
-    return struct {
-        const Self = @This();
+const ShiftType = struct {
+    const Self = @This();
 
-        dest: Register,
-        src: Register,
-        amount: u5,
+    dest: Register,
+    src: Register,
+    amount: u5,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 0 and parts.func == func and parts.rs.val == 0)
-                return Self{.dest = parts.rd, .src = parts.rs, .amount = parts.shift}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        if (parts.rs.val == 0)
+            return Self{.dest = parts.rd, .src = parts.rs, .amount = parts.shift}
+        else
+            return error.UnknownInstruction;
+    }
+};
 
 /// Instruction decoder for signed immediate-type instructions.
-fn SignedImmediateType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
+const SignedImmediateType = struct {
+    const Self = @This();
 
-        src: Register,
-        dest: Register,
-        imm: SignedImmediate,
+    src: Register,
+    dest: Register,
+    imm: SignedImmediate,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == opcode)
-                return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.simm }
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.simm };
+    }
+};
 
 /// Instruction decoder for unsigned immediate-type instructions.
-fn UnsignedImmediateType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
+const UnsignedImmediateType = struct {
+    const Self = @This();
 
-        src: Register,
-        dest: Register,
-        imm: UnsignedImmediate,
+    src: Register,
+    dest: Register,
+    imm: UnsignedImmediate,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == opcode)
-                return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.uimm }
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.uimm };
+    }
+};
 
 /// Instruction decoder for immediate-type branch instructions.
-fn BranchType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
+const BranchType = struct {
+    const Self = @This();
 
-        src1: Register,
-        src2: Register,
-        imm: SignedImmediate,
+    src1: Register,
+    src2: Register,
+    imm: SignedImmediate,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == opcode)
-                return Self{ .src1 = parts.rs, .src2 = parts.rt, .imm = parts.simm }
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        return Self{ .src1 = parts.rs, .src2 = parts.rt, .imm = parts.simm };
+    }
+};
 
 /// Instruction decoder for immediate-type branch-against-zero instructions.
-fn BranchZeroType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
+const BranchZeroType = struct {
+    const Self = @This();
 
-        src: Register,
-        imm: SignedImmediate,
+    src: Register,
+    imm: SignedImmediate,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == opcode and parts.rt.val == 0)
-                return Self{ .src = parts.rs, .imm = parts.simm }
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        if (parts.rt.val == 0)
+            return Self{ .src = parts.rs, .imm = parts.simm }
+        else
+            return error.UnknownInstruction;
+    }
+};
 
 /// Instruction decoder for "REGIMM"-type branch instructions.
-fn RegImmBranchType(comptime kind: u5) type {
-    return struct {
-        const Self = @This();
+const RegImmBranchType = struct {
+    const Self = @This();
 
-        src: Register,
-        offset: SignedImmediate,
+    src: Register,
+    offset: SignedImmediate,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == 1 and parts.rt.val == kind)
-                return Self{.src = parts.rs, .offset = parts.simm}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        return Self{.src = parts.rs, .offset = parts.simm};
+    }
+};
 
 /// Instruction decoder for jump-type instructions.
-fn JumpType(comptime opcode: u6) type {
-    return struct {
-        const Self = @This();
+const JumpType = struct {
+    const Self = @This();
 
-        target: JumpTarget,
+    target: JumpTarget,
 
-        fn decode(parts: InstructionParts) ?Self {
-            if (parts.opcode == opcode)
-                return Self{.target = parts.target}
-            else
-                return null;
-        }
-    };
-}
+    fn decode(parts: InstructionParts) !Self {
+        return Self{.target = parts.target};
+    }
+};
 
 //////////////////////////////////////////////////////////////////////
 // Processor state and execution.
