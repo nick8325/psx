@@ -6,12 +6,47 @@ pub const MemoryError = error {
     UnalignedAccess
 };
 
-pub var ram = [_]u8{0} ** 0x200000;
-pub var scratchpad = [_]u8{0} ** 0x400;
-pub var bios = utils.readArray(u8, "../SCPH1002.bin");
-pub var expansion = [_]u8{0} ** 0x100;
-pub var io_ports = [_]u8{0} ** 0x1000;
-pub var cache_control = @bitCast([4]u8, [1]u32{0});
+const page_size = 0x1000;
+
+pub const Page = struct {
+    val: usize,
+
+    fn invalid() Page {
+        return .{.val = 0};
+    }
+
+    fn valid(page: *[page_size]u8, writable: bool, io: bool) Page {
+        const addr = @ptrToInt(page);
+
+        std.debug.assert(addr % page_size == 0);
+        return .{.val = addr | @as(usize, if (writable) 1 else 0) | @as(usize, if (io) 2 else 0)};
+    }
+
+    fn pointer(page: Page) ?*[page_size]u8 {
+        if (page.val == 0) return null
+        else return @intToPtr(*[page_size]u8, (page.val & ~@as(usize, 0b11)));
+    }
+
+    fn isWritable(page: Page) bool {
+        return (page.val & 1) != 0;
+    }
+
+    fn isIo(page: Page) bool {
+        return (page.val & 2) != 0;
+    }
+};
+
+pub var page_table align(4096) = [_]Page{Page.invalid()} ** 0x100000;
+pub var ram align(4096) = [_]u8{0} ** 0x200000;
+pub var scratchpad align(4096) = [_]u8{0} ** 0x1000;
+pub var bios align(4096) = utils.readArray(u8, "../SCPH1002.bin");
+pub var expansion align(4096) = [_]u8{255} ** 0x1000;
+pub var io_ports align(4096) = [_]u8{0} ** 0x1000;
+pub var cache_control align(4096) = [_]u8{0} ** 0x1000;
+
+// 4KB pages.
+// Each page is address + readable bit + writable bit + "IO bit".
+// If IO bit is set then separate IO handler gets invoked afterwards.
 
 const memory_map = .{
     // TODO: configurable RAM size
@@ -24,11 +59,24 @@ const memory_map = .{
     RAM{.start = 0x1f801000, .memory = io_ports[0..], .writable = true},
     RAM{.start = 0x1f802000, .memory = expansion[0..], .writable = false},
     RAM{.start = 0x1fc00000, .memory = bios[0..], .writable = true},
-    RAM{.start = 0xfffe0130, .memory = cache_control[0..], .writable = true}
+    RAM{.start = 0xfffe0000, .memory = cache_control[0..], .writable = true}
 };
 
 pub fn fetch(addr: u32) !u32 {
-    return read(u32, addr);
+    if (addr % @sizeOf(u32) != 0) {
+        std.log.err("read of unaligned address {x} at size {}", .{addr, @sizeOf(u32)});
+        return error.UnalignedAccess;
+    }
+
+    const page = addr >> 12;
+    const offset = addr & 0xfff;
+
+    if (page_table[page].pointer()) |ptr|
+        return std.mem.bytesAsSlice(u32, ptr)[offset/@sizeOf(u32)]
+    else {
+        std.log.err("fetch of unknown address {x}", .{addr});
+        return error.UnknownAddress;
+    }
 }
 
 pub fn read(comptime T: type, addr: u32) !T {
@@ -37,14 +85,15 @@ pub fn read(comptime T: type, addr: u32) !T {
         return error.UnalignedAccess;
     }
 
-    inline for (memory_map) |block| {
-        var start = block.start;
-        if (start <= addr and addr < block.end())
-            return block.read(T, addr);
-    }
+    const page = addr >> 12;
+    const offset = addr & 0xfff;
 
-    std.log.err("read from unknown address {x}", .{addr});
-    return error.UnknownAddress;
+    if (page_table[page].pointer()) |ptr|
+        return std.mem.bytesAsSlice(T, ptr)[offset/@sizeOf(T)]
+    else {
+        std.log.err("read from unknown address {x}", .{addr});
+        return error.UnknownAddress;
+    }
 }
 
 pub fn write(comptime T: type, addr: u32, value: T) !void {
@@ -53,14 +102,16 @@ pub fn write(comptime T: type, addr: u32, value: T) !void {
         return error.UnalignedAccess;
     }
 
-    inline for (memory_map) |block| {
-        var start = block.start;
-        if (start <= addr and addr < block.end())
-            return block.write(T, addr, value);
-    }
+    const page = addr >> 12;
+    const offset = addr & 0xfff;
 
-    std.log.err("write to unknown address {x}", .{addr});
-    return error.UnknownAddress;
+    if (page_table[page].pointer()) |ptr| {
+        if (page_table[page].isWritable())
+            std.mem.bytesAsSlice(T, ptr)[offset/@sizeOf(T)] = value;
+    } else {
+        std.log.err("write to unknown address {x}", .{addr});
+        return error.UnknownAddress;
+    }
 }
 
 const RAM = struct {
@@ -68,21 +119,24 @@ const RAM = struct {
     memory: []u8,
     writable: bool,
 
-    fn read(self: RAM, comptime T: type, addr: u32) T {
-        return std.mem.bytesAsSlice(T, self.memory)[(addr - self.start)/@sizeOf(T)];
-    }
-
-    fn write(self: RAM, comptime T: type, addr: u32, value: T) void {
-        if (self.writable)
-            std.mem.bytesAsSlice(T, self.memory)[(addr - self.start)/@sizeOf(T)] = value;
-    }
-
     fn end(self: RAM) u32 {
         return self.start + @intCast(u32, self.memory.len);
     }
 };
 
 pub fn init() !void {
+    inline for (memory_map) |block| {
+        std.debug.assert(block.start % page_size == 0);
+        std.debug.assert(block.end() % page_size == 0);
+
+        var i: u32 = 0;
+        while (i < block.end() - block.start) : (i += page_size) {
+            const pageno = (block.start + i) / page_size;
+            const ptr = @ptrCast(*[page_size]u8, block.memory[i..i+page_size].ptr);
+            page_table[pageno] = Page.valid(ptr, block.writable, false);
+        }
+    }
+
     try write(u32, 0x1f801000, 0x1f000000);
     try write(u32, 0x1f801004, 0x1f802000);
     try write(u32, 0x1f801008, 0x0013243f);
