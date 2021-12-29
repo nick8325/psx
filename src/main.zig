@@ -2,7 +2,12 @@ const std = @import("std");
 const CPU = @import("cpu.zig");
 const memory = @import("memory.zig");
 
-pub fn main() !void {
+pub fn main() void {
+    var i: usize = 0;
+    while (i < 100) : (i += 1) { main2() catch {}; }
+}
+
+pub noinline fn main2() !void {
     try memory.init();
     var old_cpu: ?CPU.CPU = null;
     var cpu = CPU.CPU.init(0xbfc00000);

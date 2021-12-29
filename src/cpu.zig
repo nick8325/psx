@@ -572,16 +572,7 @@ pub const CPU = struct {
             // TODO: allow scratchpad to be disabled too
             return (addr & 0x3ff) + 0x1f800000;
 
-        if (addr < 0x80000000) // KUSEG
-            // Officially this gets translated to addr + 1GB,
-            // but let's just identity map it for simplicity
-            return addr
-        else if (addr < 0xa0000000) // KSEG0
-            return addr - 0x80000000
-        else if (addr < 0xc0000000) // KSEG1
-            return addr - 0xa0000000
-        else // KSEG2
-            return addr;
+        return addr; // memory.zig does memory mirroring
     }
 
     /// Fetch the next instruction.

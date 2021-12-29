@@ -63,10 +63,7 @@ const memory_map = .{
 };
 
 pub fn fetch(addr: u32) !u32 {
-    if (addr % @sizeOf(u32) != 0) {
-        std.log.err("read of unaligned address {x} at size {}", .{addr, @sizeOf(u32)});
-        return error.UnalignedAccess;
-    }
+    std.debug.assert(addr % 4 == 0);
 
     const page = addr >> 12;
     const offset = addr & 0xfff;
@@ -124,16 +121,25 @@ const RAM = struct {
     }
 };
 
+fn map(block: RAM, offset: u32) void {
+    std.debug.assert(block.start % page_size == 0);
+    std.debug.assert(block.end() % page_size == 0);
+
+    var i: u32 = 0;
+    while (i < block.end() - block.start) : (i += page_size) {
+        const pageno = (offset + block.start + i) / page_size;
+        const ptr = @ptrCast(*[page_size]u8, block.memory[i..i+page_size].ptr);
+        page_table[pageno] = Page.valid(ptr, block.writable, false);
+    }
+}
+
 pub fn init() !void {
     inline for (memory_map) |block| {
-        std.debug.assert(block.start % page_size == 0);
-        std.debug.assert(block.end() % page_size == 0);
-
-        var i: u32 = 0;
-        while (i < block.end() - block.start) : (i += page_size) {
-            const pageno = (block.start + i) / page_size;
-            const ptr = @ptrCast(*[page_size]u8, block.memory[i..i+page_size].ptr);
-            page_table[pageno] = Page.valid(ptr, block.writable, false);
+        map(block, 0);
+        if (block.end() <= 0x20000000) {
+            // Add the block to KSEG0 and KSEG1
+            map(block, 0x80000000);
+            map(block, 0xa0000000);
         }
     }
 
