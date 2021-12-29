@@ -214,6 +214,10 @@ const SignedImmediate = struct {
         return .{.val = @bitCast(u32, @as(i32, @bitCast(i16, val)))};
     }
 
+    fn vali(self: @This()) i32 {
+        return @bitCast(i32, self.val);
+    }
+
     pub fn format(self: @This(), comptime _: anytype, _: anytype, writer: anytype) !void {
         try writer.print("$0x{x}", .{self.val});
     }
@@ -525,11 +529,21 @@ pub const CPU = struct {
         return self.regs[reg.val];
     }
 
+    /// Get the value of a register - signed version.
+    pub fn geti(self: *const CPU, reg: Register) i32 {
+        return @bitCast(i32, self.get(reg));
+    }
+
     /// Set the value of a register.
     /// Writes to register 0 are ignored.
     pub fn set(self: *CPU, reg: Register, val: u32) void {
         self.regs[reg.val] = val;
         self.regs[0] = 0;
+    }
+
+    /// Set the value of a register - signed version.
+    pub fn seti(self: *CPU, reg: Register, val: i32) void {
+        self.set(reg, @bitCast(u32, val));
     }
 
     /// Resolve a virtual address to a physical address,
@@ -588,42 +602,37 @@ pub const CPU = struct {
             .OR => |info| self.set(info.dest, self.get(info.src1) | self.get(info.src2)),
             .AND => |info| self.set(info.dest, self.get(info.src1) & self.get(info.src2)),
             .SLTU => |info| self.set(info.dest, if (self.get(info.src1) < self.get(info.src2)) 1 else 0),
+            .SLT => |info| self.seti(info.dest, if (self.geti(info.src1) < self.geti(info.src2)) 1 else 0),
             .ADDU => |info| self.set(info.dest, self.get(info.src1) +% self.get(info.src2)),
             .ADD => |info| {
-                const src1 = @bitCast(i32, self.get(info.src1));
-                const src2 = @bitCast(i32, self.get(info.src2));
                 var dest: i32 = undefined;
-                if (@addWithOverflow(i32, src1, src2, &dest))
+                if (@addWithOverflow(i32, self.geti(info.src1), self.geti(info.src2), &dest))
                     return error.Overflow
                 else
-                    self.set(info.dest, @bitCast(u32, dest));
+                    self.seti(info.dest, dest);
             },
             .SUBU => |info| self.set(info.dest, self.get(info.src1) -% self.get(info.src2)),
             .SUBIU => |info| self.set(info.dest, self.get(info.src) -% info.imm.val),
             .JR => |info| new_pc = self.get(info.src),
             .SLL => |info| self.set(info.dest, self.get(info.src) << info.amount),
             .SRL => |info| self.set(info.dest, self.get(info.src) >> info.amount),
-            .SRA => |info| self.set(info.dest, @bitCast(u32, @bitCast(i32, self.get(info.src)) >> info.amount)),
+            .SRA => |info| self.seti(info.dest, self.geti(info.src) >> info.amount),
             .LUI => |info| self.set(info.dest, info.imm.val << 16),
             .ORI => |info| self.set(info.dest, self.get(info.src) | info.imm.val),
             .ADDIU => |info| self.set(info.dest, self.get(info.src) +% info.imm.val),
             .ADDI => |info| {
-                const src1 = @bitCast(i32, self.get(info.src));
-                const src2 = @bitCast(i32, info.imm.val);
                 var dest: i32 = undefined;
-                if (@addWithOverflow(i32, src1, src2, &dest))
+                if (@addWithOverflow(i32, self.geti(info.src), info.imm.vali(), &dest))
                     return error.Overflow
                 else
-                    self.set(info.dest, @bitCast(u32, dest));
+                    self.seti(info.dest, dest);
             },
             .SUBI => |info| {
-                const src1 = @bitCast(i32, self.get(info.src));
-                const src2 = @bitCast(i32, info.imm.val);
                 var dest: i32 = undefined;
-                if (@subWithOverflow(i32, src1, src2, &dest))
+                if (@subWithOverflow(i32, self.geti(info.src), info.imm.vali(), &dest))
                     return error.Overflow
                 else
-                    self.set(info.dest, @bitCast(u32, dest));
+                    self.seti(info.dest, dest);
             },
             .SW => |info| try self.write(u32, self.get(info.src) +% info.imm.val, self.get(info.dest)),
             .LW => |info| self.set(info.dest, try self.read(u32, self.get(info.src) +% info.imm.val)),
@@ -646,8 +655,9 @@ pub const CPU = struct {
             .SH => |info| try self.write(u16, self.get(info.src) +% info.imm.val, @intCast(u16, self.get(info.dest) & 0xffff)),
             .SB => |info| try self.write(u8, self.get(info.src) +% info.imm.val, @intCast(u8, self.get(info.dest) & 0xff)),
             .ANDI => |info| self.set(info.dest, self.get(info.src) & info.imm.val),
-            .LB => |info| self.set(info.dest, @bitCast(u32, @as(i32, try self.read(i8, self.get(info.src) +% info.imm.val)))),
+            .LB => |info| self.seti(info.dest, @as(i32, try self.read(i8, self.get(info.src) +% info.imm.val))),
             .LBU => |info| self.set(info.dest, @as(u32, try self.read(u8, self.get(info.src) +% info.imm.val))),
+            .LH => |info| self.seti(info.dest, @as(i32, try self.read(i16, self.get(info.src) +% info.imm.val))),
             .LHU => |info| self.set(info.dest, @as(u32, try self.read(u16, self.get(info.src) +% info.imm.val))),
             .J => |info| new_pc = info.target.absTarget(self.next_pc),
             .JALR => |info| {
