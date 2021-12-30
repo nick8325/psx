@@ -143,7 +143,7 @@ pub const Instruction = union(enum) {
     ORI: UnsignedImmediateType,
     XORI: UnsignedImmediateType,
     LUI: struct {
-        /// ImmediateType(15, false) but rs is unused
+        /// UnsignedImmediateType but rs is unused
         const Self = @This();
 
         dest: Register,
