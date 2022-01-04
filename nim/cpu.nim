@@ -1,7 +1,7 @@
 import memory
 import trie32
 import fusion/matching
-import std/[setutils, tables, options, bitops]
+import std/[setutils, tables, options, bitops, strformat]
 {.experimental: "caseStmtMacros".}
 
 type
@@ -46,7 +46,7 @@ type
   Target = distinct range[0 .. (1 shl 26)-1]
 
 func absTarget(target: Target, pc: uint32): uint32 =
-  (pc and 0xf0000000u32) or (uint32(target) shl 2)
+  (pc and 0xf000_0000u32) or (uint32(target) shl 2)
 
 func `$` *(x: Register): string =
   "r" & $int(x)
@@ -381,11 +381,17 @@ proc step(cpu: var CPU) =
   # The execute function is in charge of updating pc and nextPC.
   cpu.execute(decode(instr), instr)
 
+func `$` *(cpu: CPU): string =
+  result = fmt "PC={cpu.pc:x} "
+  for i, x in cpu.registers:
+    result &= fmt "R{i}={x:x} "
+  result &= fmt "COP0.SR={cpu.cop0.sr:x}"
+
 proc test() =
   var cpu = initCPU(0xbfc00000u32)
   while true:
     echo(cpu.fetch().decode())
-    echo repr(cpu)
+    echo cpu
     step(cpu)
 
 test()
