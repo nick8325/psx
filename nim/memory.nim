@@ -74,7 +74,7 @@ proc resolve[T](table: var PageTable, address: word): ResolvedAddress[T] =
     entry = table.table[page]
 
   if entry.pointer.isNil: raise invalidAddressError
-  let pointer = cast[ptr word](cast[ByteAddress](entry.pointer) +% cast[ByteAddress](offset))
+  let pointer = cast[ptr T](cast[ByteAddress](entry.pointer) +% cast[ByteAddress](offset))
 
   return (pointer: pointer, writable: entry.writable, io: entry.IO())
 
@@ -91,13 +91,18 @@ proc mapRegion(table: var PageTable, arr: var openArray[byte], address: word, wr
     let page = slicePage(arr, cast[word](i) * pageSize)
     table.table[startingPage + cast[word](i)] = initPage(page, writable = writable, io = io)
 
+  if address + word(arr.len) <= 0x20000000u32:
+    # Add the block to KSEG0 and KSEG1
+    mapRegion(table, arr, address + 0x80000000u32, writable, io)
+    mapRegion(table, arr, address + 0xa0000000u32, writable, io)
+
 proc read*[T](address: word): T =
-  let resolved = pageTable.resolve[T](address)
+  let resolved = pageTable.resolve[:T](address)
   resolved.pointer[]
   # TODO: handle I/O
 
 proc write*[T](address: word, value: T): void =
-  let resolved = pageTable.resolve[T](address)
+  let resolved = pageTable.resolve[:T](address)
   if resolved.writable:
     resolved.pointer[] = value
   # TODO: handle I/O
@@ -114,3 +119,15 @@ pageTable.mapRegion(ioPorts,      0x1f801000u32, true,     true)
 pageTable.mapRegion(expansion,    0x1f802000u32, false,    false)
 pageTable.mapRegion(bios,         0x1fc00000u32, false,    false)
 pageTable.mapRegion(cacheControl, 0xfffe0000u32, true,     true)
+
+# Set up I/O space
+write[uint32](0x1f801000u32, 0x1f000000u32)
+write[uint32](0x1f801004u32, 0x1f802000u32)
+write[uint32](0x1f801008u32, 0x0013243fu32)
+write[uint32](0x1f80100cu32, 0x00003022u32)
+write[uint32](0x1f801010u32, 0x0013243fu32)
+write[uint32](0x1f801014u32, 0x200931e1u32)
+write[uint32](0x1f801018u32, 0x00020843u32)
+write[uint32](0x1f80101cu32, 0x00070777u32)
+write[uint32](0x1f801020u32, 0x00031125u32)
+write[uint32](0x1f801060u32, 0x00000b88u32)

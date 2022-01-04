@@ -36,7 +36,7 @@ proc addNode(trie: var Trie, phase: Phase, vals: set[uint8], value: uint8, child
 func theVal(vals: set[uint8]): uint8 =
   for val in vals:
     return val
-  return 0xffu8
+  return 0xff
 
 proc makeTrie(trie: var Trie, patterns: Table[uint8, Pattern], phase: Phase, vals: set[uint8]): uint8 =
   if (phase, vals) in trie.hash:
