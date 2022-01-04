@@ -25,31 +25,31 @@ func initPage(page: ptr array[pageSize, byte], writable: bool, io: bool): Page =
   assert address mod pageSize == 0
   Page(address or (if writable: 1 else: 0) or (if io: 2 else: 0))
 
-func pointer(page: Page): ptr array[pageSize, byte] {. inline .} =
+func pointer(page: Page): ptr array[pageSize, byte] {.inline.} =
   # This gives null if the page is invalid
   cast[ptr array[pageSize, byte]](ByteAddress(page) and not 3)
 
-func writable(page: Page): bool {. inline .} =
+func writable(page: Page): bool {.inline.} =
   (ByteAddress(page) and 1) != 0
 
-func IO(page: Page): bool {. inline .} =
+func IO(page: Page): bool {.inline.} =
   (ByteAddress(page) and 2) != 0
 
 type
   PageTable = object
-    table {. align: 4096 .}: array[0x100000, Page]
+    table {.align: 4096.}: array[0x100000, Page]
     # Keep references to the underlying arrays, to prevent them
     # getting garbage collected while 'table' is still alive
     regions: seq[ref seq[byte]]
 
 var
   pageTable: PageTable
-  bios {. align: 4096 .}: array[0x80000, byte]
-  ram {. align: 4096 .}: array[0x200000, byte]
-  scratchpad {. align: 4096 .}: array[0x1000, byte]
-  expansion {. align: 4096 .}: array[0x1000, byte]
-  ioPorts {. align: 4096 .}: array[0x1000, byte]
-  cacheControl {. align: 4096 .}: array[0x1000, byte]
+  bios {.align: 4096.}: array[0x80000, byte]
+  ram {.align: 4096.}: array[0x200000, byte]
+  scratchpad {.align: 4096.}: array[0x1000, byte]
+  expansion {.align: 4096.}: array[0x1000, byte]
+  ioPorts {.align: 4096.}: array[0x1000, byte]
+  cacheControl {.align: 4096.}: array[0x1000, byte]
 
 # Initialise expansion to -1, and read in BIOS
 for x in expansion.mitems: x = 0xff
