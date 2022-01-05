@@ -159,6 +159,7 @@ func `$`*(cpu: CPU): string =
   result &= fmt "COP0.SR={cpu.cop0.sr:x}"
 
 func cpuDiff(cpu1: CPU, cpu2: CPU): string =
+  ## Show the difference between two CPU states.
   if cpu1.pc != cpu2.pc:
     result &= fmt "PC={cpu1.pc:x}->{cpu2.pc:x} "
   for i, x in cpu1.registers:
@@ -183,16 +184,20 @@ type
   Target = distinct range[0 .. (1 shl 26)-1] ## A 26-bit jump target.
 
 func absTarget(target: Target, pc: uint32): uint32 =
+  ## Resolve a target address.
   (pc and 0xf000_0000u32) or (uint32(target) shl 2)
 
-converter toInt32(x: SignedImmediate): int32 =
-  int32(int16(x))
+converter signed(x: SignedImmediate): int32 =
+  int32(int16(x)) # Sign-extend first
 
-converter toUint32(x: SignedImmediate): uint32 =
-  x.toInt32.unsigned
+converter unsigned(x: SignedImmediate): uint32 =
+  x.signed.unsigned
 
-converter toUint32(x: UnsignedImmediate): uint32 =
+converter unsigned(x: UnsignedImmediate): uint32 =
   uint32(x)
+
+converter signed(x: UnsignedImmediate): int32 =
+  x.unsigned.signed
 
 const
   opcode: BitSlice[int, word] = (pos: 26, width: 6)
@@ -288,6 +293,7 @@ for op, pat in patterns.pairs:
   assert trie.find[:Opcode](instr2) == some(op)
 
 proc decode*(instr: uint32): Opcode =
+  ## Decode an instruction to find its opcode.
   case trie.find[:Opcode](instr)
   of Some(@op): return op
   of None(): raise unknownInstructionError
@@ -337,34 +343,34 @@ proc execute(cpu: var CPU, op: Opcode, instr: uint32) =
     if src1 < 0 and src2 > high(int32) + src1:
       raise overflowError
     cpu[instr[rt]] = src1.unsigned - src2.unsigned
-  of SW: write[uint32](cpu[instr[rs]] + instr[signedImm].toUint32, cpu[instr[rt]])
-  of LW: cpu[instr[rt]] = read[uint32](cpu[instr[rs]] + instr[signedImm].toUint32)
+  of SW: write[uint32](cpu[instr[rs]] + instr[signedImm].unsigned, cpu[instr[rt]])
+  of LW: cpu[instr[rt]] = read[uint32](cpu[instr[rs]] + instr[signedImm].unsigned)
   of BNE:
     if cpu[instr[rs]] != cpu[instr[rt]]:
-      newPC = cpu.nextPC + instr[signedImm].toUint32 shl 2
+      newPC = cpu.nextPC + instr[signedImm].unsigned shl 2
   of BEQ:
     if cpu[instr[rs]] == cpu[instr[rt]]:
-      newPC = cpu.nextPC + instr[signedImm].toUint32 shl 2
+      newPC = cpu.nextPC + instr[signedImm].unsigned shl 2
   of BLEZ:
     if cpu[instr[rs]].signed <= 0:
-      newPC = cpu.nextPC + instr[signedImm].toUint32 shl 2
+      newPC = cpu.nextPC + instr[signedImm].unsigned shl 2
   of BGTZ:
     if cpu[instr[rs]].signed > 0:
-      newPC = cpu.nextPC + instr[signedImm].toUint32 shl 2
+      newPC = cpu.nextPC + instr[signedImm].unsigned shl 2
   of SH:
-    write[uint16](cpu[instr[rs]] + instr[signedImm].toUint32, uint16(cpu[instr[rt]] and 0xffff))
+    write[uint16](cpu[instr[rs]] + instr[signedImm].unsigned, uint16(cpu[instr[rt]] and 0xffff))
   of SB:
-    write[uint8](cpu[instr[rs]] + instr[signedImm].toUint32, uint8(cpu[instr[rt]] and 0xff))
+    write[uint8](cpu[instr[rs]] + instr[signedImm].unsigned, uint8(cpu[instr[rt]] and 0xff))
   of ANDI:
     cpu[instr[rt]] = cpu[instr[rs]] and instr[unsignedImm]
   of LB:
-    cpu[instr[rt]] = int32(read[int8](cpu[instr[rs]] + instr[signedImm].toUint32)).unsigned
+    cpu[instr[rt]] = int32(read[int8](cpu[instr[rs]] + instr[signedImm].unsigned)).unsigned
   of LBU:
-    cpu[instr[rt]] = uint32(read[uint8](cpu[instr[rs]] + instr[signedImm].toUint32))
+    cpu[instr[rt]] = uint32(read[uint8](cpu[instr[rs]] + instr[signedImm].unsigned))
   of LH:
-    cpu[instr[rt]] = int32(read[int16](cpu[instr[rs]] + instr[signedImm].toUint32)).unsigned
+    cpu[instr[rt]] = int32(read[int16](cpu[instr[rs]] + instr[signedImm].unsigned)).unsigned
   of LHU:
-    cpu[instr[rt]] = uint32(read[uint16](cpu[instr[rs]] + instr[signedImm].toUint32))
+    cpu[instr[rt]] = uint32(read[uint16](cpu[instr[rs]] + instr[signedImm].unsigned))
   of J:
     newPC = instr[target].absTarget(cpu.nextPC)
   of JALR:
