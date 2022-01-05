@@ -30,8 +30,15 @@ func equals*[T, U](slice: BitSlice[T, U], value: U): Pattern[U] =
   initPattern(mask, value shl slice.pos)
 
 func `and`*[T](m1, m2: Pattern[T]): Pattern[T] =
-  ## Take the conjunction of two patterns
+  ## Take the conjunction of two patterns.
   let commonMask = m1.mask and m2.mask
   assert (m1.value and commonMask) == (m2.value and commonMask)
   (mask: m1.mask or m2.mask, value: m1.value or m2.value)
 
+func signed*(x: uint32): int32 =
+  ## Convert unsigned to signed.
+  cast[int32](x)
+
+func unsigned*(x: int32): uint32 =
+  ## Convert signed to unsigned.
+  cast[uint32](x)
