@@ -1,22 +1,7 @@
-import memory
-import trie32
+import memory, trie32, utils, common
 import fusion/matching
 import std/[setutils, tables, options, bitops, strformat]
 {.experimental: "caseStmtMacros".}
-
-type
-  DecodingError* = object of CatchableError
-  UnknownInstructionError* = object of DecodingError
-  ExecutionError = object of CatchableError
-  InvalidCOPError = object of ExecutionError
-  OverflowError = object of ExecutionError
-  MemoryProtectionError = object of ExecutionError
-
-let
-  unknownInstructionError = newException(UnknownInstructionError, "unknown instruction")
-  invalidCOPError = newException(InvalidCOPError, "invalid COP")
-  overflowError = newException(OverflowError, "overflow")
-  memoryProtectionError = newException(MemoryProtectionError, "memory protection error")
 
 type
   Opcode* {.pure.} = enum
@@ -25,18 +10,6 @@ type
     SLTU, BLTZ, BGEZ, BLTZAL, BGEZAL, J, JAL, BEQ, BNE, BLEZ, BGTZ, ADDI, ADDIU,
     SUBI, SUBIU, ANDI, ORI, XORI, LUI, LB, LH, LWL, LW, LBU, LHU, LWR, SB, SH,
     SWL, SW, SWR, MFC0, MTC0
-
-  Section[T] = tuple[pos: int, width: int]
-
-func pattern[T](section: Section[T], value: uint32): Pattern =
-  let mask = toMask[uint32](section.pos ..< section.pos+section.width)
-  initPattern(mask, value shl section.pos)
-
-func get[T](section: Section[T], value: uint32): T =
-  cast[T](value.bitsliced(section.pos ..< section.pos+section.width))
-
-func `[]`[T](value: uint32, section: Section[T]): T =
-  get(section, value)
 
 type
   Register = distinct range[0..31]
@@ -70,27 +43,27 @@ func bit(x: bool): uint32 =
   if x: 1 else: 0
 
 const
-  opcode: Section[int] = (pos: 26, width: 6)
-  rs: Section[Register] = (pos: 21, width: 5)
-  rt: Section[Register] = (pos: 16, width: 5)
-  rd: Section[Register] = (pos: 11, width: 5)
-  shamt: Section[int] = (pos: 6, width: 5)
-  funct: Section[int] = (pos: 0, width: 6)
-  unsignedImm: Section[SignedImmediate] = (pos: 0, width: 16)
-  signedImm: Section[UnsignedImmediate] = (pos: 0, width: 16)
-  target: Section[Target] = (pos: 0, width: 26)
+  opcode: BitSlice[int, word] = (pos: 26, width: 6)
+  rs: BitSlice[Register, word] = (pos: 21, width: 5)
+  rt: BitSlice[Register, word] = (pos: 16, width: 5)
+  rd: BitSlice[Register, word] = (pos: 11, width: 5)
+  shamt: BitSlice[int, word] = (pos: 6, width: 5)
+  funct: BitSlice[int, word] = (pos: 0, width: 6)
+  unsignedImm: BitSlice[SignedImmediate, word] = (pos: 0, width: 16)
+  signedImm: BitSlice[UnsignedImmediate, word] = (pos: 0, width: 16)
+  target: BitSlice[Target, word] = (pos: 0, width: 26)
 
-func registerPattern(op: uint32): Pattern =
-  opcode.pattern(0) and funct.pattern(op) and shamt.pattern(0)
+func registerPattern(op: word): Pattern[word] =
+  opcode.equals(0) and funct.equals(op) and shamt.equals(0)
 
-func shiftPattern(op: uint32): Pattern =
-  opcode.pattern(0) and funct.pattern(op) and rs.pattern(0)
+func shiftPattern(op: word): Pattern[word] =
+  opcode.equals(0) and funct.equals(op) and rs.equals(0)
 
-func regImmBranchPattern(op: uint32): Pattern =
-  opcode.pattern(1) and rt.pattern(op)
+func regImmBranchPattern(op: word): Pattern[word] =
+  opcode.equals(1) and rt.equals(op)
 
 let
-  patterns: Table[Opcode, Pattern] = {
+  patterns: Table[Opcode, Pattern[word]] = {
     SLL: shiftPattern(0),
     SRL: shiftPattern(2),
     SRA: shiftPattern(3),
@@ -99,8 +72,8 @@ let
     SRAV: registerPattern(7),
     JR: registerPattern(8),
     JALR: registerPattern(9),
-    SYSCALL: opcode.pattern(0) and funct.pattern(12),
-    BREAK: opcode.pattern(0) and funct.pattern(13),
+    SYSCALL: opcode.equals(0) and funct.equals(12),
+    BREAK: opcode.equals(0) and funct.equals(13),
     MFHI: registerPattern(16),
     MTHI: registerPattern(17),
     MFLO: registerPattern(18),
@@ -123,34 +96,34 @@ let
     BGEZ: regImmBranchPattern(1),
     BLTZAL: regImmBranchPattern(16),
     BGEZAL: regImmBranchPattern(17),
-    J: opcode.pattern(2),
-    JAL: opcode.pattern(3),
-    BEQ: opcode.pattern(4),
-    BNE: opcode.pattern(5),
-    BLEZ: opcode.pattern(6) and rt.pattern(0),
-    BGTZ: opcode.pattern(7) and rt.pattern(0),
-    ADDI: opcode.pattern(8),
-    ADDIU: opcode.pattern(9),
-    SUBI: opcode.pattern(10),
-    SUBIU: opcode.pattern(11),
-    ANDI: opcode.pattern(12),
-    ORI: opcode.pattern(13),
-    XORI: opcode.pattern(14),
-    LUI: opcode.pattern(15),
-    LB: opcode.pattern(32),
-    LH: opcode.pattern(33),
-    LWL: opcode.pattern(34),
-    LW: opcode.pattern(35),
-    LBU: opcode.pattern(36),
-    LHU: opcode.pattern(37),
-    LWR: opcode.pattern(38),
-    SB: opcode.pattern(40),
-    SH: opcode.pattern(41),
-    SWL: opcode.pattern(42),
-    SW: opcode.pattern(43),
-    SWR: opcode.pattern(46),
-    MFC0: opcode.pattern(16) and rs.pattern(0),
-    MTC0: opcode.pattern(16) and rs.pattern(4)
+    J: opcode.equals(2),
+    JAL: opcode.equals(3),
+    BEQ: opcode.equals(4),
+    BNE: opcode.equals(5),
+    BLEZ: opcode.equals(6) and rt.equals(0),
+    BGTZ: opcode.equals(7) and rt.equals(0),
+    ADDI: opcode.equals(8),
+    ADDIU: opcode.equals(9),
+    SUBI: opcode.equals(10),
+    SUBIU: opcode.equals(11),
+    ANDI: opcode.equals(12),
+    ORI: opcode.equals(13),
+    XORI: opcode.equals(14),
+    LUI: opcode.equals(15),
+    LB: opcode.equals(32),
+    LH: opcode.equals(33),
+    LWL: opcode.equals(34),
+    LW: opcode.equals(35),
+    LBU: opcode.equals(36),
+    LHU: opcode.equals(37),
+    LWR: opcode.equals(38),
+    SB: opcode.equals(40),
+    SH: opcode.equals(41),
+    SWL: opcode.equals(42),
+    SW: opcode.equals(43),
+    SWR: opcode.equals(46),
+    MFC0: opcode.equals(16) and rs.equals(0),
+    MTC0: opcode.equals(16) and rs.equals(4)
     }.toTable
 
   trie = makeTrie(patterns)

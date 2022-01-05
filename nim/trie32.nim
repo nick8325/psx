@@ -1,16 +1,6 @@
 import std/[tables, setutils]
 import std/options
-
-type
-  Pattern* = tuple[mask: uint32, value: uint32]
-
-func initPattern*(mask: uint32, value: uint32): Pattern =
-  (mask: mask, value: mask and value)
-
-func `and` *(m1, m2: Pattern): Pattern =
-  let commonMask = m1.mask and m2.mask
-  assert (m1.value and commonMask) == (m2.value and commonMask)
-  (mask: m1.mask or m2.mask, value: m1.value or m2.value)
+import utils, common
 
 type
   Phase = -1..3
@@ -38,7 +28,7 @@ func theVal(vals: set[uint8]): uint8 =
     return val
   return 0xff
 
-proc makeTrie(trie: var Trie, patterns: Table[uint8, Pattern], phase: Phase, vals: set[uint8]): uint8 =
+proc makeTrie(trie: var Trie, patterns: Table[uint8, Pattern[word]], phase: Phase, vals: set[uint8]): uint8 =
   if (phase, vals) in trie.hash:
     return trie.hash[(phase, vals)]
 
@@ -71,9 +61,9 @@ proc makeTrie(trie: var Trie, patterns: Table[uint8, Pattern], phase: Phase, val
       children[i] = makeTrie(trie, patterns, phase-1, newVals)
     return addNode(trie, phase, vals, 0xff, children)
 
-proc makeTrie*[T](patterns: Table[T, Pattern]): Trie =
+proc makeTrie*[T](patterns: Table[T, Pattern[word]]): Trie =
   assert ord(low(T)) >= 0 and ord(high(T)) < 255
-  var patternsU8: Table[uint8, Pattern]
+  var patternsU8: Table[uint8, Pattern[word]]
   for key, value in patterns.pairs:
     patternsU8[cast[uint8](key.ord)] = value
 

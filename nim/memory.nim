@@ -1,18 +1,10 @@
+import common, utils
+
 type
-  word = uint32
   Page = distinct ByteAddress
 
 const
   pageSize = 0x1000
-
-# Convert a page-aligned slice of an array into a page
-func slicePage(arr: var openArray[byte], offset: word): ptr array[pageSize, byte] =
-  assert offset mod pageSize == 0
-  assert cast[uint32](arr.len) >= offset + pageSize
-  let
-    address = addr(arr[offset])
-    raw = cast[ptr UncheckedArray[byte]](address)
-  cast[ptr array[pageSize, byte]](raw)
 
 # Page tables
 #[
@@ -57,13 +49,6 @@ bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../SCPH1002.bin"), 0, 
 
 type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool]
-  MemoryError = object of CatchableError
-  InvalidAddressError = object of MemoryError
-  UnalignedAccessError = object of MemoryError
-
-let
-  invalidAddressError = new InvalidAddressError
-  unalignedAccessError = new UnalignedAccessError
 
 proc resolve[T](table: var PageTable, address: word): ResolvedAddress[T] =
   if address mod cast[word](sizeof(T)) != 0: raise unalignedAccessError
@@ -88,7 +73,7 @@ proc mapRegion(table: var PageTable, arr: var openArray[byte], address: word, wr
   table.regions.add(cast[ref seq[byte]](arr))
   let startingPage = address div pageSize
   for i in 0 ..< arr.len div pageSize:
-    let page = slicePage(arr, cast[word](i) * pageSize)
+    let page = sliceArray[pageSize, byte](arr, i * pageSize)
     table.table[startingPage + cast[word](i)] = initPage(page, writable = writable, io = io)
 
   if address + word(arr.len) <= 0x20000000u32:
