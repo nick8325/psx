@@ -48,7 +48,7 @@ type
 func absTarget(target: Target, pc: uint32): uint32 =
   (pc and 0xf000_0000u32) or (uint32(target) shl 2)
 
-func `$` *(x: Register): string =
+func `$`*(x: Register): string =
   "r" & $int(x)
 
 func signed(x: uint32): int32 =
@@ -167,8 +167,6 @@ proc decode*(instr: uint32): Opcode =
   of Some(@op): return op
   of None(): raise unknownInstructionError
 
-echo(decode(fetch(0x1fc00000)))
-
 # COP0 status.
 type
   COP0 = object
@@ -186,7 +184,7 @@ const initCOP0: COP0 =
   # BEV=1
   COP0(sr: 0b00000000010000000000000000000000u32)
 
-proc `[]` *(cop0: COP0, reg: CoRegister): uint32 =
+proc `[]`*(cop0: COP0, reg: CoRegister): uint32 =
   case reg
   of CoRegister(3): cop0.bpc
   of CoRegister(5): cop0.bda
@@ -200,7 +198,7 @@ proc `[]` *(cop0: COP0, reg: CoRegister): uint32 =
   of CoRegister(15): 2
   else: raise invalidCOPError
 
-proc `[]=` *(cop0: var COP0, reg: CoRegister, val: uint32) =
+proc `[]=`*(cop0: var COP0, reg: CoRegister, val: uint32) =
   case reg
   of CoRegister(3): cop0.bpc = val
   of CoRegister(5): cop0.bda = val
@@ -381,17 +379,28 @@ proc step(cpu: var CPU) =
   # The execute function is in charge of updating pc and nextPC.
   cpu.execute(decode(instr), instr)
 
-func `$` *(cpu: CPU): string =
+func `$`*(cpu: CPU): string =
   result = fmt "PC={cpu.pc:x} "
   for i, x in cpu.registers:
     result &= fmt "R{i}={x:x} "
   result &= fmt "COP0.SR={cpu.cop0.sr:x}"
 
+func cpuDiff(cpu1: CPU, cpu2: CPU): string =
+  if cpu1.pc != cpu2.pc:
+    result &= fmt "PC={cpu1.pc:x}->{cpu2.pc:x} "
+  for i, x in cpu1.registers:
+    if x != cpu2.registers[i]:
+      result &= fmt "R{i}={x:x}->{cpu2.registers[i]:x} "
+  if cpu1.cop0.sr != cpu2.cop0.sr:
+    result &= fmt "COP0.SR={cpu1.cop0.sr:x}->{cpu2.cop0.sr:x}"
+
 proc test() =
+  var oldCPU: CPU
   var cpu = initCPU(0xbfc00000u32)
   while true:
-    echo(cpu.fetch().decode())
-    echo cpu
+    echo cpuDiff(oldCPU, cpu)
+    echo cpu.fetch.decode
+    oldCPU = cpu
     step(cpu)
 
 test()
