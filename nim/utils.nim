@@ -13,7 +13,7 @@ type
   ## Like a slice, but on a range of bits in a word
   BitSlice*[T, U] = tuple[pos: int, width: int]
 
-func `[]`*[T, U](value: U, slice: BitSlice[T, U]): T =
+func `[]`*[T, U](value: U, slice: BitSlice[T, U]): T {.inline.} =
   cast[T](value.bitsliced(slice.pos ..< slice.pos+slice.width))
 
 type
@@ -35,10 +35,10 @@ func `and`*[T](m1, m2: Pattern[T]): Pattern[T] =
   assert (m1.value and commonMask) == (m2.value and commonMask)
   (mask: m1.mask or m2.mask, value: m1.value or m2.value)
 
-func signed*(x: uint32): int32 =
+func signed*(x: uint32): int32 {.inline.} =
   ## Convert unsigned to signed.
   cast[int32](x)
 
-func unsigned*(x: int32): uint32 =
+func unsigned*(x: int32): uint32 {.inline.} =
   ## Convert signed to unsigned.
   cast[uint32](x)

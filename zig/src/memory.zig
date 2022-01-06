@@ -103,8 +103,12 @@ pub fn write(comptime T: type, addr: u32, value: T) !void {
     const offset = addr & 0xfff;
 
     if (page_table[page].pointer()) |ptr| {
-        if (page_table[page].isWritable())
+        if (page_table[page].isWritable()) {
+            std.log.debug("write {x} to {x}", .{value, addr});
             std.mem.bytesAsSlice(T, ptr)[offset/@sizeOf(T)] = value;
+        } else {
+            std.log.debug("skip write {x} to {x}", .{value, addr});
+        }
     } else {
         std.log.err("write to unknown address {x}", .{addr});
         return error.UnknownAddress;

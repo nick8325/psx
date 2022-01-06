@@ -7,10 +7,8 @@ const
   pageSize = 0x1000
 
 # Page tables
-#[
 const
-  invalidPage: Page = Page(0) # unused
-]#
+  invalidPage {.used.}: Page = Page(0)
 
 func initPage(page: ptr array[pageSize, byte], writable: bool, io: bool): Page =
   let address = cast[ByteAddress](page)
@@ -50,7 +48,7 @@ bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../SCPH1002.bin"), 0, 
 type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool]
 
-proc resolve[T](table: var PageTable, address: word): ResolvedAddress[T] =
+proc resolve[T](table: var PageTable, address: word): ResolvedAddress[T] {.inline.} =
   if address mod cast[word](sizeof(T)) != 0: raise unalignedAccessError
 
   let
@@ -63,7 +61,7 @@ proc resolve[T](table: var PageTable, address: word): ResolvedAddress[T] =
 
   return (pointer: pointer, writable: entry.writable, io: entry.IO())
 
-proc fetch*(address: word): word =
+proc fetch*(address: word): word {.inline.} =
   pageTable.resolve[:word](address).pointer[]
 
 proc mapRegion(table: var PageTable, arr: var openArray[byte], address: word, writable: bool, io: bool) =
@@ -81,12 +79,12 @@ proc mapRegion(table: var PageTable, arr: var openArray[byte], address: word, wr
     mapRegion(table, arr, address + 0x80000000u32, writable, io)
     mapRegion(table, arr, address + 0xa0000000u32, writable, io)
 
-proc read*[T](address: word): T =
+proc read*[T](address: word): T {.inline.} =
   let resolved = pageTable.resolve[:T](address)
   resolved.pointer[]
   # TODO: handle I/O
 
-proc write*[T](address: word, value: T): void =
+proc write*[T](address: word, value: T): void {.inline.} =
   let resolved = pageTable.resolve[:T](address)
   if resolved.writable:
     resolved.pointer[] = value

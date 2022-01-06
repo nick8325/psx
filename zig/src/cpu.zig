@@ -6,18 +6,206 @@ const utils = @import("utils.zig");
 // Instruction decoding.
 //////////////////////////////////////////////////////////////////////
 
-/// Errors returned by the decode function.
-pub const DecodingError = error {
-    UnknownInstruction
+const MaskedValue = struct {
+    mask: u32,
+    value: u32,
+
+    fn make(mask: u32, value: u32) MaskedValue {
+        return .{.mask = mask, .value = value & mask};
+    }
+
+    fn plus(self: MaskedValue, other: MaskedValue) MaskedValue {
+        const both_mask = self.mask & other.mask;
+        std.debug.assert((self.value & both_mask) == (other.value & both_mask));
+
+        return .{.mask = self.mask | other.mask, .value = self.value | other.value};
+    }
 };
 
-/// Decode an instruction.
+pub const TrieError = error {
+    AmbiguousEncoding
+};
+
+const Masks = std.enums.EnumMap(std.meta.Tag(Instruction), MaskedValue);
+var trie_children: [4][256][256]u16 = undefined;
+var trie_values: [4][256]u16 = undefined;
+var trie_end: [4]u16 = .{0, 0, 0, 0};
+var trie_root: u16 = undefined;
+
+pub fn init_trie() !void {
+    trie_end = .{0,0,0,0};
+
+    const tag_type = std.meta.Tag(Instruction);
+    var tags = Masks.init(.{});
+    inline for (@typeInfo(tag_type).Enum.fields) |field| {
+        const tag = @intToEnum(tag_type, field.value);
+        tags.put(tag, Instruction.mask(tag));
+    }
+    var masks: [4][65536]@TypeOf(tags.bits.mask) = undefined;
+    trie_root = try make_trie(3, tags, &masks);
+}
+
+fn the_tag(tags: Masks) ?u16 {
+    var tags_copy = tags;
+    var iter = tags_copy.iterator();
+    return switch (tags.count()) {
+        0 => @as(u16, 0xffff),
+        1 => @enumToInt(iter.next().?.key),
+        else => null
+    };
+}
+
+fn add_node(phase: isize, tags: Masks, masks: *[4][65536]@TypeOf(Masks.init(.{}).bits.mask), children: [256]u16, value: u16) u16 {
+    const pos = trie_end[@intCast(usize, phase)];
+    trie_end[@intCast(usize, phase)] += 1;
+
+    trie_children[@intCast(usize, phase)][pos] = children;
+    trie_values[@intCast(usize, phase)][pos] = value;
+    masks[@intCast(usize, phase)][pos] = tags.bits.mask;
+
+    return pos;
+}
+
+fn make_trie(phase: isize, tags: Masks, masks: *[4][65536]@TypeOf(Masks.init(.{}).bits.mask)) TrieError!u16 {
+    if (phase >= 0)
+        if (std.mem.indexOfScalar(@TypeOf(tags.bits.mask), masks[@intCast(usize, phase)][0..trie_end[@intCast(usize, phase)]], tags.bits.mask)) |index|
+            return @intCast(u16, index);
+
+    if (phase == -1) {
+        if (the_tag(tags)) |tag|
+            return tag
+        else
+            return error.AmbiguousEncoding;
+    } else if (the_tag(tags)) |tag| {
+        const subnode = try make_trie(phase-1, Masks.init(.{}), masks);
+        return add_node(phase, tags, masks, .{subnode} ** 256, tag);
+    } else {
+        var tags_copy = tags;
+        var children: [256]u16 = .{undefined} ** 256;
+        var i: usize = 0;
+        while (i < 256) : (i += 1) {
+            var subtags = tags;
+            var iter = tags_copy.iterator();
+            while (iter.next()) |tag| {
+                const phase_mask = @as(u32, 0xff) << (@intCast(u5, phase)*8);
+                const phase_value = @intCast(u32, i) << (@intCast(u5, phase)*8);
+                const masked = tag.value;
+                const mask = phase_mask & masked.mask;
+
+                if ((phase_value & mask) != (masked.value & mask))
+                    subtags.remove(tag.key);
+            }
+
+            children[i] = try make_trie(phase-1, subtags, masks);
+        }
+
+        return add_node(phase, tags, masks, children, 0xff);
+    }
+}
+
+/// Errors returned by the decode function.
+pub const DecodingError = error {
+    UnknownInstruction,
+    InvalidTrie
+};
+
 pub inline fn decode(instr: u32) DecodingError!Instruction {
+    const parts = InstructionParts.make(instr);
+    const byte1 = @truncate(u8, instr >> 24);
+    const byte2 = @truncate(u8, instr >> 16);
+    const byte3 = @truncate(u8, instr >> 8);
+    const byte4 = @truncate(u8, instr);
+
+    std.log.warn("decoding {x}/{x}/{x}/{x}, expect {}", .{byte1, byte2, byte3, byte4, old_decode(instr)});
+
+    var op: u16 = 0xff;
+    op &= trie_values[0][trie_root];
+    const level1 = trie_children[0][trie_root][byte1];
+    op &= trie_values[1][level1];
+    const level2 = trie_children[1][level1][byte2];
+    op &= trie_values[2][level2];
+    const level3 = trie_children[2][level2][byte3];
+    op &= trie_values[3][level3];
+    const level4 = trie_children[3][level3][byte4];
+    op &= level4;
+
+    std.log.warn("went {}->{}->{}->{}", .{level1, level2, level3, level4});
+    std.log.warn("added {x}->{x}->{x}->{x}", .{trie_values[0][trie_root], trie_values[1][level1], trie_values[2][level2], trie_values[3][level3]});
+    std.log.warn("result is {}", .{op});
+
+    return switch(op) {
+        @enumToInt(Instruction.SLL) => Instruction.decode(.SLL, parts),
+        @enumToInt(Instruction.SRL) => Instruction.decode(.SRL, parts),
+        @enumToInt(Instruction.SRA) => Instruction.decode(.SRA, parts),
+        @enumToInt(Instruction.SLLV) => Instruction.decode(.SLLV, parts),
+        @enumToInt(Instruction.SRLV) => Instruction.decode(.SRLV, parts),
+        @enumToInt(Instruction.SRAV) => Instruction.decode(.SRAV, parts),
+        @enumToInt(Instruction.JR) => Instruction.decode(.JR, parts),
+        @enumToInt(Instruction.JALR) => Instruction.decode(.JALR, parts),
+        @enumToInt(Instruction.SYSCALL) => Instruction.decode(.SYSCALL, parts),
+        @enumToInt(Instruction.BREAK) => Instruction.decode(.BREAK, parts),
+        @enumToInt(Instruction.MFHI) => Instruction.decode(.MFHI, parts),
+        @enumToInt(Instruction.MTHI) => Instruction.decode(.MTHI, parts),
+        @enumToInt(Instruction.MFLO) => Instruction.decode(.MFLO, parts),
+        @enumToInt(Instruction.MTLO) => Instruction.decode(.MTLO, parts),
+        @enumToInt(Instruction.MULT) => Instruction.decode(.MULT, parts),
+        @enumToInt(Instruction.MULTU) => Instruction.decode(.MULTU, parts),
+        @enumToInt(Instruction.DIV) => Instruction.decode(.DIV, parts),
+        @enumToInt(Instruction.DIVU) => Instruction.decode(.DIVU, parts),
+        @enumToInt(Instruction.ADD) => Instruction.decode(.ADD, parts),
+        @enumToInt(Instruction.ADDU) => Instruction.decode(.ADDU, parts),
+        @enumToInt(Instruction.SUB) => Instruction.decode(.SUB, parts),
+        @enumToInt(Instruction.SUBU) => Instruction.decode(.SUBU, parts),
+        @enumToInt(Instruction.AND) => Instruction.decode(.AND, parts),
+        @enumToInt(Instruction.OR) => Instruction.decode(.OR, parts),
+        @enumToInt(Instruction.XOR) => Instruction.decode(.XOR, parts),
+        @enumToInt(Instruction.NOR) => Instruction.decode(.NOR, parts),
+        @enumToInt(Instruction.SLT) => Instruction.decode(.SLT, parts),
+        @enumToInt(Instruction.SLTU) => Instruction.decode(.SLTU, parts),
+        @enumToInt(Instruction.BLTZ) => Instruction.decode(.BLTZ, parts),
+        @enumToInt(Instruction.BGEZ) => Instruction.decode(.BGEZ, parts),
+        @enumToInt(Instruction.BLTZAL) => Instruction.decode(.BLTZAL, parts),
+        @enumToInt(Instruction.BGEZAL) => Instruction.decode(.BGEZAL, parts),
+        @enumToInt(Instruction.J) => Instruction.decode(.J, parts),
+        @enumToInt(Instruction.JAL) => Instruction.decode(.JAL, parts),
+        @enumToInt(Instruction.BEQ) => Instruction.decode(.BEQ, parts),
+        @enumToInt(Instruction.BNE) => Instruction.decode(.BNE, parts),
+        @enumToInt(Instruction.BLEZ) => Instruction.decode(.BLEZ, parts),
+        @enumToInt(Instruction.BGTZ) => Instruction.decode(.BGTZ, parts),
+        @enumToInt(Instruction.ADDI) => Instruction.decode(.ADDI, parts),
+        @enumToInt(Instruction.ADDIU) => Instruction.decode(.ADDIU, parts),
+        @enumToInt(Instruction.SUBI) => Instruction.decode(.SUBI, parts),
+        @enumToInt(Instruction.SUBIU) => Instruction.decode(.SUBIU, parts),
+        @enumToInt(Instruction.ANDI) => Instruction.decode(.ANDI, parts),
+        @enumToInt(Instruction.ORI) => Instruction.decode(.ORI, parts),
+        @enumToInt(Instruction.XORI) => Instruction.decode(.XORI, parts),
+        @enumToInt(Instruction.LUI) => Instruction.decode(.LUI, parts),
+        @enumToInt(Instruction.LB) => Instruction.decode(.LB, parts),
+        @enumToInt(Instruction.LH) => Instruction.decode(.LH, parts),
+        @enumToInt(Instruction.LWL) => Instruction.decode(.LWL, parts),
+        @enumToInt(Instruction.LW) => Instruction.decode(.LW, parts),
+        @enumToInt(Instruction.LBU) => Instruction.decode(.LBU, parts),
+        @enumToInt(Instruction.LHU) => Instruction.decode(.LHU, parts),
+        @enumToInt(Instruction.LWR) => Instruction.decode(.LWR, parts),
+        @enumToInt(Instruction.SB) => Instruction.decode(.SB, parts),
+        @enumToInt(Instruction.SH) => Instruction.decode(.SH, parts),
+        @enumToInt(Instruction.SWL) => Instruction.decode(.SWL, parts),
+        @enumToInt(Instruction.SW) => Instruction.decode(.SW, parts),
+        @enumToInt(Instruction.SWR) => Instruction.decode(.SWR, parts),
+        @enumToInt(Instruction.MFC0) => Instruction.decode(.MFC0, parts),
+        @enumToInt(Instruction.MTC0) => Instruction.decode(.MTC0, parts),
+        else => error.InvalidTrie
+    };
+}
+
+
+/// Decode an instruction.
+pub inline fn old_decode(instr: u32) DecodingError!Instruction {
     const parts = InstructionParts.make(instr);
 
     return switch (parts.opcode) {
         0 => switch (parts.func) {
-            0 => if (instr == 0) Instruction.decode(.NOP, parts) else Instruction.decode(.SLL, parts),
+            0 => Instruction.decode(.SLL, parts),
             2 => Instruction.decode(.SRL, parts),
             3 => Instruction.decode(.SRA, parts),
             4 => Instruction.decode(.SLLV, parts),
@@ -96,52 +284,55 @@ pub const Instruction = union(enum) {
         return @unionInit(Instruction, @tagName(tag), try std.meta.TagPayload(Instruction, tag).decode(parts));
     }
 
-    NOP: DontCareType,
-    SLL: ShiftType,
-    SRL: ShiftType,
-    SRA: ShiftType,
-    SLLV: RegisterType,
-    SRLV: RegisterType,
-    SRAV: RegisterType,
-    JR: RSType,
-    JALR: RSDType,
-    SYSCALL: DontCareType,
-    BREAK: DontCareType,
-    MFHI: RDType,
-    MTHI: RSType,
-    MFLO: RDType,
-    MTLO: RSType,
-    MULT: RSTType,
-    MULTU: RSTType,
-    DIV: RSTType,
-    DIVU: RSTType,
-    ADD: RegisterType,
-    ADDU: RegisterType,
-    SUB: RegisterType,
-    SUBU: RegisterType,
-    AND: RegisterType,
-    OR: RegisterType,
-    XOR: RegisterType,
-    NOR: RegisterType,
-    SLT: RegisterType,
-    SLTU: RegisterType,
-    BLTZ: RegImmBranchType,
-    BGEZ: RegImmBranchType,
-    BLTZAL: RegImmBranchType,
-    BGEZAL: RegImmBranchType,
-    J: JumpType,
-    JAL: JumpType,
-    BEQ: BranchType,
-    BNE: BranchType,
-    BLEZ: BranchZeroType,
-    BGTZ: BranchZeroType,
-    ADDI: SignedImmediateType,
-    ADDIU: SignedImmediateType,
-    SUBI: SignedImmediateType,
-    SUBIU: SignedImmediateType,
-    ANDI: UnsignedImmediateType,
-    ORI: UnsignedImmediateType,
-    XORI: UnsignedImmediateType,
+    fn mask(comptime tag: @typeInfo(Instruction).Union.tag_type.?) MaskedValue {
+        return std.meta.TagPayload(Instruction, tag).mask();
+    }
+
+    SLL: ShiftType(0),
+    SRL: ShiftType(2),
+    SRA: ShiftType(3),
+    SLLV: RegisterType(4),
+    SRLV: RegisterType(6),
+    SRAV: RegisterType(7),
+    JR: RSType(8),
+    JALR: RSDType(9),
+    SYSCALL: DontCareType(12),
+    BREAK: DontCareType(13),
+    MFHI: RDType(16),
+    MTHI: RSType(17),
+    MFLO: RDType(18),
+    MTLO: RSType(19),
+    MULT: RSTType(24),
+    MULTU: RSTType(25),
+    DIV: RSTType(26),
+    DIVU: RSTType(27),
+    ADD: RegisterType(32),
+    ADDU: RegisterType(33),
+    SUB: RegisterType(34),
+    SUBU: RegisterType(35),
+    AND: RegisterType(36),
+    OR: RegisterType(37),
+    XOR: RegisterType(38),
+    NOR: RegisterType(39),
+    SLT: RegisterType(42),
+    SLTU: RegisterType(43),
+    BLTZ: RegImmBranchType(0),
+    BGEZ: RegImmBranchType(1),
+    BLTZAL: RegImmBranchType(16),
+    BGEZAL: RegImmBranchType(17),
+    J: JumpType(2),
+    JAL: JumpType(3),
+    BEQ: BranchType(4),
+    BNE: BranchType(5),
+    BLEZ: BranchZeroType(6),
+    BGTZ: BranchZeroType(7),
+    ADDI: SignedImmediateType(8),
+    ADDIU: SignedImmediateType(9),
+    SUBI: SignedImmediateType(10),
+    SUBIU: SignedImmediateType(11),
+    ANDI: UnsignedImmediateType(12),
+    ORI: UnsignedImmediateType(13),
+    XORI: UnsignedImmediateType(14),
     LUI: struct {
         /// UnsignedImmediateType but rs is unused
         const Self = @This();
@@ -152,19 +343,23 @@ pub const Instruction = union(enum) {
         fn decode(parts: InstructionParts) !Self {
             return Self{ .dest = parts.rt, .imm = parts.uimm };
         }
+
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(15);
+        }
     },
-    LB: SignedImmediateType,
-    LH: SignedImmediateType,
-    LWL: SignedImmediateType,
-    LW: SignedImmediateType,
-    LBU: SignedImmediateType,
-    LHU: SignedImmediateType,
-    LWR: SignedImmediateType,
-    SB: SignedImmediateType,
-    SH: SignedImmediateType,
-    SWL: SignedImmediateType,
-    SW: SignedImmediateType,
-    SWR: SignedImmediateType,
+    LB: SignedImmediateType(32),
+    LH: SignedImmediateType(33),
+    LWL: SignedImmediateType(34),
+    LW: SignedImmediateType(35),
+    LBU: SignedImmediateType(36),
+    LHU: SignedImmediateType(37),
+    LWR: SignedImmediateType(38),
+    SB: SignedImmediateType(40),
+    SH: SignedImmediateType(41),
+    SWL: SignedImmediateType(42),
+    SW: SignedImmediateType(43),
+    SWR: SignedImmediateType(46),
 
     MFC0: struct {
         const Self = @This();
@@ -177,6 +372,10 @@ pub const Instruction = union(enum) {
             else
                 return error.UnknownInstruction;
         }
+
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(16).plus(InstructionParts.rsMask(0)).plus(InstructionParts.shiftMask(0)).plus(InstructionParts.funcMask(0));
+        }
     },
     MTC0: struct {
         const Self = @This();
@@ -188,6 +387,10 @@ pub const Instruction = union(enum) {
                 return Self{.src = parts.rt, .dest = .{.val = parts.rd.val}}
             else
                 return error.UnknownInstruction;
+        }
+
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(16).plus(InstructionParts.rsMask(4)).plus(InstructionParts.shiftMask(0)).plus(InstructionParts.funcMask(0));
         }
     },
 
@@ -247,6 +450,22 @@ const InstructionParts = struct {
             .target = JumpTarget{.val = @truncate(u26, instr)},
         };
     }
+
+    fn mask(it: anytype, pos: u5) MaskedValue {
+        const max = std.math.maxInt(@TypeOf(it));
+        const the_mask = @as(u32, max) << pos;
+        const val = @as(u32, it) << pos;
+        return MaskedValue.make(the_mask, val);
+    }
+
+    fn opcodeMask(opcode: u6) MaskedValue { return mask(opcode, 26); }
+    fn rsMask(rs: u5) MaskedValue { return mask(rs, 21); }
+    fn rtMask(rt: u5) MaskedValue { return mask(rt, 16); }
+    fn rdMask(rd: u5) MaskedValue { return mask(rd, 11); }
+    fn shiftMask(shift: u5) MaskedValue { return mask(shift, 6); }
+    fn funcMask(func: u6) MaskedValue { return mask(func, 0); }
+    fn immMask(imm: u16) MaskedValue { return mask(imm, 0); }
+    fn targetMask(target: u26) MaskedValue { return mask(target, 0); }
 };
 
 /// The operand of a jump-type instruction.
@@ -294,180 +513,245 @@ const UnsignedImmediate = struct {
 };
 
 /// Instruction decoder for instructions with "don't-care" rs/rt/rd/shift.
-const DontCareType = struct {
-    const Self = @This();
+fn DontCareType(comptime op: u6) type {
+    return struct {
+        const Self = @This();
 
-    fn decode(_: InstructionParts) !Self {
-        return Self{};
-    }
-};
+        fn decode(_: InstructionParts) !Self {
+            return Self{};
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(0).plus(InstructionParts.funcMask(op));
+        }
+    };
+}
 
 /// Instruction decoder for register-type instructions.
-const RegisterType = struct {
-    const Self = @This();
+fn RegisterType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
 
-    dest: Register,
-    src1: Register,
-    src2: Register,
+        dest: Register,
+        src1: Register,
+        src2: Register,
 
-    fn decode(parts: InstructionParts) !Self {
-        if (parts.shift == 0)
-            return Self{.dest = parts.rd, .src1 = parts.rs, .src2 = parts.rt}
-        else
-            return error.UnknownInstruction;
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.shift == 0)
+                return Self{.dest = parts.rd, .src1 = parts.rs, .src2 = parts.rt}
+            else
+                return error.UnknownInstruction;
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(0).plus(InstructionParts.funcMask(func)).plus(InstructionParts.shiftMask(0));
+        }
+    };
+}
 
 /// Instruction decoder for register-type instructions with rs only.
-const RSType = struct {
-    const Self = @This();
+fn RSType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
 
-    src: Register,
+        src: Register,
 
-    fn decode(parts: InstructionParts) !Self {
-        if (parts.rt.val == 0 and parts.rd.val == 0 and parts.shift == 0)
-            return Self{.src = parts.rs}
-        else
-            return error.UnknownInstruction;
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.rt.val == 0 and parts.rd.val == 0 and parts.shift == 0)
+                return Self{.src = parts.rs}
+            else
+                return error.UnknownInstruction;
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(0).plus(InstructionParts.funcMask(func)).plus(InstructionParts.shiftMask(0)).plus(InstructionParts.rtMask(0)).plus(InstructionParts.rdMask(0));
+        }
+    };
+}
 
 /// Instruction decoder for register-type instructions with rd only.
-const RDType = struct {
-    const Self = @This();
+fn RDType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
 
-    dest: Register,
+        dest: Register,
 
-    fn decode(parts: InstructionParts) !Self {
-        if (parts.rs.val == 0 and parts.rt.val == 0 and parts.shift == 0)
-            return Self{.dest = parts.rd}
-        else
-            return error.UnknownInstruction;
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.rs.val == 0 and parts.rt.val == 0 and parts.shift == 0)
+                return Self{.dest = parts.rd}
+            else
+                return error.UnknownInstruction;
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(0).plus(InstructionParts.funcMask(func)).plus(InstructionParts.shiftMask(0)).plus(InstructionParts.rsMask(0)).plus(InstructionParts.rtMask(0));
+        }
+    };
+}
 
 /// Instruction decoder for register-type instructions with rs and rd only.
-const RSDType = struct {
-    const Self = @This();
+fn RSDType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
 
-    src: Register,
-    dest: Register,
+        src: Register,
+        dest: Register,
 
-    fn decode(parts: InstructionParts) !Self {
-        if (parts.rt.val == 0 and parts.shift == 0)
-            return Self{.src = parts.rs, .dest = parts.rd}
-        else
-            return error.UnknownInstruction;
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.rt.val == 0 and parts.shift == 0)
+                return Self{.src = parts.rs, .dest = parts.rd}
+            else
+                return error.UnknownInstruction;
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(0).plus(InstructionParts.funcMask(func)).plus(InstructionParts.shiftMask(0)).plus(InstructionParts.rtMask(0));
+        }
+    };
+}
 
 /// Instruction decoder for register-type instructions with rs and rt only.
-const RSTType = struct {
-    const Self = @This();
+fn RSTType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
 
-    src1: Register,
-    src2: Register,
+        src1: Register,
+        src2: Register,
 
-    fn decode(parts: InstructionParts) !Self {
-        if (parts.rd.val == 0 and parts.shift == 0)
-            return Self{.src1 = parts.rs, .src2 = parts.rt}
-        else
-            return error.UnknownInstruction;
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.rd.val == 0 and parts.shift == 0)
+                return Self{.src1 = parts.rs, .src2 = parts.rt}
+            else
+                return error.UnknownInstruction;
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(0).plus(InstructionParts.funcMask(func)).plus(InstructionParts.shiftMask(0)).plus(InstructionParts.rdMask(0));
+        }
+    };
+}
 
 /// Instruction decoder for shift-type instructions.
-const ShiftType = struct {
-    const Self = @This();
+fn ShiftType(comptime func: u6) type {
+    return struct {
+        const Self = @This();
 
-    dest: Register,
-    src: Register,
-    amount: u5,
+        dest: Register,
+        src: Register,
+        amount: u5,
 
-    fn decode(parts: InstructionParts) !Self {
-        if (parts.rs.val == 0)
-            return Self{.dest = parts.rd, .src = parts.rs, .amount = parts.shift}
-        else
-            return error.UnknownInstruction;
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.rs.val == 0)
+                return Self{.dest = parts.rd, .src = parts.rs, .amount = parts.shift}
+            else
+                return error.UnknownInstruction;
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(0).plus(InstructionParts.funcMask(func)).plus(InstructionParts.rsMask(0));
+        }
+    };
+}
 
 /// Instruction decoder for signed immediate-type instructions.
-const SignedImmediateType = struct {
-    const Self = @This();
+fn SignedImmediateType(comptime op: u6) type {
+    return struct {
+        const Self = @This();
 
-    src: Register,
-    dest: Register,
-    imm: SignedImmediate,
+        src: Register,
+        dest: Register,
+        imm: SignedImmediate,
 
-    fn decode(parts: InstructionParts) !Self {
-        return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.simm };
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.simm };
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(op);
+        }
+    };
+}
 
 /// Instruction decoder for unsigned immediate-type instructions.
-const UnsignedImmediateType = struct {
-    const Self = @This();
+fn UnsignedImmediateType(comptime op: u6) type {
+    return struct {
+        const Self = @This();
 
-    src: Register,
-    dest: Register,
-    imm: UnsignedImmediate,
+        src: Register,
+        dest: Register,
+        imm: UnsignedImmediate,
 
-    fn decode(parts: InstructionParts) !Self {
-        return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.uimm };
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            return Self{ .src = parts.rs, .dest = parts.rt, .imm = parts.uimm };
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(op);
+        }
+    };
+}
 
 /// Instruction decoder for immediate-type branch instructions.
-const BranchType = struct {
-    const Self = @This();
+fn BranchType(comptime op: u6) type {
+    return struct {
+        const Self = @This();
 
-    src1: Register,
-    src2: Register,
-    imm: SignedImmediate,
+        src1: Register,
+        src2: Register,
+        imm: SignedImmediate,
 
-    fn decode(parts: InstructionParts) !Self {
-        return Self{ .src1 = parts.rs, .src2 = parts.rt, .imm = parts.simm };
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            return Self{ .src1 = parts.rs, .src2 = parts.rt, .imm = parts.simm };
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(op);
+        }
+    };
+}
 
 /// Instruction decoder for immediate-type branch-against-zero instructions.
-const BranchZeroType = struct {
-    const Self = @This();
+fn BranchZeroType(comptime op: u6) type {
+    return struct {
+        const Self = @This();
 
-    src: Register,
-    imm: SignedImmediate,
+        src: Register,
+        imm: SignedImmediate,
 
-    fn decode(parts: InstructionParts) !Self {
-        if (parts.rt.val == 0)
-            return Self{ .src = parts.rs, .imm = parts.simm }
-        else
-            return error.UnknownInstruction;
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            if (parts.rt.val == 0)
+                return Self{ .src = parts.rs, .imm = parts.simm }
+            else
+                return error.UnknownInstruction;
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(op).plus(InstructionParts.rtMask(0));
+        }
+    };
+}
 
 /// Instruction decoder for "REGIMM"-type branch instructions.
-const RegImmBranchType = struct {
-    const Self = @This();
+fn RegImmBranchType(comptime op: u5) type {
+    return struct {
+        const Self = @This();
 
-    src: Register,
-    offset: SignedImmediate,
+        src: Register,
+        offset: SignedImmediate,
 
-    fn decode(parts: InstructionParts) !Self {
-        return Self{.src = parts.rs, .offset = parts.simm};
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            return Self{.src = parts.rs, .offset = parts.simm};
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(1).plus(InstructionParts.rtMask(op));
+        }
+    };
+}
 
 /// Instruction decoder for jump-type instructions.
-const JumpType = struct {
-    const Self = @This();
+fn JumpType(comptime op: u6) type {
+    return struct {
+        const Self = @This();
 
-    target: JumpTarget,
+        target: JumpTarget,
 
-    fn decode(parts: InstructionParts) !Self {
-        return Self{.target = parts.target};
-    }
-};
+        fn decode(parts: InstructionParts) !Self {
+            return Self{.target = parts.target};
+        }
+        fn mask() MaskedValue {
+            return InstructionParts.opcodeMask(op);
+        }
+    };
+}
 
 //////////////////////////////////////////////////////////////////////
 // Processor state and execution.
@@ -602,7 +886,6 @@ pub const CPU = struct {
         var new_pc: u32 = self.next_pc +% 4;
 
         switch(instr) {
-            .NOP => {},
             .OR => |info| self.set(info.dest, self.get(info.src1) | self.get(info.src2)),
             .AND => |info| self.set(info.dest, self.get(info.src1) & self.get(info.src2)),
             .SLTU => |info| self.set(info.dest, if (self.get(info.src1) < self.get(info.src2)) 1 else 0),
@@ -881,3 +1164,25 @@ pub const CPUDiff = struct {
         } else try self.cpu2.format(fmt, options, writer);
     }
 };
+
+test {
+    std.testing.refAllDecls(@This());
+}
+
+test "init trie" {
+    init_trie() catch unreachable;
+    std.log.warn("{} {} {} {} {}", .{trie_end[3], trie_end[2], trie_end[1], trie_end[0], trie_root});
+}
+
+test "every instruction has the correct mask" {
+    @setEvalBranchQuota(10000);
+    init_trie() catch unreachable;
+    const tag_type = std.meta.Tag(Instruction);
+    inline for (@typeInfo(tag_type).Enum.fields) |field| {
+        const tag = @intToEnum(tag_type, field.value);
+        const mask = Instruction.mask(tag);
+        const inverted_value = mask.value | ~mask.mask;
+        try std.testing.expectEqual(tag, try decode(mask.value));
+        try std.testing.expectEqual(tag, try decode(inverted_value));
+    }
+}

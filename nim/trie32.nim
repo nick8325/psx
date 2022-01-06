@@ -71,7 +71,7 @@ proc makeTrie*[T](patterns: Table[T, Pattern[word]]): Trie =
   trie.root = makeTrie(trie, patternsU8, 3, patternsU8.keys.toSet)
   trie
 
-proc find*[T](trie: Trie, val: uint32): Option[T] =
+proc find*[T](trie: Trie, val: uint32): Option[T] {.inline.} =
   let
     byte1 = (val shr 24) and 0xff
     byte2 = (val shr 16) and 0xff
