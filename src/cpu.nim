@@ -12,6 +12,8 @@ type
   Register* = distinct range[0..31] ## A register.
   CoRegister = distinct range[0..31] ## A coprocessor register.
 
+func `==`*(x, y: Register): bool {.borrow.}
+
 func `$`*(x: Register): string =
   "r" & $int(x)
 
@@ -300,9 +302,107 @@ for op, pat in patterns.pairs:
 
 proc decode*(instr: uint32): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
-  case trie.find[:Opcode](instr)
-  of Some(@op): return op
-  of None(): raise unknownInstructionError
+  case instr[opcode]
+  of 0:
+    case instr[funct]
+    of 0:
+      if instr[rs] == Register(0): return SLL
+    of 2:
+      if instr[rs] == Register(0): return SRL
+    of 3:
+      if instr[rs] == Register(0): return SRA
+    of 4:
+      if instr[shamt] == 0: return SLLV
+    of 6:
+      if instr[shamt] == 0: return SRLV
+    of 7:
+      if instr[shamt] == 0: return SRAV
+    of 8:
+      if instr[shamt] == 0: return JR
+    of 9:
+      if instr[shamt] == 0: return JALR
+    of 12: return SYSCALL
+    of 13: return BREAK
+    of 16:
+      if instr[shamt] == 0: return MFHI
+    of 17:
+      if instr[shamt] == 0: return MTHI
+    of 18:
+      if instr[shamt] == 0: return MFLO
+    of 19:
+      if instr[shamt] == 0: return MTLO
+    of 24:
+      if instr[shamt] == 0: return MULT
+    of 25:
+      if instr[shamt] == 0: return MULTU
+    of 26:
+      if instr[shamt] == 0: return DIV
+    of 27:
+      if instr[shamt] == 0: return DIVU
+    of 32:
+      if instr[shamt] == 0: return ADD
+    of 33:
+      if instr[shamt] == 0: return ADDU
+    of 34:
+      if instr[shamt] == 0: return SUB
+    of 35:
+      if instr[shamt] == 0: return SUBU
+    of 36:
+      if instr[shamt] == 0: return AND
+    of 37:
+      if instr[shamt] == 0: return OR
+    of 38:
+      if instr[shamt] == 0: return XOR
+    of 39:
+      if instr[shamt] == 0: return NOR
+    of 42:
+      if instr[shamt] == 0: return SLT
+    of 43:
+      if instr[shamt] == 0: return SLTU
+    else: raise unknownInstructionError
+  of 1:
+    case int(instr[rt])
+    of 0: return BLTZ
+    of 1: return BGEZ
+    of 16: return BLTZAL
+    of 17: return BGEZAL
+    else: raise unknownInstructionError
+  of 2: return J
+  of 3: return JAL
+  of 4: return BEQ
+  of 5: return BNE
+  of 6:
+    if instr[rt] == Register(0): return BLEZ
+  of 7:
+    if instr[rt] == Register(0): return BGTZ
+  of 8: return ADDI
+  of 9: return ADDIU
+  of 10: return SUBI
+  of 11: return SUBIU
+  of 12: return ANDI
+  of 13: return ORI
+  of 14: return XORI
+  of 15: return LUI
+  of 32: return LB
+  of 33: return LH
+  of 34: return LWL
+  of 35: return LW
+  of 36: return LBU
+  of 37: return LHU
+  of 38: return LWR
+  of 40: return SB
+  of 41: return SH
+  of 42: return SWL
+  of 43: return SW
+  of 46: return SWR
+  of 16:
+    case int(instr[rs])
+    of 0: return MFC0
+    of 4: return MTC0
+    else: raise unknownInstructionError
+  else: raise unknownInstructionError
+
+  raise unknownInstructionError
 
 const
   debug = false
