@@ -1,6 +1,6 @@
 ## An interpreter for the R3000A CPU.
 
-import trie32, utils, common
+import utils, common
 from memory import nil
 import fusion/matching
 import std/[setutils, tables, options, bitops, strformat]
@@ -217,88 +217,6 @@ const
   funct: BitSlice[int, word] = (pos: 0, width: 6)
   imm: BitSlice[Immediate, word] = (pos: 0, width: 16)
   target: BitSlice[Target, word] = (pos: 0, width: 26)
-
-func registerPattern(op: word): Pattern[word] =
-  opcode.equals(0) and funct.equals(op) and shamt.equals(0)
-
-func shiftPattern(op: word): Pattern[word] =
-  opcode.equals(0) and funct.equals(op) and rs.equals(0)
-
-func regImmBranchPattern(op: word): Pattern[word] =
-  opcode.equals(1) and rt.equals(op)
-
-let
-  patterns: Table[Opcode, Pattern[word]] = {
-    SLL: shiftPattern(0),
-    SRL: shiftPattern(2),
-    SRA: shiftPattern(3),
-    SLLV: registerPattern(4),
-    SRLV: registerPattern(6),
-    SRAV: registerPattern(7),
-    JR: registerPattern(8),
-    JALR: registerPattern(9),
-    SYSCALL: opcode.equals(0) and funct.equals(12),
-    BREAK: opcode.equals(0) and funct.equals(13),
-    MFHI: registerPattern(16),
-    MTHI: registerPattern(17),
-    MFLO: registerPattern(18),
-    MTLO: registerPattern(19),
-    MULT: registerPattern(24),
-    MULTU: registerPattern(25),
-    DIV: registerPattern(26),
-    DIVU: registerPattern(27),
-    ADD: registerPattern(32),
-    ADDU: registerPattern(33),
-    SUB: registerPattern(34),
-    SUBU: registerPattern(35),
-    AND: registerPattern(36),
-    OR: registerPattern(37),
-    XOR: registerPattern(38),
-    NOR: registerPattern(39),
-    SLT: registerPattern(42),
-    SLTU: registerPattern(43),
-    BLTZ: regImmBranchPattern(0),
-    BGEZ: regImmBranchPattern(1),
-    BLTZAL: regImmBranchPattern(16),
-    BGEZAL: regImmBranchPattern(17),
-    J: opcode.equals(2),
-    JAL: opcode.equals(3),
-    BEQ: opcode.equals(4),
-    BNE: opcode.equals(5),
-    BLEZ: opcode.equals(6) and rt.equals(0),
-    BGTZ: opcode.equals(7) and rt.equals(0),
-    ADDI: opcode.equals(8),
-    ADDIU: opcode.equals(9),
-    SUBI: opcode.equals(10),
-    SUBIU: opcode.equals(11),
-    ANDI: opcode.equals(12),
-    ORI: opcode.equals(13),
-    XORI: opcode.equals(14),
-    LUI: opcode.equals(15),
-    LB: opcode.equals(32),
-    LH: opcode.equals(33),
-    LWL: opcode.equals(34),
-    LW: opcode.equals(35),
-    LBU: opcode.equals(36),
-    LHU: opcode.equals(37),
-    LWR: opcode.equals(38),
-    SB: opcode.equals(40),
-    SH: opcode.equals(41),
-    SWL: opcode.equals(42),
-    SW: opcode.equals(43),
-    SWR: opcode.equals(46),
-    MFC0: opcode.equals(16) and rs.equals(0),
-    MTC0: opcode.equals(16) and rs.equals(4)
-    }.toTable
-
-  trie = makeTrie(patterns)
-
-for op, pat in patterns.pairs:
-  let
-    instr1 = pat.value
-    instr2 = pat.value or (not pat.mask)
-  assert trie.find[:Opcode](instr1) == some(op)
-  assert trie.find[:Opcode](instr2) == some(op)
 
 proc decode*(instr: uint32): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
