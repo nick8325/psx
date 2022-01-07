@@ -33,7 +33,7 @@ type
     regions: seq[ref seq[byte]]
 
 var
-  pageTable: PageTable
+  pageTable*: PageTable
   bios {.align: 4096.}: array[0x80000, byte]
   ram {.align: 4096.}: array[0x200000, byte]
   scratchpad {.align: 4096.}: array[0x1000, byte]
@@ -48,7 +48,7 @@ bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../SCPH1002.bin"), 0, 
 type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool]
 
-proc resolve[T](table: var PageTable, address: word): ResolvedAddress[T] {.inline.} =
+proc resolve[T](table: PageTable, address: word): ResolvedAddress[T] {.inline.} =
   if address mod cast[word](sizeof(T)) != 0: raise new UnalignedAccessError
 
   let
@@ -60,9 +60,6 @@ proc resolve[T](table: var PageTable, address: word): ResolvedAddress[T] {.inlin
   let pointer = cast[ptr T](cast[ByteAddress](entry.pointer) +% cast[ByteAddress](offset))
 
   return (pointer: pointer, writable: entry.writable, io: entry.IO())
-
-proc fetch*(address: word): word {.inline.} =
-  pageTable.resolve[:word](address).pointer[]
 
 proc mapRegion(table: var PageTable, arr: var openArray[byte], address: word, writable: bool, io: bool) =
   assert arr.len mod pageSize == 0
@@ -79,13 +76,16 @@ proc mapRegion(table: var PageTable, arr: var openArray[byte], address: word, wr
     mapRegion(table, arr, address + 0x80000000u32, writable, io)
     mapRegion(table, arr, address + 0xa0000000u32, writable, io)
 
-proc read*[T](address: word): T {.inline.} =
-  let resolved = pageTable.resolve[:T](address)
+proc fetch*(table: PageTable, address: word): word {.inline.} =
+  table.resolve[:word](address).pointer[]
+
+proc read*[T](table: PageTable, address: word): T {.inline.} =
+  let resolved = table.resolve[:T](address)
   resolved.pointer[]
   # TODO: handle I/O
 
-proc write*[T](address: word, value: T): void {.inline.} =
-  let resolved = pageTable.resolve[:T](address)
+proc write*[T](table: PageTable, address: word, value: T): void {.inline.} =
+  let resolved = table.resolve[:T](address)
   if resolved.writable:
     resolved.pointer[] = value
   # TODO: handle I/O
@@ -104,13 +104,13 @@ pageTable.mapRegion(bios,         0x1fc00000u32, false,    false)
 pageTable.mapRegion(cacheControl, 0xfffe0000u32, true,     true)
 
 # Set up I/O space
-write[uint32](0x1f801000u32, 0x1f000000u32)
-write[uint32](0x1f801004u32, 0x1f802000u32)
-write[uint32](0x1f801008u32, 0x0013243fu32)
-write[uint32](0x1f80100cu32, 0x00003022u32)
-write[uint32](0x1f801010u32, 0x0013243fu32)
-write[uint32](0x1f801014u32, 0x200931e1u32)
-write[uint32](0x1f801018u32, 0x00020843u32)
-write[uint32](0x1f80101cu32, 0x00070777u32)
-write[uint32](0x1f801020u32, 0x00031125u32)
-write[uint32](0x1f801060u32, 0x00000b88u32)
+pageTable.write[:uint32](0x1f801000u32, 0x1f000000u32)
+pageTable.write[:uint32](0x1f801004u32, 0x1f802000u32)
+pageTable.write[:uint32](0x1f801008u32, 0x0013243fu32)
+pageTable.write[:uint32](0x1f80100cu32, 0x00003022u32)
+pageTable.write[:uint32](0x1f801010u32, 0x0013243fu32)
+pageTable.write[:uint32](0x1f801014u32, 0x200931e1u32)
+pageTable.write[:uint32](0x1f801018u32, 0x00020843u32)
+pageTable.write[:uint32](0x1f80101cu32, 0x00070777u32)
+pageTable.write[:uint32](0x1f801020u32, 0x00031125u32)
+pageTable.write[:uint32](0x1f801060u32, 0x00000b88u32)

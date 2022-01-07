@@ -1,7 +1,7 @@
 ## An interpreter for the R3000A CPU.
 
 import utils, common
-from memory import nil
+import memory
 import fusion/matching
 import std/[tables, bitops, strformat]
 import sugar
@@ -153,15 +153,15 @@ proc resolveAddress(cpu: CPU, address: uint32, code: bool): uint32 =
 
 proc fetch*(cpu: CPU): uint32 =
   ## Fetch the next instruction.
-  memory.fetch(cpu.resolveAddress(cpu.pc, true))
+  pageTable.fetch(cpu.resolveAddress(cpu.pc, true))
 
 proc read*[T](cpu: CPU, address: uint32): T =
   ## Read from a given virtual address.
-  memory.read[T](cpu.resolveAddress(address, false))
+  pageTable.read[:T](cpu.resolveAddress(address, false))
 
 proc write*[T](cpu: CPU, address: uint32, val: T) =
   ## Write to a given virtual address.
-  memory.write[T](cpu.resolveAddress(address, false), val)
+  pageTable.write[:T](cpu.resolveAddress(address, false), val)
 
 func `$`*(cpu: CPU): string =
   result = fmt "PC={cpu.pc:x} "
