@@ -4,6 +4,7 @@ import utils, common
 from memory import nil
 import fusion/matching
 import std/[setutils, tables, options, bitops, strformat]
+import sugar
 {.experimental: "caseStmtMacros".}
 
 # Processor state.
@@ -331,24 +332,24 @@ proc format(instr: uint32): string =
       result &= " " & arg
 
   let
-    r = args(rd, rs, rt)
-    s = args(rd, rs, shamt)
-    i = args(rt, rs, imm)
-    it = args(rt, imm)
-    iss = args(rs, imm)
-    rst = args(rs, rt)
-    rdd = args(rd)
-    rss = args(rs)
-    rds = args(rd, rs)
-    shift = args(rd, rt, shamt)
-    j = args(target)
-    mem = args(rt, fmt"{imm}({rs})")
-    whole = args(fmt"$0x{instr and 0x3ffffff:x}")
-    mfc0 = args(rt, CoRegister(rd))
-    mtc0 = args(CoRegister(rd), rt)
+    r = () => args(rd, rs, rt)
+    s = () => args(rd, rs, shamt)
+    i = () => args(rt, rs, imm)
+    it = () => args(rt, imm)
+    iss = () => args(rs, imm)
+    rst = () => args(rs, rt)
+    rdd = () => args(rd)
+    rss = () => args(rs)
+    rds = () => args(rd, rs)
+    shift = () => args(rd, rt, shamt)
+    j = () => args(target)
+    mem = () => args(rt, fmt"{imm}({rs})")
+    whole = () => args(fmt"$0x{instr and 0x3ffffff:x}")
+    mfc0 = () => args(rt, CoRegister(rd))
+    mtc0 = () => args(CoRegister(rd), rt)
 
   let
-    kinds: array[Opcode, string] =
+    kinds: array[Opcode, () -> string] =
       [ADD: r, ADDI: i, ADDU: r, ADDIU: i, SUB: r, SUBU: i, SUBI: r, SUBIU: i,
        DIV: rst, DIVU: rst, MULT: rst, MULTU: rst, MFLO: rdd, MTLO: rss,
        MFHI: rdd, MTHI: rss, SLT: r, SLTU: r, LUI: it,
@@ -361,7 +362,7 @@ proc format(instr: uint32): string =
        J: j, JR: rss, JAL: j, JALR: rds,
        SYSCALL: whole, BREAK: whole, MFC0: mfc0, MTC0: mtc0]
 
-  return kinds[op]
+  return kinds[op]()
 
 proc execute(cpu: var CPU, instr: uint32) =
   var newPC = cpu.nextPC + 4
