@@ -364,7 +364,7 @@ proc format(instr: uint32): string =
 
   return kinds[op]()
 
-proc execute(cpu: var CPU, instr: uint32) =
+proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   var newPC = cpu.nextPC + 4
   let op = decode(instr)
   let rd = instr[rd]
@@ -452,7 +452,7 @@ proc execute(cpu: var CPU, instr: uint32) =
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
 
-proc step(cpu: var CPU) =
+proc step(cpu: var CPU) {.inline.} =
   # The execute function is in charge of updating pc and nextPC.
   cpu.execute(cpu.fetch)
 
