@@ -49,14 +49,14 @@ type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool]
 
 proc resolve[T](table: var PageTable, address: word): ResolvedAddress[T] {.inline.} =
-  if address mod cast[word](sizeof(T)) != 0: raise unalignedAccessError
+  if address mod cast[word](sizeof(T)) != 0: raise new UnalignedAccessError
 
   let
     page = address shr 12
     offset = address and 0xfff
     entry = table.table[page]
 
-  if entry.pointer.isNil: raise invalidAddressError
+  if entry.pointer.isNil: raise new InvalidAddressError
   let pointer = cast[ptr T](cast[ByteAddress](entry.pointer) +% cast[ByteAddress](offset))
 
   return (pointer: pointer, writable: entry.writable, io: entry.IO())

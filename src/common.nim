@@ -15,15 +15,5 @@ type
 
   ExecutionError* = object of CatchableError
   InvalidCOPError* = object of ExecutionError
-  OverflowError* = object of ExecutionError
+  ArithmeticOverflowError* = object of ExecutionError
   MemoryProtectionError* = object of ExecutionError
-
-let
-  ## Avoid putting heap allocation in the CPU loop by preallocating exceptions.
-  # TODO: check if this improves performance
-  invalidAddressError* = new InvalidAddressError
-  unalignedAccessError* = new UnalignedAccessError
-  unknownInstructionError* = new UnknownInstructionError
-  invalidCOPError* = new InvalidCOPError
-  overflowError* = new OverflowError
-  memoryProtectionError* = new MemoryProtectionError

@@ -58,7 +58,7 @@ proc `[]`(cop0: COP0, reg: CoRegister): uint32 =
   of CoRegister(13): cop0.cause
   of CoRegister(14): cop0.epc
   of CoRegister(15): 2 # PRId - value from Nocash PSX
-  else: raise invalidCOPError # TODO Is this the right exception?
+  else: raise new InvalidCOPError # TODO Is this the right exception?
 
 proc `[]=`*(cop0: var COP0, reg: CoRegister, val: uint32) =
   ## Access registers by number.
@@ -73,11 +73,11 @@ proc `[]=`*(cop0: var COP0, reg: CoRegister, val: uint32) =
     # Which bits are allowed to be modified
     const mask = 0b00001111101101000000000011000000u32
     if (val and mask) != (cop0.sr and mask):
-      raise invalidCOPError # TODO Is this the right exception?
+      raise new InvalidCOPError # TODO Is this the right exception?
     cop0.sr = val
   of CoRegister(13): discard
   of CoRegister(14): discard
-  else: raise invalidCopError # TODO Is this the right exception?
+  else: raise new InvalidCOPError # TODO Is this the right exception?
 
 func cu(cop0: COP0): array[4, bool] =
   ## Get value of COP0.CU.
@@ -141,7 +141,7 @@ proc resolveAddress(cpu: CPU, address: uint32, code: bool): uint32 =
   ## Resolve a virtual address to a physical address,
   ## also checking access permissions.
   if address >= 0x80000000u32 and cpu.cop0.ku[0]:
-    raise memoryProtectionError
+    raise new MemoryProtectionError
 
   # If "isolate cache" bit is set, high bits are discarded and
   # low bits are used to index into scratchpad (only for data,
@@ -241,7 +241,7 @@ proc decode*(instr: uint32): Opcode {.inline.} =
     if x:
       return op
     else:
-      raise unknownInstructionError
+      raise new UnknownInstructionError
 
   return case instr[opcode]
   of 0:
@@ -274,14 +274,14 @@ proc decode*(instr: uint32): Opcode {.inline.} =
     of 39: NOR.guard(instr[shamt] == 0)
     of 42: SLT.guard(instr[shamt] == 0)
     of 43: SLTU.guard(instr[shamt] == 0)
-    else: raise unknownInstructionError
+    else: raise new UnknownInstructionError
   of 1:
     case int(instr[rt])
     of 0: BLTZ
     of 1: BGEZ
     of 16: BLTZAL
     of 17: BGEZAL
-    else: raise unknownInstructionError
+    else: raise new UnknownInstructionError
   of 2: J
   of 3: JAL
   of 4: BEQ
@@ -312,8 +312,8 @@ proc decode*(instr: uint32): Opcode {.inline.} =
     case int(instr[rs])
     of 0: MFC0
     of 4: MTC0
-    else: raise unknownInstructionError
-  else: raise unknownInstructionError
+    else: raise new UnknownInstructionError
+  else: raise new UnknownInstructionError
 
 proc format(instr: uint32): string =
   let
@@ -385,9 +385,9 @@ proc execute(cpu: var CPU, instr: uint32) =
       src1 = cpu[rs].signed
       src2 = cpu[rt].signed
     if src1 > 0 and src2 > high(int32) - src1:
-      raise overflowError
+      raise new ArithmeticOverflowError
     if src1 < 0 and src2 < low(int32) - src1:
-      raise overflowError
+      raise new ArithmeticOverflowError
     cpu[rd] = src1.unsigned + src2.unsigned
   of SUBU: cpu[rd] = cpu[rs] - cpu[rt]
   of SUBIU: cpu[rt] = cpu[rs] - imm.signExt
@@ -403,18 +403,18 @@ proc execute(cpu: var CPU, instr: uint32) =
       src1 = cpu[rs].signed
       src2 = imm.signExt.signed
     if src1 > 0 and src2 > high(int32) - src1:
-      raise overflowError
+      raise new ArithmeticOverflowError
     if src1 < 0 and src2 < low(int32) - src1:
-      raise overflowError
+      raise new ArithmeticOverflowError
     cpu[rt] = src1.unsigned + src2.unsigned
   of SUBI:
     let
       src1 = cpu[rs].signed
       src2 = imm.signExt.signed
     if src1 > 0 and src2 < low(int32) + src1:
-      raise overflowError
+      raise new ArithmeticOverflowError
     if src1 < 0 and src2 > high(int32) + src1:
-      raise overflowError
+      raise new ArithmeticOverflowError
     cpu[rt] = src1.unsigned - src2.unsigned
   of SW: cpu.write[:uint32](cpu[rs] + imm.signExt, cpu[rt])
   of LW: cpu[rt] = cpu.read[:uint32](cpu[rs] + imm.signExt)
@@ -447,7 +447,7 @@ proc execute(cpu: var CPU, instr: uint32) =
   of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
   of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
   else:
-    raise unknownInstructionError
+    raise new UnknownInstructionError
 
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
