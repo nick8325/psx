@@ -3,8 +3,7 @@
 import utils, common
 import memory
 import fusion/matching
-import std/[tables, bitops, strformat]
-import sugar
+import std/[tables, bitops, strformat, setutils, sequtils]
 
 # Processor state.
 
@@ -221,6 +220,37 @@ func signExt(x: Immediate): uint32 =
   ## Sign extend an immediate to a uint32.
   cast[uint32](int32(cast[int16](uint16(x))))
 
+type
+  OpcodeType {.pure.} = enum
+    ## Possible instruction codings used by MIPS
+    Reg,   ## R-type - RD, RS, RT used
+    RegST, ## R-type - RS and RT used as source registers (MULT and DIV family)
+    RegD,  ## R-type - RD used (MFHI/MFLO)
+    RegS,  ## R-type - RS used (MTHI/MTLO)
+    RegDS, ## R-type - RD and RS used (JALR)
+    Shift, ## R-type with shift - RT and RD used
+    Imm,   ## Immediate - RS is source, RT is target
+    ImmT,  ## Immediate - RT used (LUI)
+    ImmS,  ## Immediate - RS used (BGTZ and family)
+    Mem,   ## Load/store - RS is base address, RT is value
+    Jump,  ## Absolute jump
+    MFC,   ## MFCn/CFCn - RD is (COP) source, RT is target
+    MTC,   ## MTCn/CFCn - RT is source, RD is (COP) target
+    Whole, ## Only opcode used, rest is user-settable (SYSCALL and BREAK)
+    None   ## No arguments (RFE)
+
+const opcodeType: array[Opcode, OpcodeType] =
+  # Type of each opcode
+  [ADD: Reg, ADDI: Imm, ADDU: Reg, ADDIU: Imm, SUB: Reg, SUBU: Imm, SUBI: Reg,
+   SUBIU: Imm, DIV: RegST, DIVU: RegST, MULT: RegST, MULTU: RegST, MFLO: RegD,
+   MTLO: RegS, MFHI: RegD, MTHI: RegS, SLT: Reg, SLTU: Reg, LUI: ImmT, AND: Reg,
+   ANDI: Imm, OR: Reg, ORI: Imm, XOR: Reg, XORI: Imm, NOR: Reg, SLL: Shift,
+   SLLV: Reg, SRA: Shift, SRAV: Reg, SRL: Shift, SRLV: Reg, LW: Mem, LB: Mem,
+   LBU: Mem, LH: Mem, LHU: Mem, LWL: Mem, LWR: Mem, SW: Mem, SB: Mem, SH: Mem,
+   SWL: Mem, SWR: Mem, BEQ: Imm, BNE: Imm, BGEZ: ImmS, BGEZAL: ImmS, BGTZ: ImmS,
+   BLEZ: ImmS, BLTZ: ImmS, BLTZAL: ImmS, J: Jump, JR: RegS, JAL: Jump,
+   JALR: RegDS, SYSCALL: Whole, BREAK: Whole, MFC0: MFC, MTC0: MTC, RFE: None]
+
 const
   # The different parts of a machine instruction.
   opcode: BitSlice[int, word] = (pos: 26, width: 6)
@@ -232,148 +262,156 @@ const
   imm: BitSlice[Immediate, word] = (pos: 0, width: 16)
   target: BitSlice[Target, word] = (pos: 0, width: 26)
   copimm: BitSlice[word, word] = (pos: 0, width: 25)
+  whole: BitSlice[word, word] = (pos: 0, width: 26)
 
 proc decode*(instr: uint32): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
 
-  proc guard(op: Opcode, x: bool): Opcode {.inline.} =
-    ## Return an opcode, but only after checking that a given condition holds.
-    if x:
-      return op
-    else:
-      raise new UnknownInstructionError
+  proc guard(x: bool) {.inline.} =
+    if not x: raise new UnknownInstructionError
 
-  return case instr[opcode]
+  proc ret(instr: word, op: static Opcode): Opcode {.inline.} =
+    ## Check for fields which must be zero, depending on instruction type
+    case opcodeType[op]
+    of Reg: guard instr[shamt] == 0
+    of RegST: guard instr[shamt] == 0 and instr[rd] == r0
+    of RegD: guard instr[shamt] == 0 and instr[rs] == r0 and instr[rt] == r0
+    of RegS: guard instr[shamt] == 0 and instr[rd] == r0 and instr[rt] == r0
+    of RegDS: guard instr[shamt] == 0 and instr[rt] == r0
+    of Shift: guard instr[rs] == r0
+    of MFC: guard instr[shamt] == 0 and instr[funct] == 0
+    of MTC: guard instr[shamt] == 0 and instr[funct] == 0
+    else: discard
+
+    return op
+
+  case instr[opcode]
   of 0:
     case instr[funct]
-    of 0: SLL.guard(instr[rs] == r0)
-    of 2: SRL.guard(instr[rs] == r0)
-    of 3: SRA.guard(instr[rs] == r0)
-    of 4: SLLV.guard(instr[shamt] == 0)
-    of 6: SRLV.guard(instr[shamt] == 0)
-    of 7: SRAV.guard(instr[shamt] == 0)
-    of 8: JR.guard(instr[shamt] == 0)
-    of 9: JALR.guard(instr[shamt] == 0)
-    of 12: SYSCALL
-    of 13: BREAK
-    of 16: MFHI.guard(instr[shamt] == 0)
-    of 17: MTHI.guard(instr[shamt] == 0)
-    of 18: MFLO.guard(instr[shamt] == 0)
-    of 19: MTLO.guard(instr[shamt] == 0)
-    of 24: MULT.guard(instr[shamt] == 0)
-    of 25: MULTU.guard(instr[shamt] == 0)
-    of 26: DIV.guard(instr[shamt] == 0)
-    of 27: DIVU.guard(instr[shamt] == 0)
-    of 32: ADD.guard(instr[shamt] == 0)
-    of 33: ADDU.guard(instr[shamt] == 0)
-    of 34: SUB.guard(instr[shamt] == 0)
-    of 35: SUBU.guard(instr[shamt] == 0)
-    of 36: AND.guard(instr[shamt] == 0)
-    of 37: OR.guard(instr[shamt] == 0)
-    of 38: XOR.guard(instr[shamt] == 0)
-    of 39: NOR.guard(instr[shamt] == 0)
-    of 42: SLT.guard(instr[shamt] == 0)
-    of 43: SLTU.guard(instr[shamt] == 0)
+    of 0: instr.ret SLL
+    of 2: instr.ret SRL
+    of 3: instr.ret SRA
+    of 4: instr.ret SLLV
+    of 6: instr.ret SRLV
+    of 7: instr.ret SRAV
+    of 8: instr.ret JR
+    of 9: instr.ret JALR
+    of 12: instr.ret SYSCALL
+    of 13: instr.ret BREAK
+    of 16: instr.ret MFHI
+    of 17: instr.ret MTHI
+    of 18: instr.ret MFLO
+    of 19: instr.ret MTLO
+    of 24: instr.ret MULT
+    of 25: instr.ret MULTU
+    of 26: instr.ret DIV
+    of 27: instr.ret DIVU
+    of 32: instr.ret ADD
+    of 33: instr.ret ADDU
+    of 34: instr.ret SUB
+    of 35: instr.ret SUBU
+    of 36: instr.ret AND
+    of 37: instr.ret OR
+    of 38: instr.ret XOR
+    of 39: instr.ret NOR
+    of 42: instr.ret SLT
+    of 43: instr.ret SLTU
     else: raise new UnknownInstructionError
   of 1:
     case int(instr[rt])
-    of 0: BLTZ
-    of 1: BGEZ
-    of 16: BLTZAL
-    of 17: BGEZAL
+    of 0: instr.ret BLTZ
+    of 1: instr.ret BGEZ
+    of 16: instr.ret BLTZAL
+    of 17: instr.ret BGEZAL
     else: raise new UnknownInstructionError
-  of 2: J
-  of 3: JAL
-  of 4: BEQ
-  of 5: BNE
-  of 6: BLEZ.guard(instr[rt] == r0)
-  of 7: BGTZ.guard(instr[rt] == r0)
-  of 8: ADDI
-  of 9: ADDIU
-  of 10: SUBI
-  of 11: SUBIU
-  of 12: ANDI
-  of 13: ORI
-  of 14: XORI
-  of 15: LUI
-  of 32: LB
-  of 33: LH
-  of 34: LWL
-  of 35: LW
-  of 36: LBU
-  of 37: LHU
-  of 38: LWR
-  of 40: SB
-  of 41: SH
-  of 42: SWL
-  of 43: SW
-  of 46: SWR
+  of 2: instr.ret J
+  of 3: instr.ret JAL
+  of 4: instr.ret BEQ
+  of 5: instr.ret BNE
+  of 6:
+    guard instr[rt] == r0
+    instr.ret BLEZ
+  of 7:
+    guard instr[rt] == r0
+    instr.ret BGTZ
+  of 8: instr.ret ADDI
+  of 9: instr.ret ADDIU
+  of 10: instr.ret SUBI
+  of 11: instr.ret SUBIU
+  of 12: instr.ret ANDI
+  of 13: instr.ret ORI
+  of 14: instr.ret XORI
+  of 15: instr.ret LUI
+  of 32: instr.ret LB
+  of 33: instr.ret LH
+  of 34: instr.ret LWL
+  of 35: instr.ret LW
+  of 36: instr.ret LBU
+  of 37: instr.ret LHU
+  of 38: instr.ret LWR
+  of 40: instr.ret SB
+  of 41: instr.ret SH
+  of 42: instr.ret SWL
+  of 43: instr.ret SW
+  of 46: instr.ret SWR
   of 16:
     case int(instr[rs])
-    of 0: MFC0
-    of 4: MTC0
-    of 16: RFE.guard(instr[copimm] == 16)
+    of 0: instr.ret MFC0
+    of 4: instr.ret MTC0
+    of 16:
+      guard instr[copimm] == 16
+      instr.ret RFE
     else: raise new UnknownInstructionError
   else: raise new UnknownInstructionError
 
 proc format*(instr: uint32): string =
+  ## Disassemble an instruction.
+
   let
     op = decode(instr)
     rd = instr[rd]
     rs = instr[rs]
     rt = instr[rt]
-    target = instr[target]
-    shamt = instr[shamt]
     imm = instr[imm]
+    target = instr[target]
+    whole = instr[whole]
+    shamt = instr[shamt]
 
   proc args(args: varargs[string, `$`]): string =
+    ## Convert an argument list to a string.
     result = $op
     for i, arg in args:
       if i != 0: result &= ","
       result &= " " & arg
 
-  let
-    r = () => args(rd, rs, rt)
-    rst = () => args(rs, rt)
-    rdd = () => args(rd)
-    rss = () => args(rs)
-    rds = () => args(rd, rs)
-    shift = () => args(rd, rt, shamt)
-    i = () => args(rt, rs, imm)
-    it = () => args(rt, imm)
-    iss = () => args(rs, imm)
-    j = () => args(target)
-    mem = () => args(rt, fmt"{imm}({rs})")
-    whole = () => args(fmt"$0x{instr and 0x3ffffff:x}")
-    mfc0 = () => args(rt, CoRegister(rd))
-    mtc0 = () => args(CoRegister(rd), rt)
-    none = () => $op
-
-  let
-    kinds: array[Opcode, () -> string] =
-      [ADD: r, ADDI: i, ADDU: r, ADDIU: i, SUB: r, SUBU: i, SUBI: r, SUBIU: i,
-       DIV: rst, DIVU: rst, MULT: rst, MULTU: rst, MFLO: rdd, MTLO: rss,
-       MFHI: rdd, MTHI: rss, SLT: r, SLTU: r, LUI: it,
-       AND: r, ANDI: i, OR: r, ORI: i, XOR: r, XORI: i, NOR: r,
-       SLL: shift, SLLV: r, SRA: shift, SRAV: r, SRL: shift, SRLV: r,
-       LW: mem, LB: mem, LBU: mem, LH: mem, LHU: mem, LWL: mem, LWR: mem,
-       SW: mem, SB: mem, SH: mem, SWL: mem, SWR: mem,
-       BEQ: i, BNE: i, BGEZ: iss, BGEZAL: iss, BGTZ: iss, BLEZ: iss,
-       BLTZ: iss, BLTZAL: iss,
-       J: j, JR: rss, JAL: j, JALR: rds,
-       SYSCALL: whole, BREAK: whole, MFC0: mfc0, MTC0: mtc0, RFE: none]
-
-  return kinds[op]()
+  return case opcodeType[op]
+  of Reg: args(rd, rs, rt)
+  of RegST: args(rs, rt)
+  of RegD: args(rd)
+  of RegS: args(rs)
+  of RegDS: args(rd, rs)
+  of Shift: args(rd, rt, shamt)
+  of Imm: args(rt, rs, imm)
+  of ImmT: args(rt, imm)
+  of ImmS: args(rs, imm)
+  of Mem: args(rt, fmt"{imm}({rs})")
+  of Jump: args(target)
+  of MFC: args(rt, CoRegister(rd))
+  of MTC: args(CoRegister(rd), rt)
+  of Whole: args(fmt"$0x{whole}")
+  of None: $op
 
 proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   var newPC = cpu.nextPC + 4
-  let op = decode(instr)
-  let rd = instr[rd]
-  let rs = instr[rs]
-  let rt = instr[rt]
-  let target = instr[target]
-  let shamt = instr[shamt]
-  let imm = instr[imm]
+  let
+    op = decode(instr)
+    rd = instr[rd]
+    rs = instr[rs]
+    rt = instr[rt]
+    shamt = instr[shamt]
+    imm = instr[imm]
+    target = instr[target]
+    whole = instr[whole]
 
   case op
   of OR: cpu[rd] = cpu[rs] or cpu[rt]
@@ -393,9 +431,9 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   of SUBU: cpu[rd] = cpu[rs] - cpu[rt]
   of SUBIU: cpu[rt] = cpu[rs] - imm.signExt
   of JR: newPC = cpu[rs]
-  of SLL: cpu[rd] = cpu[rs] shl shamt
-  of SRL: cpu[rd] = cpu[rs] shr shamt
-  of SRA: cpu[rd] = (cpu[rs].signed shr shamt).unsigned
+  of SLL: cpu[rd] = cpu[rt] shl shamt
+  of SRL: cpu[rd] = cpu[rt] shr shamt
+  of SRA: cpu[rd] = (cpu[rt].signed shr shamt).unsigned
   of LUI: cpu[rt] = imm.zeroExt shl 16
   of ORI: cpu[rt] = cpu[rs] or imm.zeroExt
   of ADDIU: cpu[rt] = cpu[rs] + imm.signExt
@@ -441,7 +479,7 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   of J: newPC = target.absTarget(cpu.nextPC)
   of JALR:
     newPC = cpu[rs]
-    cpu[Register(31)] = cpu.nextPC + 4
+    cpu[rd] = cpu.nextPC + 4
   of JAL:
     newPC = target.absTarget(cpu.nextPC)
     cpu[Register(31)] = cpu.nextPC + 4
@@ -460,18 +498,21 @@ proc step(cpu: var CPU) {.inline.} =
 var clocks = 0
 
 proc test() =
-#  var oldCPU: CPU
+  var oldCPU: CPU
   var cpu = initCPU
   while true:
-#    oldCPU = cpu
+    oldCPU = cpu
+    echo format(cpu.fetch)
     step(cpu)
     clocks += 1
-#    echo cpuDiff(oldCPU, cpu)
+    echo cpuDiff(oldCPU, cpu)
 
-for i in 0..<100:
-  try:
-    test()
-  except CatchableError:
-    discard
+test()
+
+# for i in 0..<100:
+#   try:
+#     test()
+#   except CatchableError:
+#     discard
 
 echo(clocks)
