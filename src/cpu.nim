@@ -277,14 +277,14 @@ proc decode*(instr: uint32): Opcode {.inline.} =
       if instr[shamt] == 0: return SLT
     of 43:
       if instr[shamt] == 0: return SLTU
-    else: raise unknownInstructionError
+    else: discard
   of 1:
     case int(instr[rt])
     of 0: return BLTZ
     of 1: return BGEZ
     of 16: return BLTZAL
     of 17: return BGEZAL
-    else: raise unknownInstructionError
+    else: discard
   of 2: return J
   of 3: return JAL
   of 4: return BEQ
@@ -317,8 +317,8 @@ proc decode*(instr: uint32): Opcode {.inline.} =
     case int(instr[rs])
     of 0: return MFC0
     of 4: return MTC0
-    else: raise unknownInstructionError
-  else: raise unknownInstructionError
+    else: discard
+  else: discard
 
   raise unknownInstructionError
 
