@@ -361,9 +361,6 @@ proc format(instr: uint32): string =
        J: j, JR: rss, JAL: j, JALR: rds,
        SYSCALL: whole, BREAK: whole, MFC0: mfc0, MTC0: mtc0]
 
-  for val in kinds:
-      assert val != ""
-
   return kinds[op]
 
 proc execute(cpu: var CPU, instr: uint32) =
