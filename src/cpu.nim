@@ -3,7 +3,7 @@
 import utils, common
 import memory
 import fusion/matching
-import std/[tables, bitops, strformat, setutils, sequtils]
+import std/[tables, bitops, strformat]
 
 # Processor state.
 
@@ -411,14 +411,8 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
     shamt = instr[shamt]
     imm = instr[imm]
     target = instr[target]
-    whole = instr[whole]
 
   case op
-  of OR: cpu[rd] = cpu[rs] or cpu[rt]
-  of AND: cpu[rd] = cpu[rs] and cpu[rt]
-  of SLTU: cpu[rd] = if cpu[rs] < cpu[rt]: 1 else: 0
-  of SLT: cpu[rd] = word(cpu[rs].signed < cpu[rt].signed)
-  of ADDU: cpu[rd] = cpu[rs] + cpu[rt]
   of ADD:
     let
       src1 = cpu[rs].signed
@@ -428,15 +422,6 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
     if src1 < 0 and src2 < low(int32) - src1:
       raise new ArithmeticOverflowError
     cpu[rd] = src1.unsigned + src2.unsigned
-  of SUBU: cpu[rd] = cpu[rs] - cpu[rt]
-  of SUBIU: cpu[rt] = cpu[rs] - imm.signExt
-  of JR: newPC = cpu[rs]
-  of SLL: cpu[rd] = cpu[rt] shl shamt
-  of SRL: cpu[rd] = cpu[rt] shr shamt
-  of SRA: cpu[rd] = (cpu[rt].signed shr shamt).unsigned
-  of LUI: cpu[rt] = imm.zeroExt shl 16
-  of ORI: cpu[rt] = cpu[rs] or imm.zeroExt
-  of ADDIU: cpu[rt] = cpu[rs] + imm.signExt
   of ADDI:
     let
       src1 = cpu[rs].signed
@@ -446,6 +431,9 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
     if src1 < 0 and src2 < low(int32) - src1:
       raise new ArithmeticOverflowError
     cpu[rt] = src1.unsigned + src2.unsigned
+  of ADDU: cpu[rd] = cpu[rs] + cpu[rt]
+  of ADDIU: cpu[rt] = cpu[rs] + imm.signExt
+  of SUB: raise new UnknownInstructionError
   of SUBI:
     let
       src1 = cpu[rs].signed
@@ -455,38 +443,73 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
     if src1 < 0 and src2 > high(int32) + src1:
       raise new ArithmeticOverflowError
     cpu[rt] = src1.unsigned - src2.unsigned
-  of SW: cpu.write[:uint32](cpu[rs] + imm.signExt, cpu[rt])
-  of LW: cpu[rt] = cpu.read[:uint32](cpu[rs] + imm.signExt)
-  of BNE:
-    if cpu[rs] != cpu[rt]:
-      newPC = cpu.nextPC + imm.signExt shl 2
-  of BEQ:
-    if cpu[rs] == cpu[rt]:
-      newPC = cpu.nextPC + imm.signExt shl 2
-  of BLEZ:
-    if cpu[rs].signed <= 0:
-      newPC = cpu.nextPC + imm.signExt shl 2
-  of BGTZ:
-    if cpu[rs].signed > 0:
-      newPC = cpu.nextPC + imm.signExt shl 2
-  of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
-  of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
+  of SUBU: cpu[rd] = cpu[rs] - cpu[rt]
+  of SUBIU: cpu[rt] = cpu[rs] - imm.signExt
+  of DIV: raise new UnknownInstructionError
+  of DIVU: raise new UnknownInstructionError
+  of MULT: raise new UnknownInstructionError
+  of MULTU: raise new UnknownInstructionError
+  of MFLO: raise new UnknownInstructionError
+  of MTLO: raise new UnknownInstructionError
+  of MFHI: raise new UnknownInstructionError
+  of MTHI: raise new UnknownInstructionError
+  of SLT: cpu[rd] = word(cpu[rs].signed < cpu[rt].signed)
+  of SLTU: cpu[rd] = if cpu[rs] < cpu[rt]: 1 else: 0
+  of LUI: cpu[rt] = imm.zeroExt shl 16
+  of AND: cpu[rd] = cpu[rs] and cpu[rt]
   of ANDI: cpu[rt] = cpu[rs] and imm.zeroExt
+  of OR: cpu[rd] = cpu[rs] or cpu[rt]
+  of ORI: cpu[rt] = cpu[rs] or imm.zeroExt
+  of XOR: cpu[rd] = cpu[rs] xor cpu[rt]
+  of XORI: cpu[rt] = cpu[rs] xor imm.zeroExt
+  of NOR: cpu[rd] = not (cpu[rs] or cpu[rt])
+  of SLL: cpu[rd] = cpu[rt] shl shamt
+  of SLLV: raise new UnknownInstructionError
+  of SRA: cpu[rd] = (cpu[rt].signed shr shamt).unsigned
+  of SRAV: raise new UnknownInstructionError
+  of SRL: cpu[rd] = cpu[rt] shr shamt
+  of SRLV: raise new UnknownInstructionError
+  of LW: cpu[rt] = cpu.read[:uint32](cpu[rs] + imm.signExt)
   of LB: cpu[rt] = int32(cpu.read[:int8](cpu[rs] + imm.signExt)).unsigned
   of LBU: cpu[rt] = uint32(cpu.read[:uint8](cpu[rs] + imm.signExt))
   of LH: cpu[rt] = int32(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned
   of LHU: cpu[rt] = uint32(cpu.read[:uint16](cpu[rs] + imm.signExt))
+  of LWL: raise new UnknownInstructionError
+  of LWR: raise new UnknownInstructionError
+  of SW: cpu.write[:uint32](cpu[rs] + imm.signExt, cpu[rt])
+  of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
+  of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
+  of SWL: raise new UnknownInstructionError
+  of SWR: raise new UnknownInstructionError
+  of BEQ:
+    if cpu[rs] == cpu[rt]:
+      newPC = cpu.nextPC + imm.signExt shl 2
+  of BNE:
+    if cpu[rs] != cpu[rt]:
+      newPC = cpu.nextPC + imm.signExt shl 2
+  of BGEZ: raise new UnknownInstructionError
+  of BGEZAL: raise new UnknownInstructionError
+  of BGTZ:
+    if cpu[rs].signed > 0:
+      newPC = cpu.nextPC + imm.signExt shl 2
+  of BLEZ:
+    if cpu[rs].signed <= 0:
+      newPC = cpu.nextPC + imm.signExt shl 2
+  of BLTZ: raise new UnknownInstructionError
+  of BLTZAL: raise new UnknownInstructionError
   of J: newPC = target.absTarget(cpu.nextPC)
-  of JALR:
-    newPC = cpu[rs]
-    cpu[rd] = cpu.nextPC + 4
+  of JR: newPC = cpu[rs]
   of JAL:
     newPC = target.absTarget(cpu.nextPC)
     cpu[Register(31)] = cpu.nextPC + 4
-  of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
+  of JALR:
+    newPC = cpu[rs]
+    cpu[rd] = cpu.nextPC + 4
+  of SYSCALL: raise new UnknownInstructionError
+  of BREAK: raise new UnknownInstructionError
   of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
-  else:
-    raise new UnknownInstructionError
+  of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
+  of RFE: raise new UnknownInstructionError
 
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
