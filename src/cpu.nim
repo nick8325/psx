@@ -3,9 +3,8 @@
 import utils, common
 from memory import nil
 import fusion/matching
-import std/[setutils, tables, options, bitops, strformat]
+import std/[tables, bitops, strformat]
 import sugar
-{.experimental: "caseStmtMacros".}
 
 # Processor state.
 
@@ -79,20 +78,20 @@ proc `[]=`*(cop0: var COP0, reg: CoRegister, val: uint32) =
   of CoRegister(14): discard
   else: raise new InvalidCOPError # TODO Is this the right exception?
 
-func cu(cop0: COP0): array[4, bool] =
+func cu(cop0: COP0): array[4, bool] {.used.} =
   ## Get value of COP0.CU.
   for i in 0..<4:
     result[i] = testBit(cop0.sr, 28+i)
 
-func bev(cop0: COP0): bool =
+func bev(cop0: COP0): bool {.used.} =
   ## Get value of COP0.BEV.
   testBit(cop0.sr, 22)
 
-func cm(cop0: COP0): bool =
+func cm(cop0: COP0): bool {.used.} =
   ## Get value of COP0.CM.
   testBit(cop0.sr, 19)
 
-func swc(cop0: COP0): bool =
+func swc(cop0: COP0): bool {.used.} =
   ## Get value of COP0.SR.
   testBit(cop0.sr, 17)
 
@@ -100,7 +99,7 @@ func isc(cop0: COP0): bool =
   ## Get value of COP0.ISC.
   testBit(cop0.sr, 16)
 
-func im(cop0: COP0): array[8, bool] =
+func im(cop0: COP0): array[8, bool] {.used.} =
   ## Get value of COP0.IM.
   for i in 0..<8:
     result[i] = testBit(cop0.sr, 8+i)
@@ -110,7 +109,7 @@ func ku(cop0: COP0): array[3, bool] =
   for i in 0..<3:
     result[i] = testBit(cop0.sr, 5-2*i)
 
-func ie(cop0: COP0): array[3, bool] =
+func ie(cop0: COP0): array[3, bool] {.used.} =
   ## Get value of COP0.IE.
   for i in 0..<3:
     result[i] = testBit(cop0.sr, 4-2*i)
@@ -170,7 +169,7 @@ func `$`*(cpu: CPU): string =
     result &= fmt "{i}={x:x} "
   result &= fmt "COP0.SR={cpu.cop0.sr:x}"
 
-func cpuDiff(cpu1: CPU, cpu2: CPU): string =
+func cpuDiff(cpu1: CPU, cpu2: CPU): string {.used.} =
   ## Show the difference between two CPU states.
   if cpu1.pc != cpu2.pc:
     result &= fmt "PC={cpu1.pc:x}->{cpu2.pc:x} "
@@ -315,7 +314,7 @@ proc decode*(instr: uint32): Opcode {.inline.} =
     else: raise new UnknownInstructionError
   else: raise new UnknownInstructionError
 
-proc format(instr: uint32): string =
+proc format*(instr: uint32): string =
   let
     op = decode(instr)
     rd = instr[rd]
@@ -333,15 +332,14 @@ proc format(instr: uint32): string =
 
   let
     r = () => args(rd, rs, rt)
-    s = () => args(rd, rs, shamt)
-    i = () => args(rt, rs, imm)
-    it = () => args(rt, imm)
-    iss = () => args(rs, imm)
     rst = () => args(rs, rt)
     rdd = () => args(rd)
     rss = () => args(rs)
     rds = () => args(rd, rs)
     shift = () => args(rd, rt, shamt)
+    i = () => args(rt, rs, imm)
+    it = () => args(rt, imm)
+    iss = () => args(rs, imm)
     j = () => args(target)
     mem = () => args(rt, fmt"{imm}({rs})")
     whole = () => args(fmt"$0x{instr and 0x3ffffff:x}")
