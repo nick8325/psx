@@ -199,7 +199,7 @@ type
     BEQ, BNE, BGEZ, BGEZAL, BGTZ, BLEZ, BLTZ, BLTZAL,
     J, JR, JAL, JALR,
     # System
-    SYSCALL, BREAK, MFC0, MTC0
+    SYSCALL, BREAK, MFC0, MTC0, RFE
   Immediate = distinct uint16   ## An immediate operand.
   Target = distinct range[0 .. (1 shl 26)-1] ## A 26-bit jump target.
 
@@ -231,6 +231,7 @@ const
   funct: BitSlice[int, word] = (pos: 0, width: 6)
   imm: BitSlice[Immediate, word] = (pos: 0, width: 16)
   target: BitSlice[Target, word] = (pos: 0, width: 26)
+  copimm: BitSlice[word, word] = (pos: 0, width: 25)
 
 proc decode*(instr: uint32): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
@@ -311,6 +312,7 @@ proc decode*(instr: uint32): Opcode {.inline.} =
     case int(instr[rs])
     of 0: MFC0
     of 4: MTC0
+    of 16: RFE.guard(instr[copimm] == 16)
     else: raise new UnknownInstructionError
   else: raise new UnknownInstructionError
 
@@ -345,6 +347,7 @@ proc format*(instr: uint32): string =
     whole = () => args(fmt"$0x{instr and 0x3ffffff:x}")
     mfc0 = () => args(rt, CoRegister(rd))
     mtc0 = () => args(CoRegister(rd), rt)
+    none = () => $op
 
   let
     kinds: array[Opcode, () -> string] =
@@ -358,7 +361,7 @@ proc format*(instr: uint32): string =
        BEQ: i, BNE: i, BGEZ: iss, BGEZAL: iss, BGTZ: iss, BLEZ: iss,
        BLTZ: iss, BLTZAL: iss,
        J: j, JR: rss, JAL: j, JALR: rds,
-       SYSCALL: whole, BREAK: whole, MFC0: mfc0, MTC0: mtc0]
+       SYSCALL: whole, BREAK: whole, MFC0: mfc0, MTC0: mtc0, RFE: none]
 
   return kinds[op]()
 
