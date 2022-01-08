@@ -27,23 +27,23 @@ func `<=`(r1, r2: Register): bool {. borrow .} # needed for iterator to work
 type
   COP0 = object
     ## COP0 status. All fields are COP0 registers.
-    sr: uint32
-    cause: uint32
-    epc: uint32
-    badvaddr: uint32
+    sr: word
+    cause: word
+    epc: word
+    badvaddr: word
     # We don't really use these ones, but they can be get and set.
     # Details from Nocash PSX.
-    bpc: uint32
-    bda: uint32
-    dcic: uint32
-    bdam: uint32
-    bpcm: uint32
+    bpc: word
+    bda: word
+    dcic: word
+    bdam: word
+    bpcm: word
 
 const initCOP0: COP0 =
   # Initial value of COP0.
   COP0(sr: 1 shl 22) # BEV=1
 
-proc `[]`(cop0: COP0, reg: CoRegister): uint32 =
+proc `[]`(cop0: COP0, reg: CoRegister): word =
   ## Access registers by number.
   case reg
   of CoRegister(3): cop0.bpc
@@ -58,7 +58,7 @@ proc `[]`(cop0: COP0, reg: CoRegister): uint32 =
   of CoRegister(15): 2 # PRId - value from Nocash PSX
   else: raise new InvalidCOPError # TODO Is this the right exception?
 
-proc `[]=`*(cop0: var COP0, reg: CoRegister, val: uint32) =
+proc `[]=`*(cop0: var COP0, reg: CoRegister, val: word) =
   ## Access registers by number.
   case reg
   of CoRegister(3): cop0.bpc = val
@@ -116,10 +116,10 @@ func ie(cop0: COP0): array[3, bool] {.used.} =
 type
   CPU = object
     ## CPU state.
-    pc: uint32 ## Current PC.
-    nextPC: uint32 ## Next PC. Used to implement branch delay slot.
-    registers: array[Register, uint32] ## Registers.
-    lo, hi: uint32 ## LO/HI registers.
+    pc: word ## Current PC.
+    nextPC: word ## Next PC. Used to implement branch delay slot.
+    registers: array[Register, word] ## Registers.
+    lo, hi: word ## LO/HI registers.
     cop0: COP0 ## COP0 registers.
 
 let initCPU: CPU = block:
@@ -127,16 +127,16 @@ let initCPU: CPU = block:
   const pc = 0xbfc00000u32
   CPU(pc: pc, nextPC: pc+4, cop0: initCOP0)
 
-func `[]`(cpu: CPU, reg: Register): uint32 =
+func `[]`(cpu: CPU, reg: Register): word =
   ## Access registers by number.
   cpu.registers[reg]
 
-func `[]=`(cpu: var CPU, reg: Register, val: uint32) =
+func `[]=`(cpu: var CPU, reg: Register, val: word) =
   ## Access registers by number. Takes care of ignoring writes to R0.
   cpu.registers[reg] = val
   cpu.registers[r0] = 0
 
-proc resolveAddress(cpu: CPU, address: uint32, code: bool): uint32 =
+proc resolveAddress(cpu: CPU, address: word, code: bool): word =
   ## Resolve a virtual address to a physical address,
   ## also checking access permissions.
   if address >= 0x80000000u32 and cpu.cop0.ku[0]:
@@ -151,15 +151,15 @@ proc resolveAddress(cpu: CPU, address: uint32, code: bool): uint32 =
 
   return address # memory.nim does memory mirroring
 
-proc fetch*(cpu: CPU): uint32 =
+proc fetch*(cpu: CPU): word =
   ## Fetch the next instruction.
   addressSpace.fetch(cpu.resolveAddress(cpu.pc, true))
 
-proc read*[T](cpu: CPU, address: uint32): T =
+proc read*[T](cpu: CPU, address: word): T =
   ## Read from a given virtual address.
   addressSpace.read[:T](cpu.resolveAddress(address, false))
 
-proc write*[T](cpu: CPU, address: uint32, val: T) =
+proc write*[T](cpu: CPU, address: word, val: T) =
   ## Write to a given virtual address.
   addressSpace.write[:T](cpu.resolveAddress(address, false), val)
 
@@ -209,16 +209,16 @@ func `$`*(x: Immediate): string =
 func `$`*(x: Target): string =
   fmt"$0x{word(x):x}"
 
-func absTarget(target: Target, pc: uint32): uint32 =
+func absTarget(target: Target, pc: word): word =
   ## Resolve a target address.
-  (pc and 0xf000_0000u32) or (uint32(target) shl 2)
+  (pc and 0xf000_0000u32) or (word(target) shl 2)
 
-func zeroExt(x: Immediate): uint32 =
-  ## Zero extend an immediate to a uint32.
+func zeroExt(x: Immediate): word =
+  ## Zero extend an immediate to a word.
   uint32(uint16(x))
 
-func signExt(x: Immediate): uint32 =
-  ## Sign extend an immediate to a uint32.
+func signExt(x: Immediate): word =
+  ## Sign extend an immediate to a word.
   cast[uint32](int32(cast[int16](uint16(x))))
 
 type
@@ -265,7 +265,7 @@ const
   copimm: BitSlice[word, word] = (pos: 0, width: 25)
   whole: BitSlice[word, word] = (pos: 0, width: 26)
 
-proc decode*(instr: uint32): Opcode {.inline.} =
+proc decode*(instr: word): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
 
   proc guard(x: bool) {.inline.} =
@@ -365,7 +365,7 @@ proc decode*(instr: uint32): Opcode {.inline.} =
     else: raise new UnknownInstructionError
   else: raise new UnknownInstructionError
 
-proc format*(instr: uint32): string =
+proc format*(instr: word): string =
   ## Disassemble an instruction.
 
   let
@@ -403,20 +403,20 @@ proc format*(instr: uint32): string =
   of None: $op
 
 proc signedAdd(x, y: word): word =
-  if x.signed > 0 and y.signed > high(int32) - x.signed:
+  if x.signed > 0 and y.signed > high(iword) - x.signed:
     raise new ArithmeticOverflowError
-  if x.signed < 0 and y.signed < low(int32) - x.signed:
+  if x.signed < 0 and y.signed < low(iword) - x.signed:
     raise new ArithmeticOverflowError
   return x + y
 
 proc signedSub(x, y: word): word =
-  if x.signed > 0 and y.signed < low(int32) + x.signed:
+  if x.signed > 0 and y.signed < low(iword) + x.signed:
     raise new ArithmeticOverflowError
-  if x.signed < 0 and y.signed > high(int32) + x.signed:
+  if x.signed < 0 and y.signed > high(iword) + x.signed:
     raise new ArithmeticOverflowError
   return x - y
 
-proc execute(cpu: var CPU, instr: uint32) {.inline.} =
+proc execute(cpu: var CPU, instr: word) {.inline.} =
   var newPC = cpu.nextPC + 4
   let
     op = decode(instr)
@@ -511,14 +511,14 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   of SRAV: cpu[rd] = (cpu[rt].signed shr (cpu[rs] and 0x1f)).unsigned
   of SRL: cpu[rd] = cpu[rt] shr shamt
   of SRLV: cpu[rd] = cpu[rt] shr (cpu[rs] and 0x1f)
-  of LW: cpu[rt] = cpu.read[:uint32](cpu[rs] + imm.signExt)
-  of LB: cpu[rt] = int32(cpu.read[:int8](cpu[rs] + imm.signExt)).unsigned
+  of LW: cpu[rt] = cpu.read[:word](cpu[rs] + imm.signExt)
+  of LB: cpu[rt] = iword(cpu.read[:int8](cpu[rs] + imm.signExt)).unsigned
   of LBU: cpu[rt] = cpu.read[:uint8](cpu[rs] + imm.signExt)
-  of LH: cpu[rt] = int32(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned
+  of LH: cpu[rt] = iword(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned
   of LHU: cpu[rt] = cpu.read[:uint16](cpu[rs] + imm.signExt)
   of LWL: raise new UnknownInstructionError
   of LWR: raise new UnknownInstructionError
-  of SW: cpu.write[:uint32](cpu[rs] + imm.signExt, cpu[rt])
+  of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt])
   of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
   of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
   of SWL: raise new UnknownInstructionError
