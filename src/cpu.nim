@@ -597,20 +597,19 @@ proc step(cpu: var CPU) {.inline.} =
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(cpu.fetch)
   except MachineError as error:
-    echo repr(error)
     cpu.handleException(error)
 
 var clocks = 0
 
 proc test() =
-  var oldCPU: CPU
+#  var oldCPU: CPU
   var cpu = initCPU
   while true:
-    oldCPU = cpu
-    echo format(cpu.fetch)
+#    oldCPU = cpu
+#    echo format(cpu.fetch)
     step(cpu)
     clocks += 1
-    echo cpuDiff(oldCPU, cpu)
+#    echo cpuDiff(oldCPU, cpu)
 
 test()
 

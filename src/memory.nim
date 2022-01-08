@@ -104,13 +104,19 @@ proc mapRegion*(memory: var Memory, arr: var openArray[byte], address: word, wri
 proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
   ## Execute I/O handlers for a write (which must be to I/O space).
 
+  # Implementation idea: always start by calling 32-bit handler, then
+  # split into smaller pieces as needed.
+  # In the helper procs handleIO16/32, 'address' doesn't have to be
+  # 16/32-bit aligned, but it does have to be aligned wrt 'size'.
+  # So all direct calls to ioHandler16/32 mask off the lower bits first.
+
   proc handleIO8(memory: Memory, address: word, kind: IOKind): bool {.inline.} =
     memory.ioHandler8 != nil and memory.ioHandler8(address, kind)
 
   proc handleIO16(memory: Memory, address: word, size: static int, kind: IOKind): bool {.inline.} =
     # Try a 16-bit write first
-    if address mod 2 == 0 and memory.ioHandler16 != nil:
-      if memory.ioHandler16(address, kind): return true
+    if memory.ioHandler16 != nil:
+      if memory.ioHandler16(address and not 1u32, kind): return true
 
     # Split into one or two 8-bit writes, depending on size
     if size == 2:
@@ -120,8 +126,8 @@ proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
 
   proc handleIO32(memory: Memory, address: word, size: static int, kind: IOKind): bool {.inline.} =
     # Try a 32-bit write first
-    if address mod 4 == 0 and memory.ioHandler32 != nil:
-      if memory.ioHandler32(address, kind): return true
+    if memory.ioHandler32 != nil:
+      if memory.ioHandler32(address and not 3u32, kind): return true
 
     # Split into one or two 16-bit writes, depending on size
     if size == 4:

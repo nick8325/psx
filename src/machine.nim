@@ -2,6 +2,7 @@
 
 import common
 import memory
+import std/strformat
 
 var
   addressSpace*: Memory ## The PSX address space.
@@ -43,3 +44,33 @@ addressSpace.rawWrite[:word](0x1f80101cu32, 0x00070777u32, io)
 addressSpace.rawWrite[:word](0x1f801020u32, 0x00031125u32, io)
 addressSpace.rawWrite[:word](0x1f801060u32, 0x00000b88u32, io)
 addressSpace.rawWrite[:word](0xfffe0130u32, 0x0001e988u32, io)
+# TODO this is the initial value of GPUSTAT
+addressSpace.rawWrite[:word](0x1f801814u32, 0x14802000u32, io)
+
+# I/O handlers
+proc ioHandler8(address: word, kind: IOKind): bool =
+  return false
+
+proc ioHandler16(address: word, kind: IOKind): bool =
+  return false
+
+proc ioHandler32(address: word, kind: IOKind): bool =
+  case address
+  of 0x1f801000u32 .. 0x1f801024u32, 0x1f801060:
+    # Memory control (TODO)
+    return true
+  of 0x1f801c00u32 .. 0x1f801ffcu32:
+    # SPU (TODO)
+    return true
+  of 0x1f801100u32 .. 0x1f801128u32:
+    # Timers (TODO)
+    return true
+  of 0x1f801070u32 .. 0x1f801074u32:
+    # Interrupt status/mask (TODO)
+    return true
+  else:
+    return false
+
+addressSpace.ioHandler8 = ioHandler8
+addressSpace.ioHandler16 = ioHandler16
+addressSpace.ioHandler32 = ioHandler32
