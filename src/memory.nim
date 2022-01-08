@@ -56,9 +56,9 @@ type
     # Returns true if the I/O was handled.
     # For each address, only one of ioHandler8/16/32 needs to handle it -
     # the main I/O handler takes care of splitting up requests.
-    ioHandler8*: proc(address: word, kind: IOKind): bool
-    ioHandler16*: proc(address: word, kind: IOKind): bool
-    ioHandler32*: proc(address: word, kind: IOKind): bool
+    ioHandler8*: proc(address: word, value: var uint8, kind: IOKind): bool
+    ioHandler16*: proc(address: word, value: var uint16, kind: IOKind): bool
+    ioHandler32*: proc(address: word, value: var uint32, kind: IOKind): bool
 
 type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool] ## \
@@ -111,12 +111,15 @@ proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
   # So all direct calls to ioHandler16/32 mask off the lower bits first.
 
   proc handleIO8(memory: Memory, address: word, kind: IOKind): bool {.inline.} =
-    memory.ioHandler8 != nil and memory.ioHandler8(address, kind)
+    # Doesn't matter what 'kind' we pass in since the address must resolve
+    let pointer = memory.resolve[:uint8](address, Fetch).pointer
+    memory.ioHandler8 != nil and memory.ioHandler8(address, pointer[], kind)
 
   proc handleIO16(memory: Memory, address: word, size: static int, kind: IOKind): bool {.inline.} =
     # Try a 16-bit write first
     if memory.ioHandler16 != nil:
-      if memory.ioHandler16(address and not 1u32, kind): return true
+      let pointer = memory.resolve[:uint16](address and not 1u32, Fetch).pointer
+      if memory.ioHandler16(address and not 1u32, pointer[], kind): return true
 
     # Split into one or two 8-bit writes, depending on size
     if size == 2:
@@ -127,7 +130,8 @@ proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
   proc handleIO32(memory: Memory, address: word, size: static int, kind: IOKind): bool {.inline.} =
     # Try a 32-bit write first
     if memory.ioHandler32 != nil:
-      if memory.ioHandler32(address and not 3u32, kind): return true
+      let pointer = memory.resolve[:uint32](address and not 3u32, Fetch).pointer
+      if memory.ioHandler32(address and not 3u32, pointer[], kind): return true
 
     # Split into one or two 16-bit writes, depending on size
     if size == 4:
@@ -160,8 +164,8 @@ proc read*[T](memory: Memory, address: word): T {.inline.} =
   ## Raises a MachineError if the address is invalid.
 
   var io: bool
-  result = rawRead[T](memory, address, io)
   if io: memory.handleIO(address, T.sizeof, Read)
+  result = rawRead[T](memory, address, io)
 
 proc rawWrite*[T](memory: Memory, address: word, value: T, io: var bool): void {.inline.} =
   ## Write data to memory, without invoking any I/O handlers.

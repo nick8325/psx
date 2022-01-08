@@ -56,3 +56,19 @@ func signed*(x: uint32): int32 {.inline.} =
 func unsigned*(x: int32): uint32 {.inline.} =
   ## Convert signed to unsigned.
   cast[uint32](x)
+
+type
+  ## An integer where only some bits are allowed to be freely set
+  ## 'mask' = writable bits
+  Masked*[T] = object
+    value*: T
+    mask*: T
+
+func `$`*[T](x: Masked[T]): string {.inline.} =
+  $x.value
+
+proc update*[T](x: var Masked[T], value: T) {.inline.} =
+  x.value = (x.value and not x.mask) or (value and x.mask)
+
+converter value*[T](x: Masked[T]): T {.inline.} =
+  x.value

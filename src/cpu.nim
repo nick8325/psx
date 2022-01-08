@@ -51,20 +51,35 @@ const
   isc: BitSlice[bool, word] = bit 16
   im: array[8, BitSlice[bool, word]] =
     [bit 8, bit 9, bit 10, bit 11, bit 12, bit 13, bit 14, bit 15]
+  imAll: BitSlice[word, word] = (pos: 8, width: 8)
   ku: array[3, BitSlice[bool, word]] =
     [bit 1, bit 3, bit 5]
   ie: array[3, BitSlice[bool, word]] =
     [bit 0, bit 2, bit 4]
 
+  # Read-write SR bits
   writableSRBits: word =
     block:
       var result: word = 0
-      # Note: CM is not user-settable (and not set at all currently)
-      for arr in [@cu, @[bev], @[swc], @[isc], @im, @ku, @ie]:
+      # Note: CM is not user-settable (and not set at all currently).
+      # Only the first two bits of IM are user-settable.
+      for arr in [@cu, @[bev, swc, isc, im[0], im[1]], @ku, @ie]:
         for x in arr:
           result = result or x.toMask
       result
+
+  # Read-only SR bits (writes to them are ignored)
   fixedSRBits = not writableSRBits
+
+  # Read-only SR bits which should print a warning on write
+  forbiddenSRBits: word =
+    block:
+      var result: word = fixedSRBits
+      # Writing to CM or IM is OK, just ignored
+      for arr in [@[cm], @im]:
+        for x in arr:
+          result = result and not x.toMask
+      result
 
 proc `[]`(cop0: COP0, reg: CoRegister): word =
   ## Access registers by number.
@@ -93,9 +108,9 @@ proc `[]=`*(cop0: var COP0, reg: CoRegister, val: word) =
   of CoRegister(9): cop0.bdam = val
   of CoRegister(11): cop0.bpcm = val
   of CoRegister(12):
-    let conflicting = (val and fixedSRBits) xor (cop0.sr and fixedSRBits)
+    let conflicting = (val and forbiddenSRBits) xor (cop0.sr and forbiddenSRBits)
     if conflicting != 0:
-      echo fmt"Ignoring writes to read-only SR bits: {conflicting:x}"
+      echo fmt"Ignoring writes to forbidden SR bits: {conflicting:x}"
     cop0.sr = (cop0.sr and fixedSRBits) or (val and writableSRBits)
   of CoRegister(13): discard
   of CoRegister(14): discard
@@ -600,6 +615,11 @@ proc handleException(cpu: var CPU, error: MachineError) =
 
 proc step(cpu: var CPU) {.inline.} =
   try:
+    # Check for IRQs first.
+    cpu.cop0.sr[im[2]] = (irqs.stat != 0)
+    if cpu.cop0.sr[ie[0]] and cpu.cop0.sr[imAll] != 0:
+      raise MachineError(error: Interrupt)
+
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(cpu.fetch)
   except MachineError as error:
