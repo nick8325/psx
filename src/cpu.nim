@@ -182,9 +182,9 @@ type
   Opcode* {.pure.} = enum
     ## An instruction opcode.
     # Arithmetic
-    ADD, ADDI, ADDU, ADDIU, SUB, SUBU, SUBI, SUBIU,
+    ADD, ADDI, ADDU, ADDIU, SUB, SUBU,
     DIV, DIVU, MULT, MULTU, MFLO, MTLO, MFHI, MTHI,
-    SLT, SLTU, LUI,
+    SLT, SLTI, SLTU, SLTIU, LUI,
     # Logic
     AND, ANDI, OR, ORI, XOR, XORI, NOR,
     # Shifts
@@ -239,9 +239,9 @@ type
 
 const opcodeType: array[Opcode, OpcodeType] =
   # Type of each opcode
-  [ADD: Reg, ADDI: Imm, ADDU: Reg, ADDIU: Imm, SUB: Reg, SUBU: Imm, SUBI: Reg,
-   SUBIU: Imm, DIV: RegST, DIVU: RegST, MULT: RegST, MULTU: RegST, MFLO: RegD,
-   MTLO: RegS, MFHI: RegD, MTHI: RegS, SLT: Reg, SLTU: Reg, LUI: ImmT, AND: Reg,
+  [ADD: Reg, ADDI: Imm, ADDU: Reg, ADDIU: Imm, SUB: Reg, SUBU: Imm, DIV: RegST,
+   DIVU: RegST, MULT: RegST, MULTU: RegST, MFLO: RegD, MTLO: RegS, MFHI: RegD,
+   MTHI: RegS, SLT: Reg, SLTI: Imm, SLTU: Reg, SLTIU: Imm, LUI: ImmT, AND: Reg,
    ANDI: Imm, OR: Reg, ORI: Imm, XOR: Reg, XORI: Imm, NOR: Reg, SLL: Shift,
    SLLV: Reg, SRA: Shift, SRAV: Reg, SRL: Shift, SRLV: Reg, LW: Mem, LB: Mem,
    LBU: Mem, LH: Mem, LHU: Mem, LWL: Mem, LWR: Mem, SW: Mem, SB: Mem, SH: Mem,
@@ -334,8 +334,8 @@ proc decode*(instr: word): Opcode {.inline.} =
     instr.ret BGTZ
   of 8: instr.ret ADDI
   of 9: instr.ret ADDIU
-  of 10: instr.ret SUBI
-  of 11: instr.ret SUBIU
+  of 10: instr.ret SLTI
+  of 11: instr.ret SLTIU
   of 12: instr.ret ANDI
   of 13: instr.ret ORI
   of 14: instr.ret XORI
@@ -444,9 +444,7 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of ADDU: cpu[rd] = cpu[rs] + cpu[rt]
   of ADDIU: cpu[rt] = cpu[rs] + imm.signExt
   of SUB: cpu[rd] = signedSub(cpu[rs], cpu[rt])
-  of SUBI: cpu[rt] = signedSub(cpu[rs], imm.signExt)
   of SUBU: cpu[rd] = cpu[rs] - cpu[rt]
-  of SUBIU: cpu[rt] = cpu[rs] - imm.signExt
   of DIV:
     let
       x = cpu[rs].signed
@@ -494,7 +492,9 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of MFHI: cpu[rd] = cpu.hi
   of MTHI: cpu.hi = cpu[rs]
   of SLT: cpu[rd] = word(cpu[rs].signed < cpu[rt].signed)
+  of SLTI: cpu[rt] = word(cpu[rs].signed < imm.signExt.signed)
   of SLTU: cpu[rd] = word(cpu[rs] < cpu[rt])
+  of SLTIU: cpu[rt] = word(cpu[rs] < imm.signExt)
   of LUI: cpu[rt] = imm.zeroExt shl 16
   of AND: cpu[rd] = cpu[rs] and cpu[rt]
   of ANDI: cpu[rt] = cpu[rs] and imm.zeroExt
