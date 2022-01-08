@@ -103,11 +103,17 @@ proc `[]=`*(cop0: var COP0, reg: CoRegister, val: word) =
     echo fmt"Ignoring read to unknown COP register {reg}"
 
 proc popKUIE(cop0: var COP0) =
-  # Nocash PSX: RFE leaves IEo/KUo unchanged, hence 0xf rather than 0x3f
-  cop0.sr = (cop0.sr and not 0xfu32) or ((cop0.sr shr 2) and 0xf)
+  # Nocash PSX: RFE leaves IEo/KUo unchanged
+  for i in 0..1:
+    cop0.sr[ku[i]] = cop0.sr[ku[i+1]]
+    cop0.sr[ie[i]] = cop0.sr[ie[i+1]]
 
 proc pushKUIE(cop0: var COP0) =
-  cop0.sr = (cop0.sr and not 0x3fu32) or ((cop0.sr shl 2) and 0x3f)
+  for i in 0..1:
+    cop0.sr[ku[i+1]] = cop0.sr[ku[i]]
+    cop0.sr[ie[i+1]] = cop0.sr[ie[i]]
+  cop0.sr[ku[0]] = false
+  cop0.sr[ie[0]] = false
 
 type
   CPU = object

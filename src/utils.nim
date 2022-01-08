@@ -25,6 +25,11 @@ func toSlice*[T, U](slice: BitSlice[T, U]): Slice[int] {.inline.} =
 func toMask*[T, U](slice: BitSlice[T, U]): U {.inline.} =
   slice.toSlice.toMask[:U]
 
+proc `[]=`*[T, U](value: var U, slice: BitSlice[T, U], part: T) {.inline.} =
+  let mask = slice.toMask
+  value.clearMask mask
+  value.setMask(mask and cast[U](part))
+
 type
   ## A pattern that matches a given part of a word against a given value
   Pattern*[T: SomeInteger] = tuple[mask: T, value: T]
