@@ -401,6 +401,20 @@ proc format*(instr: uint32): string =
   of Whole: args(fmt"$0x{whole}")
   of None: $op
 
+proc signedAdd(x, y: word): word =
+  if x.signed > 0 and y.signed > high(int32) - x.signed:
+    raise new ArithmeticOverflowError
+  if x.signed < 0 and y.signed < low(int32) - x.signed:
+    raise new ArithmeticOverflowError
+  return x + y
+
+proc signedSub(x, y: word): word =
+  if x.signed > 0 and y.signed < low(int32) + x.signed:
+    raise new ArithmeticOverflowError
+  if x.signed < 0 and y.signed > high(int32) + x.signed:
+    raise new ArithmeticOverflowError
+  return x - y
+
 proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   var newPC = cpu.nextPC + 4
   let
@@ -412,37 +426,26 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
     imm = instr[imm]
     target = instr[target]
 
+  template branchIf(x: bool) =
+    if x:
+      newPC = cpu.nextPC + imm.signExt shl 2
+
+  template link(r: Register) =
+    cpu[r] = cpu.nextPC + 4
+
+  template link() =
+    link(Register(31))
+
+  template absJump() =
+    newPC = target.absTarget(cpu.nextPC)
+
   case op
-  of ADD:
-    let
-      src1 = cpu[rs].signed
-      src2 = cpu[rt].signed
-    if src1 > 0 and src2 > high(int32) - src1:
-      raise new ArithmeticOverflowError
-    if src1 < 0 and src2 < low(int32) - src1:
-      raise new ArithmeticOverflowError
-    cpu[rd] = src1.unsigned + src2.unsigned
-  of ADDI:
-    let
-      src1 = cpu[rs].signed
-      src2 = imm.signExt.signed
-    if src1 > 0 and src2 > high(int32) - src1:
-      raise new ArithmeticOverflowError
-    if src1 < 0 and src2 < low(int32) - src1:
-      raise new ArithmeticOverflowError
-    cpu[rt] = src1.unsigned + src2.unsigned
+  of ADD: cpu[rd] = signedAdd(cpu[rs], cpu[rt])
+  of ADDI: cpu[rt] = signedAdd(cpu[rs], imm.signExt)
   of ADDU: cpu[rd] = cpu[rs] + cpu[rt]
   of ADDIU: cpu[rt] = cpu[rs] + imm.signExt
-  of SUB: raise new UnknownInstructionError
-  of SUBI:
-    let
-      src1 = cpu[rs].signed
-      src2 = imm.signExt.signed
-    if src1 > 0 and src2 < low(int32) + src1:
-      raise new ArithmeticOverflowError
-    if src1 < 0 and src2 > high(int32) + src1:
-      raise new ArithmeticOverflowError
-    cpu[rt] = src1.unsigned - src2.unsigned
+  of SUB: cpu[rd] = signedSub(cpu[rs], cpu[rt])
+  of SUBI: cpu[rt] = signedSub(cpu[rs], imm.signExt)
   of SUBU: cpu[rd] = cpu[rs] - cpu[rt]
   of SUBIU: cpu[rt] = cpu[rs] - imm.signExt
   of DIV: raise new UnknownInstructionError
@@ -454,7 +457,7 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   of MFHI: raise new UnknownInstructionError
   of MTHI: raise new UnknownInstructionError
   of SLT: cpu[rd] = word(cpu[rs].signed < cpu[rt].signed)
-  of SLTU: cpu[rd] = if cpu[rs] < cpu[rt]: 1 else: 0
+  of SLTU: cpu[rd] = word(cpu[rs] < cpu[rt])
   of LUI: cpu[rt] = imm.zeroExt shl 16
   of AND: cpu[rd] = cpu[rs] and cpu[rt]
   of ANDI: cpu[rt] = cpu[rs] and imm.zeroExt
@@ -464,16 +467,16 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   of XORI: cpu[rt] = cpu[rs] xor imm.zeroExt
   of NOR: cpu[rd] = not (cpu[rs] or cpu[rt])
   of SLL: cpu[rd] = cpu[rt] shl shamt
-  of SLLV: raise new UnknownInstructionError
+  of SLLV: cpu[rd] = cpu[rt] shl (cpu[rs] and 0x1f)
   of SRA: cpu[rd] = (cpu[rt].signed shr shamt).unsigned
-  of SRAV: raise new UnknownInstructionError
+  of SRAV: cpu[rd] = (cpu[rt].signed shr (cpu[rs] and 0x1f)).unsigned
   of SRL: cpu[rd] = cpu[rt] shr shamt
-  of SRLV: raise new UnknownInstructionError
+  of SRLV: cpu[rd] = cpu[rt] shr (cpu[rs] and 0x1f)
   of LW: cpu[rt] = cpu.read[:uint32](cpu[rs] + imm.signExt)
   of LB: cpu[rt] = int32(cpu.read[:int8](cpu[rs] + imm.signExt)).unsigned
-  of LBU: cpu[rt] = uint32(cpu.read[:uint8](cpu[rs] + imm.signExt))
+  of LBU: cpu[rt] = cpu.read[:uint8](cpu[rs] + imm.signExt)
   of LH: cpu[rt] = int32(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned
-  of LHU: cpu[rt] = uint32(cpu.read[:uint16](cpu[rs] + imm.signExt))
+  of LHU: cpu[rt] = cpu.read[:uint16](cpu[rs] + imm.signExt)
   of LWL: raise new UnknownInstructionError
   of LWR: raise new UnknownInstructionError
   of SW: cpu.write[:uint32](cpu[rs] + imm.signExt, cpu[rt])
@@ -481,30 +484,18 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
   of SWL: raise new UnknownInstructionError
   of SWR: raise new UnknownInstructionError
-  of BEQ:
-    if cpu[rs] == cpu[rt]:
-      newPC = cpu.nextPC + imm.signExt shl 2
-  of BNE:
-    if cpu[rs] != cpu[rt]:
-      newPC = cpu.nextPC + imm.signExt shl 2
-  of BGEZ: raise new UnknownInstructionError
-  of BGEZAL: raise new UnknownInstructionError
-  of BGTZ:
-    if cpu[rs].signed > 0:
-      newPC = cpu.nextPC + imm.signExt shl 2
-  of BLEZ:
-    if cpu[rs].signed <= 0:
-      newPC = cpu.nextPC + imm.signExt shl 2
-  of BLTZ: raise new UnknownInstructionError
-  of BLTZAL: raise new UnknownInstructionError
-  of J: newPC = target.absTarget(cpu.nextPC)
+  of BEQ: branchIf(cpu[rs] == cpu[rt])
+  of BNE: branchIf(cpu[rs] != cpu[rt])
+  of BGEZ: branchIf(cpu[rs].signed >= 0)
+  of BGEZAL: branchIf(cpu[rs].signed > 0); link()
+  of BGTZ: branchIf(cpu[rs].signed > 0)
+  of BLEZ: branchIf(cpu[rs].signed <= 0)
+  of BLTZ: branchIf(cpu[rs].signed < 0)
+  of BLTZAL: branchIf(cpu[rs].signed < 0); link()
+  of J: absJump()
   of JR: newPC = cpu[rs]
-  of JAL:
-    newPC = target.absTarget(cpu.nextPC)
-    cpu[Register(31)] = cpu.nextPC + 4
-  of JALR:
-    newPC = cpu[rs]
-    cpu[rd] = cpu.nextPC + 4
+  of JAL: absJump; link()
+  of JALR: newPC = cpu[rs]; link(rd)
   of SYSCALL: raise new UnknownInstructionError
   of BREAK: raise new UnknownInstructionError
   of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
