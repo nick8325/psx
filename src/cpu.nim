@@ -239,7 +239,7 @@ type
 
 const opcodeType: array[Opcode, OpcodeType] =
   # Type of each opcode
-  [ADD: Reg, ADDI: Imm, ADDU: Reg, ADDIU: Imm, SUB: Reg, SUBU: Imm, DIV: RegST,
+  [ADD: Reg, ADDI: Imm, ADDU: Reg, ADDIU: Imm, SUB: Reg, SUBU: Reg, DIV: RegST,
    DIVU: RegST, MULT: RegST, MULTU: RegST, MFLO: RegD, MTLO: RegS, MFHI: RegD,
    MTHI: RegS, SLT: Reg, SLTI: Imm, SLTU: Reg, SLTIU: Imm, LUI: ImmT, AND: Reg,
    ANDI: Imm, OR: Reg, ORI: Imm, XOR: Reg, XORI: Imm, NOR: Reg, SLL: Shift,
