@@ -1,7 +1,7 @@
 ## The PSX virtual address space.
 
 import common, utils
-import std/strformat
+import std/[strformat, strutils]
 
 type
   # We represent the address space as a page table consisting of an array of
@@ -101,6 +101,29 @@ proc mapRegion*(memory: var Memory, arr: var openArray[byte], address: word, wri
     mapRegion(memory, arr, address + 0x80000000u32, writable, io)
     mapRegion(memory, arr, address + 0xa0000000u32, writable, io)
 
+proc fetch*(memory: Memory, address: word): word {.inline.} =
+  ## Fetch a word of memory as an instruction.
+  ## Raises a MachineError if the address is invalid.
+
+  memory.resolve[:word](address, Fetch).pointer[]
+
+proc rawRead*[T](memory: Memory, address: word, io: var bool): T {.inline.} =
+  ## Read data from memory, without invoking any I/O handlers.
+  ## Raises a MachineError if the address is invalid.
+
+  let resolved = memory.resolve[:T](address, Load)
+  io = resolved.io
+  resolved.pointer[]
+
+proc rawWrite*[T](memory: Memory, address: word, value: T, io: var bool): void {.inline.} =
+  ## Write data to memory, without invoking any I/O handlers.
+  ## Raises a MachineError if the address is invalid.
+
+  let resolved = memory.resolve[:T](address, Store)
+  if resolved.writable:
+    resolved.pointer[] = value
+  io = resolved.io
+
 proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
   ## Execute I/O handlers for a write (which must be to I/O space).
 
@@ -141,23 +164,15 @@ proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
       return memory.handleIO16(address, size, kind)
 
   if not handleIO32(memory, address, size, kind):
-    case kind
-    of Read: echo fmt"Unknown I/O read of size {size} from {address:x}"
-    of Write: echo fmt"Unknown I/O write of size {size} to {address:x}"
-
-proc fetch*(memory: Memory, address: word): word {.inline.} =
-  ## Fetch a word of memory as an instruction.
-  ## Raises a MachineError if the address is invalid.
-
-  memory.resolve[:word](address, Fetch).pointer[]
-
-proc rawRead*[T](memory: Memory, address: word, io: var bool): T {.inline.} =
-  ## Read data from memory, without invoking any I/O handlers.
-  ## Raises a MachineError if the address is invalid.
-
-  let resolved = memory.resolve[:T](address, Load)
-  io = resolved.io
-  resolved.pointer[]
+    let value = block:
+      var io: bool
+      case size
+      of 1: word(rawRead[uint8](memory, address, io))
+      of 2: word(rawRead[uint16](memory, address, io))
+      of 4: word(rawRead[uint32](memory, address, io))
+      else: raise new AssertionDefect
+    let kindStr = toLowerAscii $kind
+    echo fmt"Unknown I/O {kindStr}, {size} bytes: {address:x} = {value:x}"
 
 proc read*[T](memory: Memory, address: word): T {.inline.} =
   ## Read data from memory.
@@ -166,15 +181,6 @@ proc read*[T](memory: Memory, address: word): T {.inline.} =
   var io: bool
   if io: memory.handleIO(address, T.sizeof, Read)
   result = rawRead[T](memory, address, io)
-
-proc rawWrite*[T](memory: Memory, address: word, value: T, io: var bool): void {.inline.} =
-  ## Write data to memory, without invoking any I/O handlers.
-  ## Raises a MachineError if the address is invalid.
-
-  let resolved = memory.resolve[:T](address, Store)
-  if resolved.writable:
-    resolved.pointer[] = value
-  io = resolved.io
 
 proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
   ## Write data to memory.
