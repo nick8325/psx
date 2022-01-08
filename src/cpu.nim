@@ -581,7 +581,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
   # TODO: set IP (interrupt pending) field
 
   cpu.cop0.cause =
-    (word(error.exceptionCode) shl 1) or
+    (word(error.exceptionCode) shl 2) or
     (word(cop) shl 28) or
     (word(branchDelay) shl 31)
 
