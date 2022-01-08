@@ -265,8 +265,8 @@ const
 proc decode*(instr: word): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
 
-  proc guard(x: bool) {.inline.} =
-    if not x: raise MachineError(error: ReservedInstruction)
+  template guard(x: untyped) =
+    if not x: raise MachineError(error: ReservedInstruction, instruction: instr)
 
   proc ret(instr: word, op: static Opcode): Opcode {.inline.} =
     ## Check for fields which must be zero, depending on instruction type

@@ -28,4 +28,6 @@ type
       # The PSX doesn't report the address for a bus error,
       # but it doesn't hurt to remember it here
       address*: word
+    of ReservedInstruction:
+      instruction*: word
     else: discard
