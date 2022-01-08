@@ -119,6 +119,7 @@ type
     pc: uint32 ## Current PC.
     nextPC: uint32 ## Next PC. Used to implement branch delay slot.
     registers: array[Register, uint32] ## Registers.
+    lo, hi: uint32 ## LO/HI registers.
     cop0: COP0 ## COP0 registers.
 
 let initCPU: CPU = block:
@@ -448,14 +449,52 @@ proc execute(cpu: var CPU, instr: uint32) {.inline.} =
   of SUBI: cpu[rt] = signedSub(cpu[rs], imm.signExt)
   of SUBU: cpu[rd] = cpu[rs] - cpu[rt]
   of SUBIU: cpu[rt] = cpu[rs] - imm.signExt
-  of DIV: raise new UnknownInstructionError
-  of DIVU: raise new UnknownInstructionError
-  of MULT: raise new UnknownInstructionError
-  of MULTU: raise new UnknownInstructionError
-  of MFLO: raise new UnknownInstructionError
-  of MTLO: raise new UnknownInstructionError
-  of MFHI: raise new UnknownInstructionError
-  of MTHI: raise new UnknownInstructionError
+  of DIV:
+    let
+      x = cpu[rs].signed
+      y = cpu[rt].signed
+
+    # Info from Nocash PSX
+    if y == 0:
+      cpu.lo = (if x >= 0: -1 else: 1).unsigned
+      cpu.hi = x.unsigned
+    elif x == -1 and y == -1:
+      cpu.lo = -1.unsigned
+      cpu.hi = 0
+
+    cpu.lo = (x div y).unsigned
+    cpu.hi = (x mod y).unsigned
+
+  of DIVU:
+    let
+      x = cpu[rs]
+      y = cpu[rt]
+
+    if y == 0:
+      cpu.lo = word.high
+      cpu.hi = x
+
+    cpu.lo = x div y
+    cpu.hi = x mod y
+
+  of MULT:
+    let
+      x = cpu[rs].signed
+      y = cpu[rt].signed
+      z = int64(x)*int64(y)
+    cpu.lo = cast[word](z)
+    cpu.hi = cast[word](z shr 32)
+  of MULTU:
+    let
+      x = cpu[rs]
+      y = cpu[rt]
+      z = uint64(x)*uint64(y)
+    cpu.lo = cast[word](z)
+    cpu.hi = cast[word](z shr 32)
+  of MFLO: cpu[rd] = cpu.lo
+  of MTLO: cpu.lo = cpu[rs]
+  of MFHI: cpu[rd] = cpu.hi
+  of MTHI: cpu.hi = cpu[rs]
   of SLT: cpu[rd] = word(cpu[rs].signed < cpu[rt].signed)
   of SLTU: cpu[rd] = word(cpu[rs] < cpu[rt])
   of LUI: cpu[rt] = imm.zeroExt shl 16
