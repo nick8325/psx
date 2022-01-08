@@ -4,8 +4,9 @@ type
   word* = uint32
   iword* = int32
 
-  AccessKind* {.pure.} = enum Fetch, Load, Store ## \
+  AccessKind* {.pure.} = enum
     ## Which kind of access a memory reference is.
+    Fetch, Load, Store
 
   MachineErrorKind* {.pure.} = enum
     ## Classes of CPU exceptions.

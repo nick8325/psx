@@ -1,6 +1,7 @@
 ## The PSX virtual address space.
 
 import common, utils
+import std/strformat
 
 type
   # We represent the address space as a page table consisting of an array of
@@ -39,19 +40,31 @@ func IO(page: Page): bool {.inline.} =
   (ByteAddress(page) and 2) != 0
 
 type
-  AddressSpace* = object
-    ## A virtual address space.
+  IOKind* {.pure.} = enum
+    ## Which memory type an I/O access is.
+    Read, Write
+
+  Memory* = object
+    ## The PSX address space.
 
     table {.align: 4096.}: array[0x100000, Page]
     # Keep references to the underlying arrays, to prevent them
     # getting garbage collected while 'table' is still alive
     regions: seq[ref seq[byte]]
 
+    # I/O handlers.
+    # Returns true if the I/O was handled.
+    # For each address, only one of ioHandler8/16/32 needs to handle it -
+    # the main I/O handler takes care of splitting up requests.
+    ioHandler8*: proc(address: word, kind: IOKind): bool
+    ioHandler16*: proc(address: word, kind: IOKind): bool
+    ioHandler32*: proc(address: word, kind: IOKind): bool
+
 type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool] ## \
     ## A virtual address resolved to a pointer on the host.
 
-proc resolve[T](space: AddressSpace, address: word, kind: AccessKind): ResolvedAddress[T] {.inline.} =
+proc resolve[T](memory: Memory, address: word, kind: AccessKind): ResolvedAddress[T] {.inline.} =
   ## Resolve a virtual address to a pointer.
   ## Raises a MachineError if the address is invalid.
 
@@ -61,7 +74,7 @@ proc resolve[T](space: AddressSpace, address: word, kind: AccessKind): ResolvedA
   let
     page = address shr 12
     offset = address and 0xfff
-    entry = space.table[page]
+    entry = memory.table[page]
 
   if entry.pointer.isNil:
     raise MachineError(error: BusError, address: address, kind: kind)
@@ -70,83 +83,93 @@ proc resolve[T](space: AddressSpace, address: word, kind: AccessKind): ResolvedA
 
   return (pointer: pointer, writable: entry.writable, io: entry.IO())
 
-proc mapRegion(space: var AddressSpace, arr: var openArray[byte], address: word, writable: bool, io: bool) =
+proc mapRegion*(memory: var Memory, arr: var openArray[byte], address: word, writable: bool, io: bool) =
   ## Map a byte array into the virtual address space.
   ## The array must be page-aligned and its size must be a multiple of one page.
 
   assert arr.len mod pageSize == 0
   assert address mod pageSize == 0
 
-  space.regions.add(cast[ref seq[byte]](arr))
+  memory.regions.add(cast[ref seq[byte]](arr))
   let startingPage = address div pageSize
   for i in 0 ..< arr.len div pageSize:
     let page = sliceArray[pageSize, byte](arr, i * pageSize)
-    space.table[startingPage + cast[word](i)] = initPage(page, writable = writable, io = io)
+    memory.table[startingPage + cast[word](i)] = initPage(page, writable = writable, io = io)
 
   if address + word(arr.len) <= 0x20000000u32:
     # Add the block to KSEG0 and KSEG1
-    mapRegion(space, arr, address + 0x80000000u32, writable, io)
-    mapRegion(space, arr, address + 0xa0000000u32, writable, io)
+    mapRegion(memory, arr, address + 0x80000000u32, writable, io)
+    mapRegion(memory, arr, address + 0xa0000000u32, writable, io)
 
-proc fetch*(space: AddressSpace, address: word): word {.inline.} =
+proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
+  ## Execute I/O handlers for a write (which must be to I/O space).
+
+  proc handleIO8(memory: Memory, address: word, kind: IOKind): bool {.inline.} =
+    memory.ioHandler8 != nil and memory.ioHandler8(address, kind)
+
+  proc handleIO16(memory: Memory, address: word, size: static int, kind: IOKind): bool {.inline.} =
+    # Try a 16-bit write first
+    if address mod 2 == 0 and memory.ioHandler16 != nil:
+      if memory.ioHandler16(address, kind): return true
+
+    # Split into one or two 8-bit writes, depending on size
+    if size == 2:
+      return memory.handleIO8(address, kind) and memory.handleIO8(address xor 1, kind)
+    else:
+      return memory.handleIO8(address, kind)
+
+  proc handleIO32(memory: Memory, address: word, size: static int, kind: IOKind): bool {.inline.} =
+    # Try a 32-bit write first
+    if address mod 4 == 0 and memory.ioHandler32 != nil:
+      if memory.ioHandler32(address, kind): return true
+
+    # Split into one or two 16-bit writes, depending on size
+    if size == 4:
+      return memory.handleIO16(address, 2, kind) and
+        memory.handleIO16(address xor 2, 2, kind)
+    else:
+      return memory.handleIO16(address, size, kind)
+
+  if not handleIO32(memory, address, size, kind):
+    case kind
+    of Read: echo fmt"Couldn't read {size} bytes from I/O address {address:x}"
+    of Write: echo fmt"Couldn't write {size} bytes to I/O address {address:x}"
+
+proc fetch*(memory: Memory, address: word): word {.inline.} =
   ## Fetch a word of memory as an instruction.
   ## Raises a MachineError if the address is invalid.
 
-  space.resolve[:word](address, Fetch).pointer[]
+  memory.resolve[:word](address, Fetch).pointer[]
 
-proc read*[T](space: AddressSpace, address: word): T {.inline.} =
+proc rawRead*[T](memory: Memory, address: word, io: var bool): T {.inline.} =
+  ## Read data from memory, without invoking any I/O handlers.
+  ## Raises a MachineError if the address is invalid.
+
+  let resolved = memory.resolve[:T](address, Load)
+  io = resolved.io
+  resolved.pointer[]
+
+proc read*[T](memory: Memory, address: word): T {.inline.} =
   ## Read data from memory.
   ## Raises a MachineError if the address is invalid.
 
-  let resolved = space.resolve[:T](address, Load)
-  resolved.pointer[]
-  # TODO: handle I/O
+  var io: bool
+  result = rawRead[T](memory, address, io)
+  if io: memory.handleIO(address, T.sizeof, Read)
 
-proc write*[T](space: AddressSpace, address: word, value: T): void {.inline.} =
+proc rawWrite*[T](memory: Memory, address: word, value: T, io: var bool): void {.inline.} =
+  ## Write data to memory, without invoking any I/O handlers.
+  ## Raises a MachineError if the address is invalid.
+
+  let resolved = memory.resolve[:T](address, Store)
+  if resolved.writable:
+    resolved.pointer[] = value
+  io = resolved.io
+
+proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
   ## Write data to memory.
   ## Raises a MachineError if the address is invalid.
 
-  let resolved = space.resolve[:T](address, Store)
-  if resolved.writable:
-    resolved.pointer[] = value
-  # TODO: handle I/O
-
-# The PSX address space.
-
-var
-  addressSpace*: AddressSpace ## The PSX address space.
-  bios {.align: 4096.}: array[0x80000, byte]
-  ram {.align: 4096.}: array[0x200000, byte]
-  scratchpad {.align: 4096.}: array[0x1000, byte]
-  expansion {.align: 4096.}: array[0x1000, byte]
-  ioPorts {.align: 4096.}: array[0x1000, byte]
-  cacheControl {.align: 4096.}: array[0x1000, byte]
-
-# Initialise expansion to -1, and read in BIOS
-for x in expansion.mitems: x = 0xff
-bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../SCPH1002.bin"), 0, 0x7ffff)
-
-# Map in all the memory
-#                      region        address        writable  io
-addressSpace.mapRegion(ram,          0x00000000u32, true,     false)
-addressSpace.mapRegion(ram,          0x00200000u32, true,     false)
-addressSpace.mapRegion(ram,          0x00400000u32, true,     false)
-addressSpace.mapRegion(ram,          0x00600000u32, true,     false)
-addressSpace.mapRegion(expansion,    0x1f000000u32, false,    false)
-addressSpace.mapRegion(scratchpad,   0x1f800000u32, true,     false)
-addressSpace.mapRegion(ioPorts,      0x1f801000u32, true,     true)
-addressSpace.mapRegion(expansion,    0x1f802000u32, false,    false)
-addressSpace.mapRegion(bios,         0x1fc00000u32, false,    false)
-addressSpace.mapRegion(cacheControl, 0xfffe0000u32, true,     true)
-
-# Set up I/O space
-addressSpace.write[:word](0x1f801000u32, 0x1f000000u32)
-addressSpace.write[:word](0x1f801004u32, 0x1f802000u32)
-addressSpace.write[:word](0x1f801008u32, 0x0013243fu32)
-addressSpace.write[:word](0x1f80100cu32, 0x00003022u32)
-addressSpace.write[:word](0x1f801010u32, 0x0013243fu32)
-addressSpace.write[:word](0x1f801014u32, 0x200931e1u32)
-addressSpace.write[:word](0x1f801018u32, 0x00020843u32)
-addressSpace.write[:word](0x1f80101cu32, 0x00070777u32)
-addressSpace.write[:word](0x1f801020u32, 0x00031125u32)
-addressSpace.write[:word](0x1f801060u32, 0x00000b88u32)
+  var io: bool
+  rawWrite[T](memory, address, value, io)
+  if io: memory.handleIO(address, T.sizeof, Write)

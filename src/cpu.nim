@@ -1,7 +1,6 @@
 ## An interpreter for the R3000A CPU.
 
-import utils, common
-import memory
+import utils, common, memory, machine
 import fusion/matching
 import std/[tables, bitops, strformat]
 
