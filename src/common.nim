@@ -17,3 +17,5 @@ type
   InvalidCOPError* = object of ExecutionError
   ArithmeticOverflowError* = object of ExecutionError
   MemoryProtectionError* = object of ExecutionError
+  SyscallError* = object of CatchableError
+  BreakError* = object of CatchableError

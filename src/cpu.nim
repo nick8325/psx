@@ -106,12 +106,19 @@ func im(cop0: COP0): array[8, bool] {.used.} =
 func ku(cop0: COP0): array[3, bool] =
   ## Get value of COP0.KU.
   for i in 0..<3:
-    result[i] = testBit(cop0.sr, 5-2*i)
+    result[i] = testBit(cop0.sr, 1+2*i)
 
 func ie(cop0: COP0): array[3, bool] {.used.} =
   ## Get value of COP0.IE.
   for i in 0..<3:
-    result[i] = testBit(cop0.sr, 4-2*i)
+    result[i] = testBit(cop0.sr, 2*i)
+
+proc popKUIE(cop0: var COP0) =
+  # Nocash PSX: RFE leaves IEo/KUo unchanged, hence 0xf rather than 0x3f
+  cop0.sr = (cop0.sr and not 0xfu32) or ((cop0.sr shr 2) and 0xf)
+
+proc pushKUIE(cop0: var COP0) =
+  cop0.sr = (cop0.sr and not 0x3fu32) or ((cop0.sr shl 2) and 0x3f)
 
 type
   CPU = object
@@ -535,11 +542,11 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of JR: newPC = cpu[rs]
   of JAL: absJump; link()
   of JALR: newPC = cpu[rs]; link(rd)
-  of SYSCALL: raise new UnknownInstructionError
-  of BREAK: raise new UnknownInstructionError
+  of SYSCALL: raise new SyscallError
+  of BREAK: raise new BreakError
   of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
   of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
-  of RFE: raise new UnknownInstructionError
+  of RFE: popKUIE(cpu.cop0)
 
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
