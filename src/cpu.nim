@@ -102,13 +102,13 @@ proc `[]=`*(cop0: var COP0, reg: CoRegister, val: word) =
   else:
     echo fmt"Ignoring read to unknown COP register {reg}"
 
-proc popKUIE(cop0: var COP0) =
+proc leaveKernel(cop0: var COP0) =
   # Nocash PSX: RFE leaves IEo/KUo unchanged
   for i in 0..1:
     cop0.sr[ku[i]] = cop0.sr[ku[i+1]]
     cop0.sr[ie[i]] = cop0.sr[ie[i+1]]
 
-proc pushKUIE(cop0: var COP0) =
+proc enterKernel(cop0: var COP0) =
   for i in 0..1:
     cop0.sr[ku[i+1]] = cop0.sr[ku[i]]
     cop0.sr[ie[i+1]] = cop0.sr[ie[i]]
@@ -542,7 +542,7 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of BREAK: raise MachineError(error: Breakpoint)
   of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
   of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
-  of RFE: popKUIE(cpu.cop0)
+  of RFE: leaveKernel(cpu.cop0)
 
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
@@ -593,7 +593,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
   if error.error == AddressError:
     cpu.cop0.badvaddr = error.address
 
-  cpu.cop0.pushKUIE
+  cpu.cop0.enterKernel
 
   cpu.pc = if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32
   cpu.nextPC = cpu.pc + 4
