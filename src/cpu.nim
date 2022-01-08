@@ -8,7 +8,7 @@ import std/[tables, bitops, strformat]
 # Processor state.
 
 type
-  Register* = distinct range[0..31] ## A register.
+  Register* = distinct range[0..31]  ## A register.
   CoRegister = distinct range[0..31] ## A coprocessor register.
 
 const
@@ -43,6 +43,30 @@ const initCOP0: COP0 =
   # Initial value of COP0.
   COP0(sr: 1 shl 22) # BEV=1
 
+const
+  # User-settable bits in COP0.SR.
+  cu: array[4, BitSlice[bool, word]] = [bit 28, bit 29, bit 30, bit 31]
+  bev: BitSlice[bool, word] = bit 22
+  cm {.used.}:  BitSlice[bool, word] = bit 19
+  swc: BitSlice[bool, word] = bit 17
+  isc: BitSlice[bool, word] = bit 16
+  im: array[8, BitSlice[bool, word]] =
+    [bit 8, bit 9, bit 10, bit 11, bit 12, bit 13, bit 14, bit 15]
+  ku: array[3, BitSlice[bool, word]] =
+    [bit 1, bit 3, bit 5]
+  ie: array[3, BitSlice[bool, word]] =
+    [bit 0, bit 2, bit 4]
+
+  writableSRBits: word =
+    block:
+      var result: word = 0
+      # Note: CM is not user-settable (and not set at all currently)
+      for arr in [@cu, @[bev], @[swc], @[isc], @im, @ku, @ie]:
+        for x in arr:
+          result = result or x.toMask
+      result
+  fixedSRBits = not writableSRBits
+
 proc `[]`(cop0: COP0, reg: CoRegister): word =
   ## Access registers by number.
   case reg
@@ -56,7 +80,9 @@ proc `[]`(cop0: COP0, reg: CoRegister): word =
   of CoRegister(13): cop0.cause
   of CoRegister(14): cop0.epc
   of CoRegister(15): 2 # PRId - value from Nocash PSX
-  else: raise new InvalidCOPError # TODO Is this the right exception?
+  else:
+    echo fmt"Ignoring read to unknown COP register {reg}"
+    return 0
 
 proc `[]=`*(cop0: var COP0, reg: CoRegister, val: word) =
   ## Access registers by number.
@@ -68,50 +94,14 @@ proc `[]=`*(cop0: var COP0, reg: CoRegister, val: word) =
   of CoRegister(9): cop0.bdam = val
   of CoRegister(11): cop0.bpcm = val
   of CoRegister(12):
-    # Which bits are allowed to be modified
-    const mask = 0b00001111101101000000000011000000u32
-    if (val and mask) != (cop0.sr and mask):
-      raise new InvalidCOPError # TODO Is this the right exception?
-    cop0.sr = val
+    let conflicting = (val and fixedSRBits) xor (cop0.sr and fixedSRBits)
+    if conflicting != 0:
+      echo fmt"Ignoring writes to read-only SR bits: {conflicting:x}"
+    cop0.sr = (cop0.sr and fixedSRBits) or (val and writableSRBits)
   of CoRegister(13): discard
   of CoRegister(14): discard
-  else: raise new InvalidCOPError # TODO Is this the right exception?
-
-func cu(cop0: COP0): array[4, bool] {.used.} =
-  ## Get value of COP0.CU.
-  for i in 0..<4:
-    result[i] = testBit(cop0.sr, 28+i)
-
-func bev(cop0: COP0): bool {.used.} =
-  ## Get value of COP0.BEV.
-  testBit(cop0.sr, 22)
-
-func cm(cop0: COP0): bool {.used.} =
-  ## Get value of COP0.CM.
-  testBit(cop0.sr, 19)
-
-func swc(cop0: COP0): bool {.used.} =
-  ## Get value of COP0.SR.
-  testBit(cop0.sr, 17)
-
-func isc(cop0: COP0): bool =
-  ## Get value of COP0.ISC.
-  testBit(cop0.sr, 16)
-
-func im(cop0: COP0): array[8, bool] {.used.} =
-  ## Get value of COP0.IM.
-  for i in 0..<8:
-    result[i] = testBit(cop0.sr, 8+i)
-
-func ku(cop0: COP0): array[3, bool] =
-  ## Get value of COP0.KU.
-  for i in 0..<3:
-    result[i] = testBit(cop0.sr, 1+2*i)
-
-func ie(cop0: COP0): array[3, bool] {.used.} =
-  ## Get value of COP0.IE.
-  for i in 0..<3:
-    result[i] = testBit(cop0.sr, 2*i)
+  else:
+    echo fmt"Ignoring read to unknown COP register {reg}"
 
 proc popKUIE(cop0: var COP0) =
   # Nocash PSX: RFE leaves IEo/KUo unchanged, hence 0xf rather than 0x3f
@@ -143,16 +133,16 @@ func `[]=`(cpu: var CPU, reg: Register, val: word) =
   cpu.registers[reg] = val
   cpu.registers[r0] = 0
 
-proc resolveAddress(cpu: CPU, address: word, code: bool): word =
+proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word =
   ## Resolve a virtual address to a physical address,
   ## also checking access permissions.
-  if address >= 0x80000000u32 and cpu.cop0.ku[0]:
-    raise new MemoryProtectionError
+  if address >= 0x80000000u32 and cpu.cop0.sr[ku[0]]:
+    raise MachineError(error: AddressError, address: address, kind: kind)
 
   # If "isolate cache" bit is set, high bits are discarded and
   # low bits are used to index into scratchpad (only for data,
   # not code).
-  if not code and cpu.cop0.isc:
+  if kind != Fetch and cpu.cop0.sr[isc]:
     # TODO: allow scratchpad to be disabled too
     return (address and 0x3ff) + 0x1f800000
 
@@ -160,15 +150,15 @@ proc resolveAddress(cpu: CPU, address: word, code: bool): word =
 
 proc fetch*(cpu: CPU): word =
   ## Fetch the next instruction.
-  addressSpace.fetch(cpu.resolveAddress(cpu.pc, true))
+  addressSpace.fetch(cpu.resolveAddress(cpu.pc, Fetch))
 
 proc read*[T](cpu: CPU, address: word): T =
   ## Read from a given virtual address.
-  addressSpace.read[:T](cpu.resolveAddress(address, false))
+  addressSpace.read[:T](cpu.resolveAddress(address, Load))
 
 proc write*[T](cpu: CPU, address: word, val: T) =
   ## Write to a given virtual address.
-  addressSpace.write[:T](cpu.resolveAddress(address, false), val)
+  addressSpace.write[:T](cpu.resolveAddress(address, Store), val)
 
 func `$`*(cpu: CPU): string =
   result = fmt "PC={cpu.pc:x} "
@@ -276,7 +266,7 @@ proc decode*(instr: word): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
 
   proc guard(x: bool) {.inline.} =
-    if not x: raise new UnknownInstructionError
+    if not x: raise MachineError(error: ReservedInstruction)
 
   proc ret(instr: word, op: static Opcode): Opcode {.inline.} =
     ## Check for fields which must be zero, depending on instruction type
@@ -324,14 +314,14 @@ proc decode*(instr: word): Opcode {.inline.} =
     of 39: instr.ret NOR
     of 42: instr.ret SLT
     of 43: instr.ret SLTU
-    else: raise new UnknownInstructionError
+    else: raise MachineError(error: ReservedInstruction)
   of 1:
     case int(instr[rt])
     of 0: instr.ret BLTZ
     of 1: instr.ret BGEZ
     of 16: instr.ret BLTZAL
     of 17: instr.ret BGEZAL
-    else: raise new UnknownInstructionError
+    else: raise MachineError(error: ReservedInstruction)
   of 2: instr.ret J
   of 3: instr.ret JAL
   of 4: instr.ret BEQ
@@ -369,8 +359,8 @@ proc decode*(instr: word): Opcode {.inline.} =
     of 16:
       guard instr[copimm] == 16
       instr.ret RFE
-    else: raise new UnknownInstructionError
-  else: raise new UnknownInstructionError
+    else: raise MachineError(error: ReservedInstruction)
+  else: raise MachineError(error: ReservedInstruction)
 
 proc format*(instr: word): string =
   ## Disassemble an instruction.
@@ -411,19 +401,20 @@ proc format*(instr: word): string =
 
 proc signedAdd(x, y: word): word =
   if x.signed > 0 and y.signed > high(iword) - x.signed:
-    raise new ArithmeticOverflowError
+    raise MachineError(error: ArithmeticOverflow)
   if x.signed < 0 and y.signed < low(iword) - x.signed:
-    raise new ArithmeticOverflowError
+    raise MachineError(error: ArithmeticOverflow)
   return x + y
 
 proc signedSub(x, y: word): word =
   if x.signed > 0 and y.signed < low(iword) + x.signed:
-    raise new ArithmeticOverflowError
+    raise MachineError(error: ArithmeticOverflow)
   if x.signed < 0 and y.signed > high(iword) + x.signed:
-    raise new ArithmeticOverflowError
+    raise MachineError(error: ArithmeticOverflow)
   return x - y
 
 proc execute(cpu: var CPU, instr: word) {.inline.} =
+  ## Decode and execute an instruction.
   var newPC = cpu.nextPC + 4
   let
     op = decode(instr)
@@ -523,13 +514,13 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of LBU: cpu[rt] = cpu.read[:uint8](cpu[rs] + imm.signExt)
   of LH: cpu[rt] = iword(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned
   of LHU: cpu[rt] = cpu.read[:uint16](cpu[rs] + imm.signExt)
-  of LWL: raise new UnknownInstructionError
-  of LWR: raise new UnknownInstructionError
+  of LWL: raise MachineError(error: ReservedInstruction)
+  of LWR: raise MachineError(error: ReservedInstruction)
   of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt])
   of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
   of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
-  of SWL: raise new UnknownInstructionError
-  of SWR: raise new UnknownInstructionError
+  of SWL: raise MachineError(error: ReservedInstruction)
+  of SWR: raise MachineError(error: ReservedInstruction)
   of BEQ: branchIf(cpu[rs] == cpu[rt])
   of BNE: branchIf(cpu[rs] != cpu[rt])
   of BGEZ: branchIf(cpu[rs].signed >= 0)
@@ -542,8 +533,8 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of JR: newPC = cpu[rs]
   of JAL: absJump; link()
   of JALR: newPC = cpu[rs]; link(rd)
-  of SYSCALL: raise new SyscallError
-  of BREAK: raise new BreakError
+  of SYSCALL: raise MachineError(error: SystemCall)
+  of BREAK: raise MachineError(error: Breakpoint)
   of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
   of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
   of RFE: popKUIE(cpu.cop0)
@@ -551,9 +542,64 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
 
+# Exception handling
+
+func exceptionCode(error: MachineError): int =
+  ## Convert a MachineError to an error code to be stored in COP0.SR.ExcCode.
+  case error.error
+  of Interrupt: 0
+  of AddressError:
+    case error.kind
+    of Fetch, Load: 4
+    of Store: 5
+  of BusError:
+    case error.kind
+    of Fetch: 6
+    of Load, Store: 7
+  of SystemCall: 8
+  of Breakpoint: 9
+  of ReservedInstruction: 10
+  of CoprocessorUnusable: 11
+  of ArithmeticOverflow: 12
+
+proc handleException(cpu: var CPU, error: MachineError) =
+  ## Handle an exception, by jumping to the exception vector etc.
+
+  var branchDelay: bool = false
+
+  if cpu.nextPC == cpu.pc + 4:
+    cpu.cop0.epc = cpu.pc
+  else:
+    # Exception in branch delay slot
+    branchDelay = true
+    cpu.cop0.epc = cpu.pc - 4
+
+  var cop: 0..3 = 0
+  if error.error == CoprocessorUnusable:
+    cop = error.cop
+
+  # TODO: set IP (interrupt pending) field
+
+  cpu.cop0.cause =
+    (word(error.exceptionCode) shl 1) or
+    (word(cop) shl 28) or
+    (word(branchDelay) shl 31)
+
+  if error.error == AddressError:
+    cpu.cop0.badvaddr = error.address
+
+  cpu.cop0.pushKUIE
+
+  cpu.pc = if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32
+  cpu.nextPC = cpu.pc + 4
+
 proc step(cpu: var CPU) {.inline.} =
-  # The execute function is in charge of updating pc and nextPC.
-  cpu.execute(cpu.fetch)
+  try:
+    # The execute function is in charge of updating pc and nextPC.
+    cpu.execute(cpu.fetch)
+  except MachineError as error:
+    echo repr(error)
+    cpu.handleException(error)
 
 var clocks = 0
 

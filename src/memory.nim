@@ -51,18 +51,21 @@ type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool] ## \
     ## A virtual address resolved to a pointer on the host.
 
-proc resolve[T](space: AddressSpace, address: word): ResolvedAddress[T] {.inline.} =
+proc resolve[T](space: AddressSpace, address: word, kind: AccessKind): ResolvedAddress[T] {.inline.} =
   ## Resolve a virtual address to a pointer.
-  ## Raises InvalidAddressError if the address is invalid.
+  ## Raises a MachineError if the address is invalid.
 
-  if address mod cast[word](sizeof(T)) != 0: raise new UnalignedAccessError
+  if address mod cast[word](sizeof(T)) != 0:
+    raise MachineError(error: AddressError, address: address, kind: kind)
 
   let
     page = address shr 12
     offset = address and 0xfff
     entry = space.table[page]
 
-  if entry.pointer.isNil: raise new InvalidAddressError
+  if entry.pointer.isNil:
+    raise MachineError(error: BusError, address: address, kind: kind)
+
   let pointer = cast[ptr T](cast[ByteAddress](entry.pointer) +% cast[ByteAddress](offset))
 
   return (pointer: pointer, writable: entry.writable, io: entry.IO())
@@ -87,23 +90,23 @@ proc mapRegion(space: var AddressSpace, arr: var openArray[byte], address: word,
 
 proc fetch*(space: AddressSpace, address: word): word {.inline.} =
   ## Fetch a word of memory as an instruction.
-  ## Raises InvalidAddressError if the address is invalid.
+  ## Raises a MachineError if the address is invalid.
 
-  space.resolve[:word](address).pointer[]
+  space.resolve[:word](address, Fetch).pointer[]
 
 proc read*[T](space: AddressSpace, address: word): T {.inline.} =
   ## Read data from memory.
-  ## Raises InvalidAddressError if the address is invalid.
+  ## Raises a MachineError if the address is invalid.
 
-  let resolved = space.resolve[:T](address)
+  let resolved = space.resolve[:T](address, Load)
   resolved.pointer[]
   # TODO: handle I/O
 
 proc write*[T](space: AddressSpace, address: word, value: T): void {.inline.} =
   ## Write data to memory.
-  ## Raises InvalidAddressError if the address is invalid.
+  ## Raises a MachineError if the address is invalid.
 
-  let resolved = space.resolve[:T](address)
+  let resolved = space.resolve[:T](address, Store)
   if resolved.writable:
     resolved.pointer[] = value
   # TODO: handle I/O

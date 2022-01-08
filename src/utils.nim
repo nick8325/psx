@@ -13,8 +13,17 @@ type
   ## Like a slice, but on a range of bits in a word
   BitSlice*[T, U] = tuple[pos: int, width: int]
 
+func bit*(pos: int): tuple[pos: int, width: int] {.inline.} =
+  (pos: pos, width: 1)
+
 func `[]`*[T, U](value: U, slice: BitSlice[T, U]): T {.inline.} =
-  cast[T](value.bitsliced(slice.pos ..< slice.pos+slice.width))
+  cast[T](value.bitsliced(slice.toSlice))
+
+func toSlice*[T, U](slice: BitSlice[T, U]): Slice[int] {.inline.} =
+  slice.pos ..< slice.pos+slice.width
+
+func toMask*[T, U](slice: BitSlice[T, U]): U {.inline.} =
+  slice.toSlice.toMask[:U]
 
 type
   ## A pattern that matches a given part of a word against a given value

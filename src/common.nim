@@ -4,18 +4,28 @@ type
   word* = uint32
   iword* = int32
 
-  ## Errors that turn into CPU exceptions.
-  MachineError* = object of CatchableError
-  MemoryError* = object of MachineError
-  InvalidAddressError* = object of MemoryError
-  UnalignedAccessError* = object of MemoryError
+  AccessKind* {.pure.} = enum Fetch, Load, Store ## \
+    ## Which kind of access a memory reference is.
 
-  DecodingError* = object of MachineError
-  UnknownInstructionError* = object of DecodingError
+  MachineErrorKind* {.pure.} = enum
+    ## Classes of CPU exceptions.
+    Interrupt,
+    AddressError,
+    BusError,
+    SystemCall,
+    Breakpoint,
+    ReservedInstruction,
+    CoprocessorUnusable,
+    ArithmeticOverflow,
 
-  ExecutionError* = object of CatchableError
-  InvalidCOPError* = object of ExecutionError
-  ArithmeticOverflowError* = object of ExecutionError
-  MemoryProtectionError* = object of ExecutionError
-  SyscallError* = object of CatchableError
-  BreakError* = object of CatchableError
+  MachineError* = ref object of CatchableError
+    ## CPU exceptions.
+    case error*: MachineErrorKind
+    of CoprocessorUnusable:
+      cop*: 0..3
+    of AddressError, BusError:
+      kind*: AccessKind
+      # The PSX doesn't report the address for a bus error,
+      # but it doesn't hurt to remember it here
+      address*: word
+    else: discard
