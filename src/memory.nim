@@ -142,8 +142,8 @@ proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
 
   if not handleIO32(memory, address, size, kind):
     case kind
-    of Read: echo fmt"Couldn't read {size} bytes from I/O address {address:x}"
-    of Write: echo fmt"Couldn't write {size} bytes to I/O address {address:x}"
+    of Read: echo fmt"Unknown I/O read of size {size} from {address:x}"
+    of Write: echo fmt"Unknown I/O write of size {size} to {address:x}"
 
 proc fetch*(memory: Memory, address: word): word {.inline.} =
   ## Fetch a word of memory as an instruction.
