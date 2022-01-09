@@ -165,7 +165,7 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
   if not handled:
     let value = word(rawRead[T](memory, address))
     let kindStr = toLowerAscii $kind
-    echo fmt"Unknown I/O {kindStr}, {T.sizeof} bytes: {address:x} = {value:x}"
+    echo fmt"Unknown I/O, address {address:08x}, value {value:08x} ({T.sizeof}-byte {kindStr})"
 
 proc read*[T](memory: Memory, address: word): T {.inline.} =
   ## Read data from memory.
