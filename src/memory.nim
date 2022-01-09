@@ -144,7 +144,8 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
     native32(address) or
     (nativeOrSplit16(address) and nativeOrSplit16(address xor 2))
 
-  # Handle an I/O at an automatically chosen size
+  # Handle an I/O at an automatically chosen size.
+  # Prefer native size, then splitting up, then increasing the size.
   template auto8(address: word): bool =
     native8(address) or native16(address and not 1u32) or native32(address and not 3u32)
   template auto16(address: word): bool =
@@ -153,7 +154,6 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
     nativeOrSplit32(address)
 
   # Handle a native-sized or "too small" I/O, splitting it up as needed
-  let oldValue = memory.rawRead[:T](address)
   let handled =
     case T.sizeof
     # Try the native size first, then try splitting, then try a bigger size
@@ -161,13 +161,11 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
     of 2: auto16(address)
     of 4: auto32(address)
     else: raise new AssertionDefect
+
   if not handled:
     let value = word(rawRead[T](memory, address))
     let kindStr = toLowerAscii $kind
     echo fmt"Unknown I/O {kindStr}, {T.sizeof} bytes: {address:x} = {value:x}"
-  let newValue = memory.rawRead[:T](address)
-  if oldValue != newValue:
-    echo fmt"Write to {address:x} didn't stick: wrote {oldValue:x}, got {newValue:x}"
 
 proc read*[T](memory: Memory, address: word): T {.inline.} =
   ## Read data from memory.

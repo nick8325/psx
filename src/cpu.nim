@@ -618,6 +618,8 @@ proc handleException(cpu: var CPU, error: MachineError) =
   cpu.pc = if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32
   cpu.nextPC = cpu.pc + 4
 
+const tracing = false
+
 proc step(cpu: var CPU) {.inline.} =
   try:
     # Check for IRQs first.
@@ -628,12 +630,14 @@ proc step(cpu: var CPU) {.inline.} =
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(cpu.fetch)
   except MachineError as error:
+    if tracing: echo error.error
     cpu.handleException(error)
 
 proc runSystem() {.inline.} =
   var cpu = initCPU
   while true:
     while events.nextTime >= cpuClock:
+      if tracing: echo fmt"{cpu.pc:08x} {cpu.fetch.format}"
       cpu.step
       events.fastForward(cpuClock)
     if not events.runNext: break

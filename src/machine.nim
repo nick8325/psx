@@ -1,7 +1,7 @@
 ## The PSX itself.
 
 import common, utils, memory, eventqueue
-import std/[bitops, sugar]
+import std/bitops
 
 # Timing information.
 
@@ -105,6 +105,7 @@ proc ioHandler32(address: word, value: var uint32, kind: IOKind): bool =
     of Write: irqs.stat.update (irqs.stat and value)
     return true
   of 0x1f801074u32:
+    # Interrupt mask
     case kind
     of Read: value = irqs.mask
     of Write: irqs.mask.update value
