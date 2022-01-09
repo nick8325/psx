@@ -1,6 +1,6 @@
 ## A queue of events to be run according to a schedule.
 
-import std/[heapqueue, sugar]
+import std/heapqueue
 
 type
   Event = tuple[time: uint64, repeat: uint64, action: proc ()]
