@@ -1,6 +1,6 @@
 ## An interpreter for the R3000A CPU.
 
-import utils, common, memory, machine
+import utils, common, memory, machine, eventqueue
 import fusion/matching
 import std/[tables, bitops, strformat]
 
@@ -625,24 +625,12 @@ proc step(cpu: var CPU) {.inline.} =
   except MachineError as error:
     cpu.handleException(error)
 
-var clocks = 0
-
-proc test() =
-#  var oldCPU: CPU
+proc runSystem() {.inline.} =
   var cpu = initCPU
   while true:
-#    oldCPU = cpu
-#    echo format(cpu.fetch)
-    step(cpu)
-    clocks += 1
-#    echo cpuDiff(oldCPU, cpu)
+    while events.nextTime >= cpuClock:
+      cpu.step
+      events.fastForward(cpuClock)
+    if not events.runNext: break
 
-test()
-
-# for i in 0..<100:
-#   try:
-#     test()
-#   except CatchableError:
-#     discard
-
-echo(clocks)
+runSystem()

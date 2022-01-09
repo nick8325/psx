@@ -15,3 +15,11 @@ p45: cop0 registers
 - main memory is mapped every 2MB from 0 to 16MB
 - then at 0x20000000 (mirrored at +2MB) - nocash says isn't on a
   real machine
+
+clock rate:
+lcm clock rate: 44100*0x300*11 Hz (~372MHz)
+cpu runs one cycle per 11 clocks (~33.8MHz)
+gpu runs one cycle per 7 clocks (~53.2MHz)
+system clock (used for timers etc.): cpu clock/8 (~4.23MHz)
+
+system clock: 4mhz?

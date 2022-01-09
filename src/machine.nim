@@ -1,9 +1,30 @@
 ## The PSX itself.
 
-import common, utils, memory
-import std/bitops
+import common, utils, memory, eventqueue
+import std/[bitops, sugar]
+
+# Timing information.
+
+type
+  Region* {.pure.} = enum PAL, NTSC
+
+const
+  region*: Region = PAL
+
+const
+  # This many timesteps occur per second.
+  clockRate*: uint64 = 44100 * 0x300 * 11 # ~372MHz
+  # How many timesteps it takes for one clock cycle of each component.
+  cpuClock* = 11 # ~33.8MHz
+  gpuClock* = 7  # ~53.2MHz
+  systemClock* = cpuClock * 8 # ~4.23MHz
+  refreshRate*: uint64 =
+    case region
+    of PAL: 50
+    of NTSC: 60
 
 var
+  events*: EventQueue = initEventQueue() ## The queue of events to happen.
   addressSpace*: Memory ## The PSX address space.
   bios {.align: 4096.}: array[0x80000, byte]
   ram {.align: 4096.}: array[0x200000, byte]
@@ -57,6 +78,9 @@ proc triggerIRQ*(irq: range[0..10]) =
   ## Trigger a given IRQ.
 
   setBit(irqs.stat.value, int(irq))
+
+# VBLANK IRQ
+events.every(clockRate div refreshRate) do: triggerIRQ(0)
 
 # I/O handlers
 proc ioHandler8(address: word, value: var uint8, kind: IOKind): bool =
