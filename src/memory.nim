@@ -107,85 +107,81 @@ proc fetch*(memory: Memory, address: word): word {.inline.} =
 
   memory.resolve[:word](address, Fetch).pointer[]
 
-proc rawRead*[T](memory: Memory, address: word, io: var bool): T {.inline.} =
+proc rawRead*[T](memory: Memory, address: word): T {.inline.} =
   ## Read data from memory, without invoking any I/O handlers.
   ## Raises a MachineError if the address is invalid.
 
   let resolved = memory.resolve[:T](address, Load)
-  io = resolved.io
   resolved.pointer[]
 
-proc rawWrite*[T](memory: Memory, address: word, value: T, io: var bool): void {.inline.} =
+proc rawWrite*[T](memory: Memory, address: word, value: T): void {.inline.} =
   ## Write data to memory, without invoking any I/O handlers.
   ## Raises a MachineError if the address is invalid.
 
   let resolved = memory.resolve[:T](address, Store)
   if resolved.writable:
     resolved.pointer[] = value
-  io = resolved.io
 
-proc handleIO(memory: Memory, address: word, size: static int, kind: IOKind) =
+proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
   ## Execute I/O handlers for a write (which must be to I/O space).
 
-  # Implementation idea: always start by calling 32-bit handler, then
-  # split into smaller pieces as needed.
-  # In the helper procs handleIO16/32, 'address' doesn't have to be
-  # 16/32-bit aligned, but it does have to be aligned wrt 'size'.
-  # So all direct calls to ioHandler16/32 mask off the lower bits first.
-
-  proc handleIO8(memory: Memory, address: word, kind: IOKind): bool {.inline.} =
-    # Doesn't matter what 'kind' we pass in since the address must resolve
+  # Call the I/O handler at a given size, with the pointer already resolved
+  template native8(address: word): bool =
     let pointer = memory.resolve[:uint8](address, Fetch).pointer
     memory.ioHandler8 != nil and memory.ioHandler8(address, pointer[], kind)
+  template native16(address: word): bool =
+    let pointer = memory.resolve[:uint16](address, Fetch).pointer
+    memory.ioHandler16 != nil and memory.ioHandler16(address, pointer[], kind)
+  template native32(address: word): bool =
+    let pointer = memory.resolve[:uint32](address, Fetch).pointer
+    memory.ioHandler32 != nil and memory.ioHandler32(address, pointer[], kind)
 
-  proc handleIO16(memory: Memory, address: word, size: static int, kind: IOKind): bool {.inline.} =
-    # Try a 16-bit write first
-    if memory.ioHandler16 != nil:
-      let pointer = memory.resolve[:uint16](address and not 1u32, Fetch).pointer
-      if memory.ioHandler16(address and not 1u32, pointer[], kind): return true
+  # Handle an I/O at either native size or split into smaller I/Os
+  template nativeOrSplit16(address: word): bool =
+    native16(address) or
+    (native8(address) and native8(address xor 1))
+  template nativeOrSplit32(address: word): bool =
+    native32(address) or
+    (nativeOrSplit16(address) and nativeOrSplit16(address xor 2))
 
-    # Split into one or two 8-bit writes, depending on size
-    if size == 2:
-      return memory.handleIO8(address, kind) and memory.handleIO8(address xor 1, kind)
-    else:
-      return memory.handleIO8(address, kind)
+  # Handle an I/O at an automatically chosen size
+  template auto8(address: word): bool =
+    native8(address) or native16(address and not 1u32) or native32(address and not 3u32)
+  template auto16(address: word): bool =
+    nativeOrSplit16(address) or native32(address and not 3u32)
+  template auto32(address: word): bool =
+    nativeOrSplit32(address)
 
-  proc handleIO32(memory: Memory, address: word, size: static int, kind: IOKind): bool {.inline.} =
-    # Try a 32-bit write first
-    if memory.ioHandler32 != nil:
-      let pointer = memory.resolve[:uint32](address and not 3u32, Fetch).pointer
-      if memory.ioHandler32(address and not 3u32, pointer[], kind): return true
-
-    # Split into one or two 16-bit writes, depending on size
-    if size == 4:
-      return memory.handleIO16(address, 2, kind) and
-        memory.handleIO16(address xor 2, 2, kind)
-    else:
-      return memory.handleIO16(address, size, kind)
-
-  if not handleIO32(memory, address, size, kind):
-    let value = block:
-      var io: bool
-      case size
-      of 1: word(rawRead[uint8](memory, address, io))
-      of 2: word(rawRead[uint16](memory, address, io))
-      of 4: word(rawRead[uint32](memory, address, io))
-      else: raise new AssertionDefect
+  # Handle a native-sized or "too small" I/O, splitting it up as needed
+  let oldValue = memory.rawRead[:T](address)
+  let handled =
+    case T.sizeof
+    # Try the native size first, then try splitting, then try a bigger size
+    of 1: auto8(address)
+    of 2: auto16(address)
+    of 4: auto32(address)
+    else: raise new AssertionDefect
+  if not handled:
+    let value = word(rawRead[T](memory, address))
     let kindStr = toLowerAscii $kind
-    echo fmt"Unknown I/O {kindStr}, {size} bytes: {address:x} = {value:x}"
+    echo fmt"Unknown I/O {kindStr}, {T.sizeof} bytes: {address:x} = {value:x}"
+  let newValue = memory.rawRead[:T](address)
+  if oldValue != newValue:
+    echo fmt"Write to {address:x} didn't stick: wrote {oldValue:x}, got {newValue:x}"
 
 proc read*[T](memory: Memory, address: word): T {.inline.} =
   ## Read data from memory.
   ## Raises a MachineError if the address is invalid.
 
-  var io: bool
-  if io: memory.handleIO(address, T.sizeof, Read)
-  result = rawRead[T](memory, address, io)
+  let resolved = memory.resolve[:T](address, Load)
+  if resolved.io: memory.handleIO[:T](address, Read)
+  resolved.pointer[]
 
 proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
   ## Write data to memory.
   ## Raises a MachineError if the address is invalid.
 
-  var io: bool
-  rawWrite[T](memory, address, value, io)
-  if io: memory.handleIO(address, T.sizeof, Write)
+  let resolved = memory.resolve[:T](address, Store)
+  if resolved.writable:
+    resolved.pointer[] = value
+    if resolved.io: memory.handleIO[:T](address, Write)
