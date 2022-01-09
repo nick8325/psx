@@ -57,6 +57,11 @@ const
   ie: array[3, BitSlice[bool, word]] =
     [bit 0, bit 2, bit 4]
 
+  # IRQ bits in COP0.CAUSE.
+  ip: array[8, BitSlice[bool, word]] =
+    [bit 8, bit 9, bit 10, bit 11, bit 12, bit 13, bit 14, bit 15]
+  ipAll: BitSlice[word, word] = (pos: 8, width: 8)
+
   # Read-write SR bits
   writableSRBits: word =
     block:
@@ -616,8 +621,8 @@ proc handleException(cpu: var CPU, error: MachineError) =
 proc step(cpu: var CPU) {.inline.} =
   try:
     # Check for IRQs first.
-    cpu.cop0.sr[im[2]] = (irqs.stat != 0)
-    if cpu.cop0.sr[ie[0]] and cpu.cop0.sr[imAll] != 0:
+    cpu.cop0.cause[ip[2]] = (irqs.stat != 0)
+    if cpu.cop0.sr[ie[0]] and (cpu.cop0.sr[imAll] and cpu.cop0.cause[ipAll]) != 0:
       raise MachineError(error: Interrupt)
 
     # The execute function is in charge of updating pc and nextPC.
