@@ -1,6 +1,6 @@
 ## An interpreter for the R3000A CPU.
 
-import utils, common, memory, machine, eventqueue
+import utils, basics, memory, machine
 import fusion/matching
 import std/[tables, bitops, strformat]
 
@@ -103,7 +103,7 @@ proc `[]`(cop0: COP0, reg: CoRegister): word =
     echo fmt"Ignoring read to unknown COP register {reg}"
     return 0
 
-proc `[]=`*(cop0: var COP0, reg: CoRegister, val: word) =
+proc `[]=`(cop0: var COP0, reg: CoRegister, val: word) =
   ## Access registers by number.
   case reg
   of CoRegister(3): cop0.bpc = val
@@ -136,27 +136,32 @@ proc enterKernel(cop0: var COP0) =
   cop0.sr[ie[0]] = false
 
 type
-  CPU = object
+  CPU* = object
     ## CPU state.
-    pc: word ## Current PC.
+    pc*: word ## Current PC.
     nextPC: word ## Next PC. Used to implement branch delay slot.
     registers: array[Register, word] ## Registers.
     lo, hi: word ## LO/HI registers.
     cop0: COP0 ## COP0 registers.
 
-let initCPU: CPU = block:
+let initCPU*: CPU = block:
   # The initial state of the CPU after reset.
   const pc = 0xbfc00000u32
   CPU(pc: pc, nextPC: pc+4, cop0: initCOP0)
 
-func `[]`(cpu: CPU, reg: Register): word =
+func `[]`*(cpu: CPU, reg: Register): word =
   ## Access registers by number.
   cpu.registers[reg]
 
-func `[]=`(cpu: var CPU, reg: Register, val: word) =
+func `[]=`*(cpu: var CPU, reg: Register, val: word) =
   ## Access registers by number. Takes care of ignoring writes to R0.
   cpu.registers[reg] = val
   cpu.registers[r0] = 0
+
+func setIRQ*(cpu: var CPU, irq: bool) =
+  ## Update the IRQ flag.
+
+  cpu.cop0.cause[ip[2]] = irq
 
 proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word =
   ## Resolve a virtual address to a physical address,
@@ -287,7 +292,7 @@ const
   copimm: BitSlice[word, word] = (pos: 0, width: 25)
   whole: BitSlice[word, word] = (pos: 0, width: 26)
 
-proc decode*(instr: word): Opcode {.inline.} =
+proc decode(instr: word): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
 
   template guard(x: untyped) =
@@ -618,28 +623,19 @@ proc handleException(cpu: var CPU, error: MachineError) =
   cpu.pc = if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32
   cpu.nextPC = cpu.pc + 4
 
-const tracing = false
+const
+  # If true, trace CPU execution
+  tracing = false
 
-proc step(cpu: var CPU) {.inline.} =
+proc step*(cpu: var CPU) {.inline.} =
   try:
     # Check for IRQs first.
-    cpu.cop0.cause[ip[2]] = (irqs.stat != 0)
     if cpu.cop0.sr[ie[0]] and (cpu.cop0.sr[imAll] and cpu.cop0.cause[ipAll]) != 0:
       raise MachineError(error: Interrupt)
 
+    if tracing: echo fmt"{cpu.pc:08x}: {cpu.fetch.format}"
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(cpu.fetch)
   except MachineError as error:
     if tracing: echo error.error
     cpu.handleException(error)
-
-proc runSystem() {.inline.} =
-  var cpu = initCPU
-  while true:
-    while events.nextTime >= cpuClock:
-      if tracing: echo fmt"{cpu.pc:08x} {cpu.fetch.format}"
-      cpu.step
-      events.fastForward(cpuClock)
-    if not events.runNext: break
-
-runSystem()

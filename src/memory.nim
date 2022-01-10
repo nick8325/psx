@@ -1,6 +1,6 @@
 ## The PSX virtual address space.
 
-import common, utils
+import basics, utils
 import std/[strformat, strutils]
 
 type

@@ -1,31 +1,43 @@
 ## The PSX itself.
 
-import common, utils, memory, eventqueue
+import basics, utils, memory, eventqueue
 import std/bitops
-
-# Timing information.
-
-type
-  Region* {.pure.} = enum PAL, NTSC
-
-const
-  region*: Region = PAL
-
-const
-  # This many timesteps occur per second.
-  clockRate*: uint64 = 44100 * 0x300 * 11 # ~372MHz
-  # How many timesteps it takes for one clock cycle of each component.
-  cpuClock* = 11 # ~33.8MHz
-  gpuClock* = 7  # ~53.2MHz
-  systemClock* = cpuClock * 8 # ~4.23MHz
-  refreshRate*: uint64 =
-    case region
-    of PAL: 50
-    of NTSC: 60
 
 var
   events*: EventQueue = initEventQueue() ## The queue of events to happen.
   addressSpace*: Memory ## The PSX address space.
+
+import cpu as r3000
+
+var
+  cpu*: CPU = initCPU ## The main processor
+
+# Interrupt mask
+var
+  irqs* =
+    (stat: Masked[word](mask: 0x7ff),
+     mask: Masked[word](mask: 0x7ff))
+
+proc setCPUIRQ() =
+  ## Update the processor IRQ flags from irq.stat.
+  cpu.setIRQ((irqs.stat and irqs.mask) != 0)
+
+proc signalIRQ*(irq: range[0..10]) =
+  ## Activate a given IRQ.
+
+  setBit(irqs.stat.value, int(irq))
+  setCPUIRQ()
+
+proc clearIRQ*(irq: range[0..10]) =
+  ## Clear a given IRQ.
+
+  clearBit(irqs.stat.value, int(irq))
+  setCPUIRQ()
+
+# VBLANK IRQ
+events.every(clockRate div refreshRate) do: signalIRQ(0)
+
+var
   bios {.align: 4096.}: array[0x80000, byte]
   ram {.align: 4096.}: array[0x200000, byte]
   scratchpad {.align: 4096.}: array[0x1000, byte]
@@ -66,20 +78,6 @@ addressSpace.rawWrite[:word](0xfffe0130u32, 0x0001e988u32)
 # TODO this is the initial value of GPUSTAT
 addressSpace.rawWrite[:word](0x1f801814u32, 0x14802000u32)
 
-# Interrupt mask
-var
-  irqs* =
-    (stat: Masked[word](mask: 0x7f),
-     mask: Masked[word](mask: 0x7f))
-
-proc triggerIRQ*(irq: range[0..10]) =
-  ## Trigger a given IRQ.
-
-  setBit(irqs.stat.value, int(irq))
-
-# VBLANK IRQ
-events.every(clockRate div refreshRate) do: triggerIRQ(0)
-
 # I/O handlers
 proc ioHandler8(address: word, value: var uint8, kind: IOKind): bool =
   return false
@@ -116,3 +114,14 @@ proc ioHandler32(address: word, value: var uint32, kind: IOKind): bool =
 addressSpace.ioHandler8 = ioHandler8
 addressSpace.ioHandler16 = ioHandler16
 addressSpace.ioHandler32 = ioHandler32
+
+proc runSystem*() =
+  ## Run the system.
+
+  while true:
+    while events.nextTime >= cpuClock:
+      cpu.step
+      events.fastForward(cpuClock)
+    if not events.runNext: break
+
+runSystem()

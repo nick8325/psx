@@ -32,3 +32,23 @@ type
     of ReservedInstruction:
       instruction*: word
     else: discard
+
+# Timing information.
+
+type
+  Region* {.pure.} = enum PAL, NTSC
+
+const
+  region*: Region = PAL
+
+const
+  # This many timesteps occur per second.
+  clockRate*: uint64 = 44100 * 0x300 * 11 # ~372MHz
+  # How many timesteps it takes for one clock cycle of each component.
+  cpuClock* = 11 # ~33.8MHz
+  gpuClock* = 7  # ~53.2MHz
+  systemClock* = cpuClock * 8 # ~4.23MHz
+  refreshRate*: uint64 =
+    case region
+    of PAL: 50
+    of NTSC: 60
