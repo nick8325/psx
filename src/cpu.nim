@@ -24,7 +24,7 @@ func `$`*(x: CoRegister): string =
 func `<=`(r1, r2: Register): bool {. borrow .} # needed for iterator to work
 
 type
-  COP0 = object
+  COP0 {.requiresInit.} = object
     ## COP0 status. All fields are COP0 registers.
     sr: word
     cause: word
@@ -39,8 +39,9 @@ type
     bpcm: word
 
 const initCOP0: COP0 =
-  # Initial value of COP0.
-  COP0(sr: 1 shl 22) # BEV=1
+  # Initial value of COP0. BEV=1, everything else 0.
+  COP0(sr: 1 shl 22, cause: 0, epc: 0, badvaddr: 0, bpc: 0, bda: 0,
+       dcic: 0, bdam: 0, bpcm: 0)
 
 const
   # User-settable bits in COP0.SR.
@@ -136,7 +137,7 @@ proc enterKernel(cop0: var COP0) =
   cop0.sr[ie[0]] = false
 
 type
-  CPU* = object
+  CPU* {.requiresInit.} = object
     ## CPU state.
     pc*: word ## Current PC.
     nextPC: word ## Next PC. Used to implement branch delay slot.
@@ -147,7 +148,8 @@ type
 let initCPU*: CPU = block:
   # The initial state of the CPU after reset.
   const pc = 0xbfc00000u32
-  CPU(pc: pc, nextPC: pc+4, cop0: initCOP0)
+  var registers: array[Register, word]
+  CPU(pc: pc, nextPC: pc+4, registers: registers, lo: 0, hi: 0, cop0: initCOP0)
 
 func `[]`*(cpu: CPU, reg: Register): word =
   ## Access registers by number.

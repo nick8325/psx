@@ -4,7 +4,7 @@ import std/heapqueue
 
 type
   Event = tuple[time: uint64, repeat: uint64, action: proc ()]
-  EventQueue* = object
+  EventQueue* {.requiresInit.} = object
     ## A queue of events.
     now: uint64
     minDelta: uint64
