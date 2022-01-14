@@ -606,16 +606,16 @@ proc handleException(cpu: var CPU, error: MachineError) =
     branchDelay = true
     cpu.cop0.epc = cpu.pc - 4
 
-  var cop: 0..3 = 0
-  if error.error == CoprocessorUnusable:
-    cop = error.cop
-
-  # TODO: set IP (interrupt pending) field
+  let cop =
+    case error.error
+    of CoprocessorUnusable: error.cop
+    else: 0
 
   cpu.cop0.cause =
     (word(error.exceptionCode) shl 2) or
     (word(cop) shl 28) or
-    (word(branchDelay) shl 31)
+    (word(branchDelay) shl 31) or
+    (cpu.cop0.cause and ipAll.toMask)
 
   if error.error == AddressError:
     cpu.cop0.badvaddr = error.address
