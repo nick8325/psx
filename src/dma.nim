@@ -44,8 +44,8 @@ var
 
 # BlockControl's fields.
 const
-  size: BitSlice[uint16, BlockControl] = (pos: 0, width: 16)
-  blocks: BitSlice[uint16, BlockControl] = (pos: 16, width: 16)
+  size: BitSlice[word, BlockControl] = (pos: 0, width: 16)
+  blocks: BitSlice[word, BlockControl] = (pos: 16, width: 16)
 
 # ChannelControl's fields.
 const
@@ -104,10 +104,25 @@ proc checkInterrupt =
   if newInterrupt and not oldInterrupt:
     irqs.signal(3)
 
+proc transfer(chan: Channel, startingAddress: word, size: word): word =
+  ## Do a basic DMA transfer.
+
+  var address = startingAddress
+  for i in 0..<size:
+    case chan.channelControl[direction]
+    of ToRAM: addressSpace.rawWrite[:word](address, chan.read())
+    of FromRAM: chan.write(addressSpace.rawRead[:word](address))
+
+    case chan.channelControl[step]
+    of Forwards: address += 4
+    of Backwards: address -= 4
+
+  return address # TODO: is it this value or one step backwards that's written to MADR?
+
 proc checkChannel(n: ChannelNumber, chan: var Channel) =
   ## Check if the given channel should do a DMA right now.
 
-  # TODO check if channel is enabled
+  # TODO run at a realistic clock rate
   if control[enableChannel[n]] and
      (chan.channelControl[startBusy] or chan.channelControl[startTrigger]):
     echo fmt"Starting DMA transfer on channel {n}"
@@ -125,20 +140,30 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
     else:
       case chan.channelControl[syncMode]
       of LinkedList:
-        case chan.channelControl[direction]
-        of FromRAM:
-          while address != 0x00ffffffu32:
+        if chan.channelControl[direction] == FromRAM:
+          while address != 0x00ff_ffff:
             let
               header = addressSpace.rawRead[:word](address)
               size = header shr 24
-              next = header and 0x00ffffffu32
+              next = header and 0x00ff_ffff
 
             for i in 1..size:
               chan.write(addressSpace.rawRead[:word](address + i*4))
 
             address = next
-        of ToRAM:
+
+          chan.baseAddress = 0x00ff_ffff
+        else:
           echo "Linked list to RAM not supported (except for DMA channel 6)"
+      of Immediate:
+        let endAddress = transfer(chan, address, chan.blockControl[size])
+        if chan.channelControl[chopping]:
+          chan.baseAddress = endAddress
+          chan.blockControl[size] = 0
+      of Blocks:
+        let endAddress = transfer(chan, address, chan.blockControl[size] * chan.blockControl[blocks])
+        chan.baseAddress = endAddress
+        chan.blockControl[blocks] = 0
       else:
         echo fmt"Sync mode {chan.channelControl[syncMode]} not supported"
 
@@ -161,7 +186,6 @@ proc handleDMAChannelControl*(n: ChannelNumber, value: var word, kind: IOKind) =
   of Read: value = word(channels[n].channelControl)
   of Write:
     word(channels[n].channelControl) = value and channelControlMask[n]
-    echo fmt"channel {n} control {value:x}"
     checkChannel n, channels[n]
 
 proc handleDMAControl*(value: var word, kind: IOKind) =

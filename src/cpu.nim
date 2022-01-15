@@ -37,6 +37,13 @@ type
     dcic: word
     bdam: word
     bpcm: word
+    # TODO: do we need to handle load delay slots? If so we could
+    # do it like this:
+    # loadRegister: Register
+    # loadValue: word
+    # and do:
+    # cpu[loadRegister] = loadValue; loadRegister = r0; loadValue = 0
+    # after each instruction
 
 const initCOP0: COP0 =
   # Initial value of COP0. BEV=1, everything else 0.
@@ -639,5 +646,7 @@ proc step*(cpu: var CPU) {.inline.} =
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(cpu.fetch)
   except MachineError as error:
-    if tracing: echo error.error
+    echo fmt"Error {error.error}, instruction {cpu.fetch:08x}"
+    echo cpu
+    #if tracing: echo error.error
     cpu.handleException(error)
