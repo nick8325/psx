@@ -93,7 +93,7 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
     if n == 6: # OT clear
       let words = chan.blockControl[blockSize]
       echo fmt"Clearing {words:x} words ending at {address:x}"
-      address -= words*4 # TODO: words or words-1?
+      address -= (words-1)*4 # TODO: words or words-1?
       for i in 0..<int(words):
         let value = if i == 0: 0x00ffffffu32 else: address-4
         addressSpace.rawWrite[:word](address, value)
@@ -108,7 +108,7 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
               size = header shr 24
               next = header and 0x00ffffffu32
 
-            for i in 1..<size:
+            for i in 1..size:
               chan.write(addressSpace.rawRead[:word](address + i*4))
 
             address = next
