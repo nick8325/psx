@@ -6,6 +6,7 @@ export basics, memory, eventqueue
 var
   events*: EventQueue = initEventQueue() ## The queue of events to happen.
   addressSpace*: Memory ## The PSX address space.
+  region*: Region = NTSC ## The game's region. Updated by the BIOS.
 
 import cpu as r3000
 export r3000
