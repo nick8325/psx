@@ -16,19 +16,26 @@ type
 func bit*(pos: int): tuple[pos: int, width: int] {.inline.} =
   (pos: pos, width: 1)
 
+func bits*[T, U](pos: static int, width: static int, stride: static int = 1): array[0..width-1, BitSlice[bool, U]] =
+  for i in 0..<width:
+    result[i] = bit(pos + i*stride)
+
+template bits*[T, U](slice: BitSlice[T, U]): auto =
+  bits[T, U](slice.pos, slice.width)
+
 func `[]`*[T, U](value: U, slice: BitSlice[T, U]): T {.inline.} =
-  cast[T](value.bitsliced(slice.toSlice))
+  cast[T](distinctBase(U)(value).bitsliced(slice.toSlice))
 
 func toSlice*[T, U](slice: BitSlice[T, U]): Slice[int] {.inline.} =
   slice.pos ..< slice.pos+slice.width
 
 func toMask*[T, U](slice: BitSlice[T, U]): U {.inline.} =
-  slice.toSlice.toMask[:U]
+  U(slice.toSlice.toMask[:distinctBase(U)])
 
 proc `[]=`*[T, U](value: var U, slice: BitSlice[T, U], part: T) {.inline.} =
-  let mask = slice.toMask
-  value.clearMask mask
-  value.setMask(cast[U](part) shl slice.pos)
+  let mask = distinctBase(U)(slice.toMask)
+  distinctBase(U)(value).clearMask mask
+  distinctBase(U)(value).setMask(cast[distinctBase(U)](part) shl slice.pos)
 
 type
   ## A pattern that matches a given part of a word against a given value
@@ -77,10 +84,10 @@ func `[]`*[T, U](val: Masked[U], slice: BitSlice[T, U]): T {.inline.} =
   val.value[slice]
 
 template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidth: int) =
-  let slice: BitSlice[T, distinctBase(U)] = (pos: thePos, width: theWidth)
+  const `name Slice` {.inject, used.}: BitSlice[T, U] = (pos: thePos, width: theWidth)
 
-  proc name*(whole: U): T {.inject.} =
-    distinctBase(U)(whole)[slice]
+  proc name(whole: U): T {.inject, used, inline.} =
+    whole[`name Slice`]
 
-  proc `name =`*(whole: var U, part: T) {.inject.} =
-    distinctBase(U)(whole)[slice] = part
+  proc `name =`(whole: var U, part: T) {.inject, used, inline.} =
+    whole[`name Slice`] = part
