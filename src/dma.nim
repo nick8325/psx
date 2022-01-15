@@ -70,7 +70,7 @@ const
 
 # Control's fields.
 const
-  enableChannel: array[ChannelNumber, BitSlice[bool, Control]] =
+  enableChannel: array[ChannelNumber, auto] =
     bits[bool, Control](pos=3, width=7, stride=4)
 
 const
