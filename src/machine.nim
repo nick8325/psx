@@ -13,7 +13,7 @@ export r3000
 var
   cpu*: CPU = initCPU ## The main processor
 
-import irq, dma
+import irq, dma, gpu
 
 var
   bios {.align: 4096.}: array[0x80000, byte]
@@ -102,15 +102,26 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     # DMA interrupt register
     handleDMAInterrupt value, kind
     return true
+  of 0x1f801810u32:
+    case kind
+    of Read: value = gpuread()
+    of Write: gp0(value)
+    return true
   of 0x1f801814u32:
-    # GPUSTAT - hack
-    if kind == Read: value = 0x1c00_0000u32
+    case kind
+    of Read: value = gpustat()
+    of Write: gp1(value)
+    return true
   else:
     return false
 
 addressSpace.ioHandler8 = handleIO8
 addressSpace.ioHandler16 = handleIO16
 addressSpace.ioHandler32 = handleIO32
+
+# Set up DMA handlers.
+dma.channels[2].read = gpuReadDMA
+dma.channels[2].write = gpuWriteDMA
 
 proc runSystem*() =
   ## Run the system.

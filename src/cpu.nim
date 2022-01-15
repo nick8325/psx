@@ -4,6 +4,8 @@ import utils, basics, memory, machine
 import fusion/matching
 import std/[tables, bitops, strformat]
 
+var logger = newLogger("CPU")
+
 # Processor state.
 
 type
@@ -108,7 +110,7 @@ proc `[]`(cop0: COP0, reg: CoRegister): word =
   of CoRegister(14): cop0.epc
   of CoRegister(15): 2 # PRId - value from Nocash PSX
   else:
-    echo fmt"Ignoring read to unknown COP register {reg}"
+    logger.warn fmt"Ignoring read of unknown COP register {reg}"
     return 0
 
 proc `[]=`(cop0: var COP0, reg: CoRegister, val: word) =
@@ -123,12 +125,12 @@ proc `[]=`(cop0: var COP0, reg: CoRegister, val: word) =
   of CoRegister(12):
     let conflicting = (val and forbiddenSRBits) xor (cop0.sr and forbiddenSRBits)
     if conflicting != 0:
-      echo fmt"Ignoring writes to forbidden SR bits: {conflicting:x}"
+      logger.warn fmt"Ignoring writes to forbidden SR bits: {conflicting:x}"
     cop0.sr = (cop0.sr and fixedSRBits) or (val and writableSRBits)
   of CoRegister(13): discard
   of CoRegister(14): discard
   else:
-    echo fmt"Ignoring read to unknown COP register {reg}"
+    logger.warn fmt"Ignoring write to unknown COP register {reg}"
 
 proc leaveKernel(cop0: var COP0) =
   # Nocash PSX: RFE leaves IEo/KUo unchanged
@@ -198,22 +200,6 @@ proc read*[T](cpu: CPU, address: word): T =
 proc write*[T](cpu: CPU, address: word, val: T) =
   ## Write to a given virtual address.
   addressSpace.write[:T](cpu.resolveAddress(address, Store), val)
-
-func `$`*(cpu: CPU): string =
-  result = fmt "PC={cpu.pc:x} "
-  for i, x in cpu.registers:
-    result &= fmt "{i}={x:x} "
-  result &= fmt "COP0.SR={cpu.cop0.sr:x}"
-
-func cpuDiff(cpu1: CPU, cpu2: CPU): string {.used.} =
-  ## Show the difference between two CPU states.
-  if cpu1.pc != cpu2.pc:
-    result &= fmt "PC={cpu1.pc:x}->{cpu2.pc:x} "
-  for i, x in cpu1.registers:
-    if x != cpu2.registers[i]:
-      result &= fmt "{i}={x:x}->{cpu2.registers[i]:x} "
-  if cpu1.cop0.sr != cpu2.cop0.sr:
-    result &= fmt "COP0.SR={cpu1.cop0.sr:x}->{cpu2.cop0.sr:x} "
 
 # Instruction decoding and execution.
 
@@ -405,7 +391,9 @@ proc format*(instr: word): string =
   ## Disassemble an instruction.
 
   let
-    op = decode(instr)
+    op =
+      try: decode(instr)
+      except MachineError: return fmt"(unknown instruction {instr:08x})"
     rd = instr[rd]
     rs = instr[rs]
     rt = instr[rt]
@@ -437,6 +425,25 @@ proc format*(instr: word): string =
   of MTC: args(CoRegister(rd), rt)
   of Whole: args(fmt"$0x{whole}")
   of None: $op
+
+proc `$`*(cpu: CPU): string =
+  let instructionStr =
+    try: cpu.fetch.format
+    except MachineError: "(invalid PC)"
+  result = fmt "{instructionStr}: PC={cpu.pc:x} "
+  for i, x in cpu.registers:
+    result &= fmt "{i}={x:x} "
+  result &= fmt "COP0.SR={cpu.cop0.sr:x}"
+
+func cpuDiff(cpu1: CPU, cpu2: CPU): string {.used.} =
+  ## Show the difference between two CPU states.
+  if cpu1.pc != cpu2.pc:
+    result &= fmt "PC={cpu1.pc:x}->{cpu2.pc:x} "
+  for i, x in cpu1.registers:
+    if x != cpu2.registers[i]:
+      result &= fmt "{i}={x:x}->{cpu2.registers[i]:x} "
+  if cpu1.cop0.sr != cpu2.cop0.sr:
+    result &= fmt "COP0.SR={cpu1.cop0.sr:x}->{cpu2.cop0.sr:x} "
 
 proc signedAdd(x, y: word): word =
   if x.signed > 0 and y.signed > high(iword) - x.signed:
@@ -685,21 +692,19 @@ proc handleException(cpu: var CPU, error: MachineError) =
   cpu.pc = if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32
   cpu.nextPC = cpu.pc + 4
 
-const
-  # If true, trace CPU execution
-  tracing = false
-
 proc step*(cpu: var CPU) {.inline.} =
   try:
     # Check for IRQs first.
     if cpu.cop0.sr[ie[0]] and (cpu.cop0.sr[imAll] and cpu.cop0.cause[ipAll]) != 0:
       raise MachineError(error: Interrupt)
 
-    if tracing: echo fmt"{cpu.pc:08x}: {cpu.fetch.format}"
+    let
+      oldCPU = cpu
+      instr = cpu.fetch
     # The execute function is in charge of updating pc and nextPC.
-    cpu.execute(cpu.fetch)
+    cpu.execute(instr)
+    logger.debug fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
   except MachineError as error:
-    echo fmt"Error {error.error}, instruction {cpu.fetch:08x}"
-    echo cpu
-    #if tracing: echo error.error
+    logger.info fmt"Machine interrupt {error.error}, instruction {cpu.fetch:08x}"
+    logger.info cpu
     cpu.handleException(error)

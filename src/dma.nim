@@ -3,6 +3,8 @@
 import machine, utils, irq
 import std/[bitops, strformat]
 
+var logger = newLogger("DMA")
+
 type
   ChannelNumber = range[0..6]
   BlockControl = distinct word
@@ -33,9 +35,9 @@ type
 
 proc initChannel(n: ChannelNumber): Channel =
   result.read = proc(): word =
-    echo fmt"Read from unknown DMA channel {n}"
+    logger.warn "Read from unknown DMA channel {n}"
   result.write = proc(value: word) =
-    echo fmt"Write {value:x} to unknown DMA channel {n}"
+    logger.warn "Write {value:x} to unknown DMA channel {n}"
 
 var
   channels*: array[ChannelNumber, Channel]
@@ -125,13 +127,13 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
   # TODO run at a realistic clock rate
   if control[enableChannel[n]] and
      (chan.channelControl[startBusy] or chan.channelControl[startTrigger]):
-    echo fmt"Starting DMA transfer on channel {n}"
+    logger.debug fmt"Starting DMA transfer on channel {n}"
     chan.channelControl[startTrigger] = false
     var address = chan.baseAddress and not 3u32
 
     if n == 6: # OT clear
       let words = chan.blockControl[size]
-      echo fmt"Clearing {words:x} words ending at {address:x}"
+      logger.debug fmt"Clearing {words:x} words ending at {address:x}"
       address -= (words-1)*4 # TODO: words or words-1?
       for i in 0..<int(words):
         let value = if i == 0: 0x00ffffffu32 else: address-4
@@ -154,7 +156,7 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
 
           chan.baseAddress = 0x00ff_ffff
         else:
-          echo "Linked list to RAM not supported (except for DMA channel 6)"
+          logger.warn "Linked list to RAM not supported (except for DMA channel 6)"
       of Immediate:
         let endAddress = transfer(chan, address, chan.blockControl[size])
         if chan.channelControl[chopping]:
@@ -165,7 +167,7 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
         chan.baseAddress = endAddress
         chan.blockControl[blocks] = 0
       else:
-        echo fmt"Sync mode {chan.channelControl[syncMode]} not supported"
+        logger.warn fmt"Sync mode {chan.channelControl[syncMode]} not supported"
 
     chan.channelControl[startBusy] = false
     interrupt[flagsIRQ[n]] = true

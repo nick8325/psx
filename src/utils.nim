@@ -1,6 +1,21 @@
 ## Utility functions used throughout the program.
 
-import std/[bitops, typetraits]
+import std/[bitops, typetraits, logging]
+
+func newLogger*(name: string, level: Level = lvlInfo): Logger =
+  newConsoleLogger(levelThreshold = level,
+                   fmtStr = defaultFmtStr & name & ": ",
+                   useStderr = true)
+
+template lazyLog*(logger: Logger, level: Level, args: varargs[string, `$`]) =
+  if level >= logger.levelThreshold:
+    logger.log(level, args)
+template debug* (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlDebug, args)
+template info*  (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlInfo, args)
+template notice*(logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlNotice, args)
+template warn*  (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlWarn, args)
+template error* (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlError, args)
+template fatal* (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlFatal, args)
 
 func sliceArray*[size: static int, T](
   arr: var openArray[T], offset: int): ptr array[size, T] =
