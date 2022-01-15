@@ -97,16 +97,16 @@ proc readyToReceiveCommand: bool =
   readyToReceiveDMA()
 
 let
-  command: BitSlice[int, word] = (pos: 24, width: 8)
-  byte1: BitSlice[int, word] = (pos: 16, width: 8)
-  byte2: BitSlice[int, word] = (pos: 8, width: 8)
-  byte3: BitSlice[int, word] = (pos: 0, width: 8)
-  half1: BitSlice[int, word] = (pos: 12, width: 12)
-  half2: BitSlice[int, word] = (pos: 0, width: 12)
-  five1: BitSlice[int, word] = (pos: 15, width: 5)
-  five2: BitSlice[int, word] = (pos: 10, width: 5)
-  five3: BitSlice[int, word] = (pos: 5, width: 5)
-  five4: BitSlice[int, word] = (pos: 0, width: 5)
+  command = BitSlice[int, word](pos: 24, width: 8)
+  byte1 = BitSlice[int, word](pos: 16, width: 8)
+  byte2 = BitSlice[int, word](pos: 8, width: 8)
+  byte3 = BitSlice[int, word](pos: 0, width: 8)
+  half1 = BitSlice[int, word](pos: 12, width: 12)
+  half2 = BitSlice[int, word](pos: 0, width: 12)
+  five1 = BitSlice[int, word](pos: 15, width: 5)
+  five2 = BitSlice[int, word](pos: 10, width: 5)
+  five3 = BitSlice[int, word](pos: 5, width: 5)
+  five4 = BitSlice[int, word](pos: 0, width: 5)
 
 proc processCommand =
   discard

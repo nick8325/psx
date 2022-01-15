@@ -54,23 +54,19 @@ const initCOP0: COP0 =
 
 const
   # User-settable bits in COP0.SR.
-  cu: array[4, BitSlice[bool, word]] = [bit 28, bit 29, bit 30, bit 31]
-  bev: BitSlice[bool, word] = bit 22
-  cm {.used.}:  BitSlice[bool, word] = bit 19
-  swc: BitSlice[bool, word] = bit 17
-  isc: BitSlice[bool, word] = bit 16
-  im: array[8, BitSlice[bool, word]] =
-    [bit 8, bit 9, bit 10, bit 11, bit 12, bit 13, bit 14, bit 15]
-  imAll: BitSlice[word, word] = (pos: 8, width: 8)
-  ku: array[3, BitSlice[bool, word]] =
-    [bit 1, bit 3, bit 5]
-  ie: array[3, BitSlice[bool, word]] =
-    [bit 0, bit 2, bit 4]
+  cu = BitSlice[word, word](pos: 28, width: 4).bits
+  bev = bit[word] 22
+  cm {.used.} = bit[word] 19
+  swc = bit[word] 17
+  isc = bit[word] 16
+  imAll = BitSlice[word, word](pos: 8, width: 8)
+  im = imAll.bits
+  ku = [bit[word] 1, bit[word] 3, bit[word] 5]
+  ie = [bit[word] 0, bit[word] 2, bit[word] 4]
 
   # IRQ bits in COP0.CAUSE.
-  ip: array[8, BitSlice[bool, word]] =
-    [bit 8, bit 9, bit 10, bit 11, bit 12, bit 13, bit 14, bit 15]
-  ipAll: BitSlice[word, word] = (pos: 8, width: 8)
+  ipAll = BitSlice[word, word](pos: 8, width: 8)
+  ip = ipAll.bits
 
   # Read-write SR bits
   writableSRBits: word =
@@ -276,16 +272,16 @@ const opcodeType: array[Opcode, OpcodeType] =
 
 const
   # The different parts of a machine instruction.
-  opcode: BitSlice[int, word] = (pos: 26, width: 6)
-  rs: BitSlice[Register, word] = (pos: 21, width: 5)
-  rt: BitSlice[Register, word] = (pos: 16, width: 5)
-  rd: BitSlice[Register, word] = (pos: 11, width: 5)
-  shamt: BitSlice[int, word] = (pos: 6, width: 5)
-  funct: BitSlice[int, word] = (pos: 0, width: 6)
-  imm: BitSlice[Immediate, word] = (pos: 0, width: 16)
-  target: BitSlice[Target, word] = (pos: 0, width: 26)
-  copimm: BitSlice[word, word] = (pos: 0, width: 25)
-  whole: BitSlice[word, word] = (pos: 0, width: 26)
+  opcode = BitSlice[int, word](pos: 26, width: 6)
+  rs = BitSlice[Register, word](pos: 21, width: 5)
+  rt = BitSlice[Register, word](pos: 16, width: 5)
+  rd = BitSlice[Register, word](pos: 11, width: 5)
+  shamt = BitSlice[int, word](pos: 6, width: 5)
+  funct = BitSlice[int, word](pos: 0, width: 6)
+  imm = BitSlice[Immediate, word](pos: 0, width: 16)
+  target = BitSlice[Target, word](pos: 0, width: 26)
+  copimm = BitSlice[word, word](pos: 0, width: 25)
+  whole = BitSlice[word, word](pos: 0, width: 26)
 
 proc decode(instr: word): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.

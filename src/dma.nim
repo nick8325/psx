@@ -46,34 +46,34 @@ var
 
 # BlockControl's fields.
 const
-  size: BitSlice[word, BlockControl] = (pos: 0, width: 16)
-  blocks: BitSlice[word, BlockControl] = (pos: 16, width: 16)
+  size = BitSlice[word, BlockControl](pos: 0, width: 16)
+  blocks = BitSlice[word, BlockControl](pos: 16, width: 16)
 
 # ChannelControl's fields.
 const
-  direction: BitSlice[Direction, ChannelControl] = (pos: 0, width: 1)
-  step: BitSlice[Step, ChannelControl] = (pos: 1, width: 1)
-  chopping {.used.}: BitSlice[bool, ChannelControl] = (pos: 8, width: 1)
-  syncMode: BitSlice[SyncMode, ChannelControl] = (pos: 9, width: 2)
-  dmaWindowSize {.used.}: BitSlice[int, ChannelControl] = (pos: 16, width: 3)
-  cpuWindowSize {.used.}: BitSlice[int, ChannelControl] = (pos: 20, width: 3)
-  startBusy: BitSlice[bool, ChannelControl] = (pos: 24, width: 1)
-  startTrigger: BitSlice[bool, ChannelControl] = (pos: 28, width: 1)
+  direction = BitSlice[Direction, ChannelControl](pos: 0, width: 1)
+  step = BitSlice[Step, ChannelControl](pos: 1, width: 1)
+  chopping {.used.} = bit[ChannelControl] 8
+  syncMode = BitSlice[SyncMode, ChannelControl](pos: 9, width: 2)
+  dmaWindowSize {.used.} = BitSlice[int, ChannelControl](pos: 16, width: 3)
+  cpuWindowSize {.used.} = BitSlice[int, ChannelControl](pos: 20, width: 3)
+  startBusy = bit[ChannelControl] 24
+  startTrigger = bit[ChannelControl] 28
 
 # Interrupt's fields.
 const
-  force: BitSlice[bool, Interrupt] = (pos: 15, width: 1)
-  enableIRQs: BitSlice[word, Interrupt] = (pos: 16, width: 7)
+  force = bit[Interrupt] 15
+  enableIRQs = BitSlice[word, Interrupt](pos: 16, width: 7)
   enableIRQ {.used.}: array[ChannelNumber, auto] = enableIRQs.bits
-  masterEnable: BitSlice[bool, Interrupt] = (pos: 23, width: 1)
-  flagsIRQs: BitSlice[word, Interrupt] = (pos: 24, width: 7)
+  masterEnable = bit[Interrupt] 23
+  flagsIRQs = BitSlice[word, Interrupt](pos: 24, width: 7)
   flagsIRQ: array[ChannelNumber, auto] = flagsIRQs.bits
-  master: BitSlice[bool, Interrupt] = (pos: 31, width: 1)
+  master = bit[Interrupt] 31
 
 # Control's fields.
 const
   enableChannel: array[ChannelNumber, auto] =
-    bits[bool, Control](pos=3, width=7, stride=4)
+    bits[Control](pos=3, width=7, stride=4)
 
 const
   # Which bits of the channel control mask are writable?

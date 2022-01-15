@@ -26,17 +26,19 @@ func sliceArray*[size: static int, T](
 
 type
   ## Like a slice, but on a range of bits in a word
-  BitSlice*[T, U] = tuple[pos: int, width: int]
+  BitSlice*[T, U] = object
+    pos*: int
+    width*: int
 
-func bit*(pos: int): tuple[pos: int, width: int] {.inline.} =
-  (pos: pos, width: 1)
+func bit*[T](pos: int): BitSlice[bool, T] {.inline.} =
+  BitSlice[bool, T](pos: pos, width: 1)
 
-func bits*[T, U](pos: static int, width: static int, stride: static int = 1): array[0..width-1, BitSlice[bool, U]] =
+func bits*[U](pos: static int, width: static int, stride: static int = 1): array[0..width-1, BitSlice[bool, U]] =
   for i in 0..<width:
-    result[i] = bit(pos + i*stride)
+    result[i] = bit[U](pos + i*stride)
 
 template bits*[T, U](slice: BitSlice[T, U]): auto =
-  bits[T, U](slice.pos, slice.width)
+  bits[U](slice.pos, slice.width)
 
 func `[]`*[T, U](value: U, slice: BitSlice[T, U]): T {.inline.} =
   cast[T](distinctBase(U)(value).bitsliced(slice.toSlice))
@@ -53,9 +55,46 @@ func toMask*[T, U](slice: BitSlice[T, U]): U {.inline.} =
 proc `[]=`*[T, U](value: var U, slice: BitSlice[T, U], part: T) {.inline.} =
   let mask = distinctBase(U)(slice.toMask)
   distinctBase(U)(value).clearMask mask
-  distinctBase(U)(value).setMask(cast[distinctBase(U)](part) shl slice.pos)
+  distinctBase(U)(value).setMask(mask and (cast[distinctBase(U)](part) shl slice.pos))
 
 proc `.=`*[T, U](value: var U, slice: BitSlice[T, U], part: T) {.inline.} =
+  value[slice] = part
+
+type
+  ## A range of bits that should be sign extended on extraction.
+  SignedBitSlice*[T, U] = object
+    pos*: int
+    width*: int
+
+func signExtendFrom[T](x: T, bit: int): T {.inline.} =
+  let
+    low = 1 shl bit
+    range = 1 shl (bit+1)
+  ((x +% low) mod range) -% low
+
+static:
+  assert signExtendFrom(0x8f, 7) == -113
+  assert signExtendFrom(0x7f, 7) == 127
+
+func unsign[T, U](slice: SignedBitSlice[T, U]): BitSlice[T, U] =
+  BitSlice(pos=slice.pos, width=slice.width)
+
+func `[]`*[T, U](value: U, slice: SignedBitSlice[T, U]): T {.inline.} =
+  value[slice.unsign].signExtendFrom(slice.width)
+
+func `.`*[T, U](value: U, slice: SignedBitSlice[T, U]): T {.inline.} =
+  value[slice]
+
+func toSlice*[T, U](slice: SignedBitSlice[T, U]): Slice[int] {.inline.} =
+  slice.unsign.toSlice
+
+func toMask*[T, U](slice: SignedBitSlice[T, U]): U {.inline.} =
+  slice.unsign.toMask
+
+proc `[]=`*[T, U](value: var U, slice: SignedBitSlice[T, U], part: T) {.inline.} =
+  value[slice.unsign] = part
+
+proc `.=`*[T, U](value: var U, slice: SignedBitSlice[T, U], part: T) {.inline.} =
   value[slice] = part
 
 type
@@ -112,4 +151,3 @@ template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidt
 
   proc `name =`(whole: var U, part: T) {.inject, used, inline.} =
     whole[`name Slice`] = part
-
