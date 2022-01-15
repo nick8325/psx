@@ -705,6 +705,5 @@ proc step*(cpu: var CPU) {.inline.} =
     cpu.execute(instr)
     logger.debug fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
   except MachineError as error:
-    logger.info fmt"Machine interrupt {error.error}, instruction {cpu.fetch:08x}"
-    logger.info cpu
+    logger.info fmt"{error.error} interrupt: {cpu}"
     cpu.handleException(error)
