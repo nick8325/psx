@@ -452,6 +452,41 @@ proc signedSub(x, y: word): word =
     raise MachineError(error: ArithmeticOverflow)
   return x - y
 
+func replaceLeft(value, replacement: word, alignment: 0..3): word =
+  ## Helper for LWL/SWL.
+
+  case alignment
+  of 3: replacement
+  of 2: (value and 0xff) or (replacement shl 8)
+  of 1: (value and 0xffff) or (replacement shl 16)
+  of 0: (value and 0xffffff) or (replacement shl 24)
+
+func replaceRight(value, replacement: word, alignment: 0..3): word =
+  ## Helper for LWR/SWR.
+
+  case alignment
+  of 0: replacement
+  of 1: (value and 0xff000000u32) or (replacement shr 8)
+  of 2: (value and 0xffff0000u32) or (replacement shr 16)
+  of 3: (value and 0xffffff00u32) or (replacement shr 24)
+
+# Test that replaceLeft/replaceRight are working properly.
+static:
+  for i in 0..3:
+    let start = 0x12345678u32
+    let bytes = [0x0d, 0xd0, 0xfe, 0xca, 0xfe, 0xbe, 0xda, 0xde]
+    proc read(i: int): word =
+      word(bytes[i]) +
+      (word(bytes[i+1]) shl 8) +
+      (word(bytes[i+2]) shl 16) +
+      (word(bytes[i+3]) shl 24)
+    proc left(value: word, i: 0..3): word =
+      replaceLeft(value, read((i+3) and not 3), (i+3) mod 4)
+    proc right(value: word, i: 0..3): word =
+      value.replaceRight(read(i and not 3), i)
+    assert start.left(i).right(i) == read(i)
+    assert start.right(i).left(i) == read(i)
+
 proc execute(cpu: var CPU, instr: word) {.inline.} =
   ## Decode and execute an instruction.
   var newPC = cpu.nextPC + 4
@@ -553,13 +588,31 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of LBU: cpu[rt] = cpu.read[:uint8](cpu[rs] + imm.signExt)
   of LH: cpu[rt] = iword(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned
   of LHU: cpu[rt] = cpu.read[:uint16](cpu[rs] + imm.signExt)
-  of LWL: raise MachineError(error: ReservedInstruction)
-  of LWR: raise MachineError(error: ReservedInstruction)
+  of LWL:
+    let
+      address = cpu[rs] + imm.signExt
+      value = cpu.read[:word](address and not 3u32)
+    cpu[rt] = cpu[rt].replaceLeft(value, address and 3)
+  of LWR:
+    let
+      address = cpu[rs] + imm.signExt
+      value = cpu.read[:word](address and not 3u32)
+    cpu[rt] = cpu[rt].replaceRight(value, address and 3)
   of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt])
   of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
   of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
-  of SWL: raise MachineError(error: ReservedInstruction)
-  of SWR: raise MachineError(error: ReservedInstruction)
+  of SWL:
+    let
+      address = cpu[rs] + imm.signExt
+      value = cpu.read[:word](address and not 3u32)
+      newValue = value.replaceLeft(cpu[rt], address and 3)
+    cpu.write[:word](address and not 3u32, newValue)
+  of SWR:
+    let
+      address = cpu[rs] + imm.signExt
+      value = cpu.read[:word](address and not 3u32)
+      newValue = value.replaceRight(cpu[rt], address and 3)
+    cpu.write[:word](address and not 3u32, newValue)
   of BEQ: branchIf(cpu[rs] == cpu[rt])
   of BNE: branchIf(cpu[rs] != cpu[rt])
   of BGEZ: branchIf(cpu[rs].signed >= 0)
