@@ -5,38 +5,42 @@ import std/[bitops, strformat]
 
 type
   ChannelNumber = range[0..6]
+  BlockControl = distinct word
+  ChannelControl = distinct word
 
   Channel* = object
-    baseAddress: Masked[word]
-    blockControl: word
-    channelControl: Masked[word]
+    baseAddress: word
+    blockControl: BlockControl
+    channelControl: ChannelControl
     read*: proc: word
     write*: proc(value: word)
 
-  SyncMode = enum
+  SyncMode {.pure.} = enum
     Immediate = 0,
     Blocks = 1,
     LinkedList = 2,
     Reserved = 3
 
-const
-  # blockControl fields
-  blockSize: BitSlice[uint16, word] = (pos: 0, width: 16)
-  blockCount: BitSlice[uint16, word] = (pos: 0, width: 16)
+  Direction {.pure.} = enum
+    ToRAM = 0,
+    FromRAM = 1
 
-  # channelControl fields
-  controlDirection: BitSlice[bool, word] = bit 0 # false=to ram, true=from ram
-  controlStep: BitSlice[bool, word] = bit 1 # false=forwards, back=forwards
-  controlChopping: BitSlice[bool, word] = bit 8
-  controlSyncMode: BitSlice[SyncMode, word] = (pos: 9, width: 2)
-  controlDMAWindowSize: BitSlice[int, word] = (pos: 16, width: 3)
-  controlCPUWindowSize: BitSlice[int, word] = (pos: 20, width: 3)
-  controlStartBusy: BitSlice[bool, word] = bit 24
-  controlStartTrigger: BitSlice[bool, word] = bit 28
+  Step {.pure.} = enum
+    Forwards = 0,
+    Backwards = 1
+
+BlockControl.bitfield size, uint16, 0, 16
+BlockControl.bitfield blocks, uint16, 16, 16
+ChannelControl.bitfield direction, Direction, 0, 1
+ChannelControl.bitfield step, Step, 0, 1
+ChannelControl.bitfield chopping, bool, 8, 1
+ChannelControl.bitfield syncMode, SyncMode, 9, 2
+ChannelControl.bitfield dmaWindowSize, int, 16, 3
+ChannelControl.bitfield cpuWindowSize, int, 20, 3
+ChannelControl.bitField startBusy, bool, 24, 1
+ChannelControl.bitField startTrigger, bool, 28, 1
 
 proc initChannel(n: ChannelNumber): Channel =
-  result.baseAddress.mask = 0xfffffff
-  result.channelControl.mask = 0x71770703
   result.read = proc(): word =
     echo fmt"Read from unknown DMA channel {n}"
   result.write = proc(value: word) =
@@ -47,17 +51,23 @@ var
   control: word = 0x07654321u32
   interrupt: word
 
+const
+  # Which bits of the channel control mask are writable?
+  channelControlMask: array[ChannelNumber, word] = block:
+    var result: array[ChannelNumber, word]
+    for x in result.mitems: x = 0x71770703
+    # Nocash PSX claims many bits are not writable for OTC
+    result[6] = 0x51000000
+    result
+
+  initialDirections: array[ChannelNumber, Direction] =
+    [FromRAM, ToRAM, FromRAM, ToRAM, ToRAM, ToRAM, ToRAM]
+
+# Initialise channels
 for i in ChannelNumber.low..ChannelNumber.high:
   channels[i] = initChannel(i)
-# Nocash PSX claims many bits are not writable for OTC
-channels[6].channelControl.mask = 0x51000000
-channels[6].channelControl.value[controlStep] = true
-
-# Initialise direction just for luck
-const
-  directions: array[ChannelNumber, bool] = [true, false, true, false, false, false, false]
-for i in ChannelNumber.low..ChannelNumber.high:
-  channels[i].channelControl.value[controlDirection] = directions[i]
+  channels[i].channelControl.direction = initialDirections[i]
+channels[6].channelControl.step = Backwards
 
 const
   irqForce: BitSlice[bool, word] = bit 15
@@ -84,14 +94,14 @@ proc checkInterrupt =
 proc checkChannel(n: ChannelNumber, chan: var Channel) =
   ## Check if the given channel should do a DMA right now.
 
-  if chan.channelControl[controlStartBusy] or
-     chan.channelControl[controlStartTrigger]:
+  if chan.channelControl.startBusy or
+     chan.channelControl.startTrigger:
     echo fmt"Starting DMA transfer on channel {n}"
-    chan.channelControl.value[controlStartTrigger] = false
+    chan.channelControl.startTrigger = false
     var address = chan.baseAddress and not 3u32
 
     if n == 6: # OT clear
-      let words = chan.blockControl[blockSize]
+      let words = chan.blockControl.size
       echo fmt"Clearing {words:x} words ending at {address:x}"
       address -= (words-1)*4 # TODO: words or words-1?
       for i in 0..<int(words):
@@ -99,9 +109,10 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
         addressSpace.rawWrite[:word](address, value)
         address += 4
     else:
-      case chan.channelControl[controlSyncMode]
+      case chan.channelControl.syncMode
       of LinkedList:
-        if chan.channelControl[controlDirection]:
+        case chan.channelControl.direction
+        of FromRAM:
           while address != 0x00ffffffu32:
             let
               header = addressSpace.rawRead[:word](address)
@@ -112,30 +123,30 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
               chan.write(addressSpace.rawRead[:word](address + i*4))
 
             address = next
-        else:
-          echo "Linked list to RAM not supported"
+        of ToRAM:
+          echo "Linked list to RAM not supported (except for DMA channel 6)"
       else:
-        echo fmt"Sync mode {chan.channelControl[controlSyncMode]} not supported"
+        echo fmt"Sync mode {chan.channelControl.syncMode} not supported"
 
-    chan.channelControl.value[controlStartBusy] = false
+    chan.channelControl.startBusy = false
     interrupt[irqFlags[n]] = true
     checkInterrupt()
 
 proc handleDMABaseAddress*(n: ChannelNumber, value: var word, kind: IOKind) =
   case kind
   of Read: value = channels[n].baseAddress
-  of Write: channels[n].baseAddress.update value
+  of Write: channels[n].baseAddress = value and 0x00ff_ffff
 
 proc handleDMABlockControl*(n: ChannelNumber, value: var word, kind: IOKind) =
   case kind
-  of Read: value = channels[n].blockControl
-  of Write: channels[n].blockControl = value
+  of Read: value = word(channels[n].blockControl)
+  of Write: word(channels[n].blockControl) = value
 
 proc handleDMAChannelControl*(n: ChannelNumber, value: var word, kind: IOKind) =
   case kind
-  of Read: value = channels[n].channelControl
+  of Read: value = word(channels[n].channelControl)
   of Write:
-    channels[n].channelControl.update value
+    word(channels[n].channelControl) = value and channelControlMask[n]
     echo fmt"channel {n} control {value:x}"
     checkChannel n, channels[n]
 

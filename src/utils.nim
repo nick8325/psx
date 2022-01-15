@@ -1,6 +1,6 @@
 ## Utility functions used throughout the program.
 
-import bitops
+import std/[bitops, typetraits]
 
 func sliceArray*[size: static int, T](
   arr: var openArray[T], offset: int): ptr array[size, T] =
@@ -75,3 +75,12 @@ converter value*[T](x: Masked[T]): T {.inline.} =
 
 func `[]`*[T, U](val: Masked[U], slice: BitSlice[T, U]): T {.inline.} =
   val.value[slice]
+
+template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidth: int) =
+  let slice: BitSlice[T, distinctBase(U)] = (pos: thePos, width: theWidth)
+
+  proc name*(whole: U): T {.inject.} =
+    distinctBase(U)(whole)[slice]
+
+  proc `name =`*(whole: var U, part: T) {.inject.} =
+    distinctBase(U)(whole)[slice] = part
