@@ -36,10 +36,10 @@ type
 # Timing information.
 
 type
-  Region* {.pure.} = enum PAL, NTSC
-
-const
-  region*: Region = PAL
+  Region* {.pure.} = enum
+    ## These numbers match GPUSTAT.20.
+    NTSC = 0,
+    PAL = 1
 
 const
   # This many timesteps occur per second.
@@ -48,7 +48,5 @@ const
   cpuClock* = 11 # ~33.8MHz
   gpuClock* = 7  # ~53.2MHz
   systemClock* = cpuClock * 8 # ~4.23MHz
-  refreshRate*: uint64 =
-    case region
-    of PAL: 50
-    of NTSC: 60
+  refreshRate*: array[Region, uint64] =
+    [NTSC: 60u64, PAL: 50u64]

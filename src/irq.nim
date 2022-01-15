@@ -35,6 +35,3 @@ proc handleMask*(irqs: var IRQs, value: var word, kind: IOKind) =
   case kind
   of Read: value = irqs.mask
   of Write: irqs.mask = value and 0x7ff
-
-# VBLANK IRQ
-events.every(clockRate div refreshRate) do: irqs.signal 0
