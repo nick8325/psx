@@ -72,3 +72,6 @@ proc update*[T](x: var Masked[T], value: T) {.inline.} =
 
 converter value*[T](x: Masked[T]): T {.inline.} =
   x.value
+
+func `[]`*[T, U](val: Masked[U], slice: BitSlice[T, U]): T {.inline.} =
+  val.value[slice]

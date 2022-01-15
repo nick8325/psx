@@ -13,7 +13,7 @@ export r3000
 var
   cpu*: CPU = initCPU ## The main processor
 
-import irq
+import irq, dma
 
 var
   bios {.align: 4096.}: array[0x80000, byte]
@@ -53,8 +53,6 @@ addressSpace.rawWrite[:word](0x1f80101cu32, 0x00070777u32)
 addressSpace.rawWrite[:word](0x1f801020u32, 0x00031125u32)
 addressSpace.rawWrite[:word](0x1f801060u32, 0x00000b88u32)
 addressSpace.rawWrite[:word](0xfffe0130u32, 0x0001e988u32)
-# TODO this is the initial value of GPUSTAT
-addressSpace.rawWrite[:word](0x1f801814u32, 0x14802000u32)
 
 # I/O handlers
 proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
@@ -82,6 +80,31 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     # Interrupt mask
     irqs.handleMask value, kind
     return true
+  of 0x1f801080u32..0x1f8010e8u32:
+    # DMA channel
+    let channel = (address-0x1f801080u32) div 16
+    case address mod 16
+    of 0:
+      handleDMABaseAddress channel, value, kind
+      return true
+    of 4:
+      handleDMABlockControl channel, value, kind
+      return true
+    of 8:
+      handleDMAChannelControl channel, value, kind
+      return true
+    else: return false
+  of 0x1f8010f0u32:
+    # DMA control register
+    handleDMAControl value, kind
+    return true
+  of 0x1f8010f4u32:
+    # DMA interrupt register
+    handleDMAInterrupt value, kind
+    return true
+  of 0x1f801814u32:
+    # GPUSTAT - hack
+    if kind == Read: value = 0x1c00_0000u32
   else:
     return false
 
