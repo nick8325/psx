@@ -1,6 +1,6 @@
 ## An interpreter for the R3000A CPU.
 
-import utils, basics, memory, machine
+import utils, basics, memory
 import fusion/matching
 import std/[tables, bitops, strformat]
 
@@ -703,3 +703,6 @@ proc step*(cpu: var CPU) {.inline.} =
   except MachineError as error:
     logger.info fmt"{error.error} interrupt: {cpu}"
     cpu.handleException(error)
+
+var
+  cpu*: CPU = initCPU ## The main processor

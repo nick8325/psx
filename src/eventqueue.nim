@@ -4,7 +4,7 @@ import std/heapqueue
 
 type
   Event = tuple[time: uint64, repeat: uint64, action: proc ()]
-  EventQueue* {.requiresInit.} = object
+  EventQueue* {.requiresInit, byref.} = object
     ## A queue of events.
     now: uint64
     minDelta: uint64
@@ -59,10 +59,13 @@ proc runNext*(queue: var EventQueue): bool =
 
   if queue.heap.len > 0:
     let event = queue.heap.pop()
+    queue.updateMinDelta
     event.action()
     if event.repeat != uint64.high:
       queue.every(event.repeat, event.action)
-    queue.updateMinDelta
     return true
   else:
     return false
+
+var
+  events*: EventQueue = initEventQueue() ## The queue of events to happen.

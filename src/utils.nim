@@ -77,7 +77,7 @@ static:
   assert signExtendFrom(0x7f, 7) == 127
 
 func unsign[T, U](slice: SignedBitSlice[T, U]): BitSlice[T, U] =
-  BitSlice(pos=slice.pos, width=slice.width)
+  BitSlice[T, U](pos: slice.pos, width: slice.width)
 
 func `[]`*[T, U](value: U, slice: SignedBitSlice[T, U]): T {.inline.} =
   value[slice.unsign].signExtendFrom(slice.width)
@@ -143,11 +143,14 @@ converter value*[T](x: Masked[T]): T {.inline.} =
 func `[]`*[T, U](val: Masked[U], slice: BitSlice[T, U]): T {.inline.} =
   val.value[slice]
 
-template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidth: int) =
-  const `name Slice` {.inject, used.}: BitSlice[T, U] = (pos: thePos, width: theWidth)
+template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidth: int, signed: bool = false) =
+  when signed:
+    const slice = SignedBitSlice[T, U](pos: thePos, width: theWidth)
+  else:
+    const slice = BitSlice[T, U](pos: thePos, width: theWidth)
 
   proc name(whole: U): T {.inject, used, inline.} =
-    whole[`name Slice`]
+    whole[slice]
 
   proc `name =`(whole: var U, part: T) {.inject, used, inline.} =
-    whole[`name Slice`] = part
+    whole[slice] = part

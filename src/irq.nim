@@ -1,6 +1,6 @@
 ## The IRQ chip.
 
-import machine
+import basics, memory, cpu
 import std/bitops
 
 type
@@ -13,7 +13,7 @@ var
 proc setCPUIRQ(irqs: var IRQs) =
   ## Update the processor IRQ flags from irq.stat.
 
-  machine.cpu.setIRQ((irqs.stat and irqs.mask) != 0)
+  cpu.cpu.setIRQ((irqs.stat and irqs.mask) != 0)
 
 proc signal*(irqs: var IRQs, irq: range[0..10]) =
   ## Activate a given IRQ.

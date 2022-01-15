@@ -1,6 +1,6 @@
 ## The DMA controller.
 
-import machine, utils, irq
+import basics, utils, irq, memory
 import std/[bitops, strformat]
 
 var logger = newLogger("DMA")

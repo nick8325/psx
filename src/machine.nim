@@ -1,20 +1,6 @@
-## The PSX itself.
+## Hooking up the PSX itself.
 
-import basics, memory, eventqueue
-export basics, memory, eventqueue
-
-var
-  events*: EventQueue = initEventQueue() ## The queue of events to happen.
-  addressSpace*: Memory ## The PSX address space.
-  region*: Region = NTSC ## The game's region. Updated by the BIOS.
-
-import cpu as r3000
-export r3000
-
-var
-  cpu*: CPU = initCPU ## The main processor
-
-import irq, dma, gpu
+import basics, memory, eventqueue, irq, dma, gpu, cpu
 
 var
   bios {.align: 4096.}: array[0x80000, byte]
@@ -129,7 +115,7 @@ proc runSystem*() =
 
   while true:
     while events.nextTime >= cpuClock:
-      cpu.step
+      cpu.cpu.step
       events.fastForward(cpuClock)
     if not events.runNext: break
 

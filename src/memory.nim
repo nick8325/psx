@@ -185,3 +185,6 @@ proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
   if resolved.writable:
     resolved.pointer[] = value
     if resolved.io: memory.handleIO[:T](address, Write)
+
+var
+  addressSpace*: Memory ## The PSX address space.
