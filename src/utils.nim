@@ -154,3 +154,6 @@ template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidt
 
   proc `name =`(whole: var U, part: T) {.inject, used, inline.} =
     whole[slice] = part
+
+func clampedConvert*[T](x: int): T =
+  x.clamp(T.low.int, T.high.int).T

@@ -3,7 +3,7 @@
 import basics, utils, irq, eventqueue
 import std/[bitops, strformat, logging, deques, options]
 
-var logger = newLogger("GPU", lvlDebug)
+var logger = newLogger("GPU")
 
 type
   TransparencyMode {.pure.} = enum
@@ -39,6 +39,8 @@ type
   PackedMiniCoord = distinct word
   PackedCoord = distinct word
   PackedSignedCoord = distinct word
+  Palette = distinct uint16
+  TexCoord = distinct uint16
 
 Vertex.bitfield x, int, 0, 10, signed=true
 Vertex.bitfield y, int, 26, 10, signed=true
@@ -69,6 +71,12 @@ PackedCoord.bitfield y, int, 10, 10
 
 PackedSignedCoord.bitfield x, int, 0, 11, signed=true
 PackedSignedCoord.bitfield y, int, 11, 11, signed=true
+
+TexCoord.bitfield x, int, 0, 8
+TexCoord.bitfield y, int, 8, 8
+
+Palette.bitfield x16, int, 0, 6
+Palette.bitfield y, int, 6, 9
 
 type
   # Texture settings
@@ -119,17 +127,25 @@ var
   control = ControlSettings()
 
 type
-  TriangleTexture = object
-    palette: tuple[x: int, y: int]
-    texpage: tuple[x: int, y: int]
-    coordinate: tuple[x: int, y: int]
+  PolygonTexture[N: static int] = object
+    blended: bool
+    palette: Palette
+    page: TexPage
+    coords: array[N, TexCoord]
   Triangle = object
     transparency: Option[TransparencyMode]
     vertices: array[3, tuple[x: int, y: int, colour: Colour]]
-    textures: Option[TriangleTexture]
+    texture: Option[PolygonTexture[3]]
+  Quadrilateral = object
+    transparency: Option[TransparencyMode]
+    vertices: array[4, tuple[x: int, y: int, colour: Colour]]
+    texture: Option[PolygonTexture[4]]
 
-proc drawTriangle(x: Triangle) =
-  echo "draw {x.repr}"
+proc draw(x: Triangle) =
+  echo fmt"draw {x.repr}"
+
+proc draw(x: Quadrilateral) =
+  echo fmt"draw {x.repr}"
 
 var
   commandQueue = initDeque[word]()
@@ -153,6 +169,8 @@ let
   byte3 = BitSlice[int, word](pos: 0, width: 8)
   half1 = BitSlice[int, word](pos: 12, width: 12)
   half2 = BitSlice[int, word](pos: 0, width: 12)
+  word1 = BitSlice[int, word](pos: 16, width: 16)
+  word2 = BitSlice[int, word](pos: 0, width: 16)
 
 var cachedGPUStat: word
 
@@ -203,10 +221,19 @@ proc processCommand =
       for i in 1..n: res.add commandQueue.popFirst
       res
 
+  template peek(n: int): seq[word] =
+    block:
+      if commandQueue.len < n+1: # include command itself
+        return
+      var res: seq[word] = @[]
+      for i in 1..n: res.add commandQueue[i]
+      res
+
   if commandQueue.len > 0:
     let value = commandQueue[0]
     case value[command]
     of 0x00: discard args 0 # NOP
+    of 0x01: discard args 0 # Clear cache
     of 0x1f:
       # Interrupt requested
       discard args 0
@@ -223,10 +250,165 @@ proc processCommand =
         transparency =
           if value[command] == 0x20: none(TransparencyMode)
           else: some(drawing.transparency)
-      drawTriangle Triangle(transparency: transparency,
-                            vertices: [(x: v1.x, y: v1.y, colour: colour),
-                                       (x: v2.x, y: v2.y, colour: colour),
-                                       (x: v3.x, y: v3.y, colour: colour)])
+      draw Triangle(transparency: transparency,
+                    vertices: [(x: v1.x, y: v1.y, colour: colour),
+                               (x: v2.x, y: v2.y, colour: colour),
+                               (x: v3.x, y: v3.y, colour: colour)])
+    of 0x28, 0x2a:
+      # Monochrome quadrilateral
+      let
+        args = args 4
+        colour = Colour(value[rest])
+        v1 = Vertex(args[0])
+        v2 = Vertex(args[1])
+        v3 = Vertex(args[2])
+        v4 = Vertex(args[3])
+        transparency =
+          if value[command] == 0x28: none(TransparencyMode)
+          else: some(drawing.transparency)
+      draw Quadrilateral(transparency: transparency,
+                         vertices: [(x: v1.x, y: v1.y, colour: colour),
+                                    (x: v2.x, y: v2.y, colour: colour),
+                                    (x: v3.x, y: v3.y, colour: colour),
+                                    (x: v4.x, y: v4.y, colour: colour)])
+    of 0x24..0x27:
+      # Textured triangle
+      let
+        args = args 6
+        colour = Colour(value[rest])
+        v1 = Vertex(args[0])
+        palette = Palette(args[1][word1])
+        coord1 = TexCoord(args[1][word2])
+        v2 = Vertex(args[2])
+        page = TexPage(args[3][word1])
+        coord2 = TexCoord(args[3][word2])
+        v3 = Vertex(args[4])
+        coord3 = TexCoord(args[5][word2])
+        transparency =
+          if value[command] in {0x26, 0x27}: some(drawing.transparency)
+          else: none(TransparencyMode)
+        blended = value[command] in {0x24, 0x26}
+      draw Triangle(transparency: transparency,
+                    vertices: [(x: v1.x, y: v1.y, colour: colour),
+                               (x: v2.x, y: v2.y, colour: colour),
+                               (x: v3.x, y: v3.y, colour: colour)],
+                    texture: some PolygonTexture[3](
+                      blended: blended,
+                      palette: palette,
+                      page: page,
+                      coords: [coord1, coord2, coord3]))
+    of 0x2c..0x2f:
+      # Textured quadrilateral
+      let
+        args = args 8
+        colour = Colour(value[rest])
+        v1 = Vertex(args[0])
+        palette = Palette(args[1][word1])
+        coord1 = TexCoord(args[1][word2])
+        v2 = Vertex(args[2])
+        page = TexPage(args[3][word1])
+        coord2 = TexCoord(args[3][word2])
+        v3 = Vertex(args[4])
+        coord3 = TexCoord(args[5][word2])
+        v4 = Vertex(args[6])
+        coord4 = TexCoord(args[7][word2])
+        transparency =
+          if value[command] in {0x2e, 0x2f}: some(drawing.transparency)
+          else: none(TransparencyMode)
+        blended = value[command] in {0x2c, 0x2e}
+      draw Quadrilateral(transparency: transparency,
+                         vertices: [(x: v1.x, y: v1.y, colour: colour),
+                                    (x: v2.x, y: v2.y, colour: colour),
+                                    (x: v3.x, y: v3.y, colour: colour),
+                                    (x: v4.x, y: v4.y, colour: colour)],
+                    texture: some PolygonTexture[4](
+                      blended: blended,
+                      palette: palette,
+                      page: page,
+                      coords: [coord1, coord2, coord3, coord4]))
+    of 0x30, 0x32:
+      # Shaded triangle
+      let
+        args = args 5
+        colour1 = Colour(value[rest])
+        v1 = Vertex(args[0])
+        colour2 = Colour(args[1])
+        v2 = Vertex(args[2])
+        colour3 = Colour(args[3])
+        v3 = Vertex(args[4])
+        transparency =
+          if value[command] == 0x30: none(TransparencyMode)
+          else: some(drawing.transparency)
+      draw Triangle(transparency: transparency,
+                    vertices: [(x: v1.x, y: v1.y, colour: colour1),
+                               (x: v2.x, y: v2.y, colour: colour2),
+                               (x: v3.x, y: v3.y, colour: colour3)])
+    of 0x38, 0x3a:
+      # Shaded quadrilateral
+      let
+        args = args 7
+        colour1 = Colour(value[rest])
+        v1 = Vertex(args[0])
+        colour2 = Colour(args[1])
+        v2 = Vertex(args[2])
+        colour3 = Colour(args[3])
+        v3 = Vertex(args[4])
+        colour4 = Colour(args[5])
+        v4 = Vertex(args[6])
+        transparency =
+          if value[command] == 0x38: none(TransparencyMode)
+          else: some(drawing.transparency)
+      draw Quadrilateral(transparency: transparency,
+                         vertices: [(x: v1.x, y: v1.y, colour: colour1),
+                                    (x: v2.x, y: v2.y, colour: colour2),
+                                    (x: v3.x, y: v3.y, colour: colour3),
+                                    (x: v4.x, y: v4.y, colour: colour4)])
+    of 0xe1:
+      # Texpage
+      discard args 0
+      let page = TexPage(value[rest])
+      textures.base.x = page.baseX64
+      textures.base.y = page.baseY256
+      drawing.transparency = page.transparency
+      textures.colourMode = page.colours.clampedConvert[:TextureColourMode]
+      drawing.dither = page.dither
+      drawing.drawToDisplayArea = page.drawToDisplayArea
+      textures.enabled = not page.textureDisable
+      textures.flip.x = page.flipX
+      textures.flip.y = page.flipY
+
+    of 0xe2:
+      discard args 0
+      textures.window = TextureWindow(value[rest])
+
+    of 0xe3:
+      discard args 0
+      drawing.drawingAreaTopLeft = PackedCoord(value[rest])
+
+    of 0xe4:
+      discard args 0
+      drawing.drawingAreaBottomRight = PackedCoord(value[rest])
+
+    of 0xe5:
+      discard args 0
+      drawing.drawingAreaOffset = PackedSignedCoord(value[rest])
+
+    of 0xe6:
+      # Mask bit settings
+      discard args 0
+      drawing.setMaskBit = value.testBit 0
+      drawing.skipMaskedPixels = value.testBit 1
+
+    of 0xa0:
+      # Copy rectangle to VRAM
+      let
+        args = peek 2
+        height = args[1][half1]
+        width = args[1][half2]
+        size = (height * width + 1) div 2 # round up
+      discard args (2 + size)
+      logger.warn fmt"Skipping copy to VRAM of {width}*{height} halfwords"
+
     else:
       logger.warn fmt"Unrecognised GP0 command {value[command]:02x}"
 
