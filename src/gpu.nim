@@ -363,6 +363,66 @@ proc processCommand =
                                     (x: v2.x, y: v2.y, colour: colour2),
                                     (x: v3.x, y: v3.y, colour: colour3),
                                     (x: v4.x, y: v4.y, colour: colour4)])
+    of 0x34, 0x36:
+      # Shaded textured triangle
+      let
+        args = args 8
+        colour1 = Colour(value[rest])
+        v1 = Vertex(args[0])
+        palette = Palette(args[1][word1])
+        coord1 = TexCoord(args[1][word2])
+        colour2 = Colour(args[2])
+        v2 = Vertex(args[3])
+        page = TexPage(args[4][word1])
+        coord2 = TexCoord(args[4][word2])
+        colour3 = Colour(args[5])
+        v3 = Vertex(args[6])
+        coord3 = TexCoord(args[7][word2])
+        transparency =
+          if value[command] == 0x36: some(drawing.transparency)
+          else: none(TransparencyMode)
+        blended = true
+      draw Triangle(transparency: transparency,
+                    vertices: [(x: v1.x, y: v1.y, colour: colour1),
+                               (x: v2.x, y: v2.y, colour: colour2),
+                               (x: v3.x, y: v3.y, colour: colour3)],
+                    texture: some PolygonTexture[3](
+                      blended: blended,
+                      palette: palette,
+                      page: page,
+                      coords: [coord1, coord2, coord3]))
+    of 0x3c, 0x3e:
+      # Shaded textured quadrilateral
+      let
+        args = args 11
+        colour1 = Colour(value[rest])
+        v1 = Vertex(args[0])
+        palette = Palette(args[1][word1])
+        coord1 = TexCoord(args[1][word2])
+        colour2 = Colour(args[2])
+        v2 = Vertex(args[3])
+        page = TexPage(args[4][word1])
+        coord2 = TexCoord(args[4][word2])
+        colour3 = Colour(args[5])
+        v3 = Vertex(args[6])
+        coord3 = TexCoord(args[7][word2])
+        colour4 = Colour(args[8])
+        v4 = Vertex(args[9])
+        coord4 = TexCoord(args[10][word2])
+        transparency =
+          if value[command] == 0x3e: some(drawing.transparency)
+          else: none(TransparencyMode)
+        blended = true
+      draw Quadrilateral(transparency: transparency,
+                         vertices: [(x: v1.x, y: v1.y, colour: colour1),
+                                    (x: v2.x, y: v2.y, colour: colour2),
+                                    (x: v3.x, y: v3.y, colour: colour3),
+                                    (x: v4.x, y: v4.y, colour: colour4)],
+                         texture: some PolygonTexture[4](
+                           blended: blended,
+                           palette: palette,
+                           page: page,
+                           coords: [coord1, coord2, coord3, coord4]))
     of 0xe1:
       # Texpage
       discard args 0
