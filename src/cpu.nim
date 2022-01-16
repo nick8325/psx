@@ -53,19 +53,17 @@ const initCOP0: COP0 =
 
 const
   # User-settable bits in COP0.SR.
-  cu = BitSlice[word, word](pos: 28, width: 4).bits
+  cu = BitSlice[word, word](pos: 28, width: 4)
   bev = bit[word] 22
   cm {.used.} = bit[word] 19
   swc = bit[word] 17
   isc = bit[word] 16
-  imAll = BitSlice[word, word](pos: 8, width: 8)
-  im = imAll.bits
+  im = BitSlice[word, word](pos: 8, width: 8)
   ku = [bit[word] 1, bit[word] 3, bit[word] 5]
   ie = [bit[word] 0, bit[word] 2, bit[word] 4]
 
   # IRQ bits in COP0.CAUSE.
-  ipAll = BitSlice[word, word](pos: 8, width: 8)
-  ip = ipAll.bits
+  ip = BitSlice[word, word](pos: 8, width: 8)
 
   # Read-write SR bits
   writableSRBits: word =
@@ -73,9 +71,9 @@ const
       var result: word = 0
       # Note: CM is not user-settable (and not set at all currently).
       # Only the first two bits of IM are user-settable.
-      for arr in [@cu, @[bev, swc, isc, im[0], im[1]], @ku, @ie]:
-        for x in arr:
-          result = result or x.toMask
+      result = result or cu.toMask
+      for x in @[bev, swc, isc, im.bit 0, im.bit 1] & @ie & @ku:
+        result = result or x.toMask
       result
 
   # Read-only SR bits (writes to them are ignored)
@@ -83,13 +81,8 @@ const
 
   # Read-only SR bits which should print a warning on write
   forbiddenSRBits: word =
-    block:
-      var result: word = fixedSRBits
-      # Writing to CM or IM is OK, just ignored
-      for arr in [@[cm], @im]:
-        for x in arr:
-          result = result and not x.toMask
-      result
+    # Writing to CM or IM is OK, just ignored
+    fixedSRBits and not cm.toMask and not im.toMask
 
 proc `[]`(cop0: COP0, reg: CoRegister): word =
   ## Access registers by number.
@@ -167,7 +160,7 @@ func `[]=`*(cpu: var CPU, reg: Register, val: word) =
 func setIRQ*(cpu: var CPU, irq: bool) =
   ## Update the IRQ flag.
 
-  cpu.cop0.cause[ip[2]] = irq
+  cpu.cop0.cause[ip.bit 2] = irq
 
 proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word =
   ## Resolve a virtual address to a physical address,
@@ -677,7 +670,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
     (word(error.exceptionCode) shl 2) or
     (word(cop) shl 28) or
     (word(branchDelay) shl 31) or
-    (cpu.cop0.cause and ipAll.toMask)
+    (cpu.cop0.cause and ip.toMask)
 
   if error.error == AddressError:
     cpu.cop0.badvaddr = error.address
@@ -690,7 +683,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
 proc step*(cpu: var CPU) {.inline.} =
   try:
     # Check for IRQs first.
-    if cpu.cop0.sr[ie[0]] and (cpu.cop0.sr[imAll] and cpu.cop0.cause[ipAll]) != 0:
+    if cpu.cop0.sr[ie[0]] and (cpu.cop0.sr[im] and cpu.cop0.cause[ip]) != 0:
       raise MachineError(error: Interrupt)
 
     let

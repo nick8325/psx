@@ -64,16 +64,15 @@ const
 const
   force = bit[Interrupt] 15
   enableIRQs = BitSlice[word, Interrupt](pos: 16, width: 7)
-  enableIRQ {.used.}: array[ChannelNumber, auto] = enableIRQs.bits
   masterEnable = bit[Interrupt] 23
   flagsIRQs = BitSlice[word, Interrupt](pos: 24, width: 7)
-  flagsIRQ: array[ChannelNumber, auto] = flagsIRQs.bits
   master = bit[Interrupt] 31
 
 # Control's fields.
 const
   enableChannel: array[ChannelNumber, auto] =
-    bits[Control](pos=3, width=7, stride=4)
+    [bit[Control] 3, bit[Control] 7, bit[Control] 11, bit[Control] 15,
+     bit[Control] 19, bit[Control] 23, bit[Control] 27]
 
 const
   # Which bits of the channel control mask are writable?
@@ -170,7 +169,7 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
         logger.warn fmt"Sync mode {chan.channelControl[syncMode]} not supported"
 
     chan.channelControl[startBusy] = false
-    interrupt[flagsIRQ[n]] = true
+    interrupt[flagsIRQs.bit n] = true
     checkInterrupt()
 
 proc handleDMABaseAddress*(n: ChannelNumber, value: var word, kind: IOKind) =

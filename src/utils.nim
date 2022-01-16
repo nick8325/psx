@@ -33,12 +33,9 @@ type
 func bit*[T](pos: int): BitSlice[bool, T] {.inline.} =
   BitSlice[bool, T](pos: pos, width: 1)
 
-func bits*[U](pos: static int, width: static int, stride: static int = 1): array[0..width-1, BitSlice[bool, U]] =
-  for i in 0..<width:
-    result[i] = bit[U](pos + i*stride)
-
-template bits*[T, U](slice: BitSlice[T, U]): auto =
-  bits[U](slice.pos, slice.width)
+func bit*[T, U](slice: BitSlice[T, U], i: int): BitSlice[bool, U] {.inline.} =
+  assert 0 <= i and i < slice.width
+  bit[U](slice.pos + i)
 
 func `[]`*[T, U](value: U, slice: BitSlice[T, U]): T {.inline.} =
   cast[T](distinctBase(U)(value).bitsliced(slice.toSlice))
