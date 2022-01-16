@@ -1,7 +1,6 @@
 ## An interpreter for the R3000A CPU.
 
 import utils, basics, memory
-import fusion/matching
 import std/[tables, bitops, strformat]
 
 var logger = newLogger("CPU")

@@ -10,7 +10,8 @@ type
     Mean = 0,
     Add = 1,
     Subtract = 2,
-    AddQuarter = 3
+    AddQuarter = 3,
+    Opaque = 4
   TextureColourMode {.pure.} = enum
     FourBit = 0,
     EightBit = 1,
@@ -132,20 +133,40 @@ type
     palette: Palette
     page: TexPage
     coords: array[N, TexCoord]
-  Triangle = object
-    transparency: Option[TransparencyMode]
-    vertices: array[3, tuple[x: int, y: int, colour: Colour]]
-    texture: Option[PolygonTexture[3]]
-  Quadrilateral = object
-    transparency: Option[TransparencyMode]
-    vertices: array[4, tuple[x: int, y: int, colour: Colour]]
-    texture: Option[PolygonTexture[4]]
+  Polygon[N: static int] = object
+    vertices: array[N, tuple[x: int, y: int, colour: Colour]]
+    texture: Option[PolygonTexture[N]]
+    transparency: TransparencyMode
 
-proc draw(x: Triangle) =
-  echo fmt"draw {x.repr}"
+func `$`*[N: static int](tex: PolygonTexture[N]): string =
+  result = if tex.blended: "blended" else: "raw"
+  result &= fmt", palette=({tex.palette.x16*16}, {tex.palette.y})"
+  result &= fmt", page={word(tex.page):02x}, "
+  for i, coord in tex.coords:
+    if i > 0: result &= "--"
+    result &= fmt"(coord.x,coord.y)"
 
-proc draw(x: Quadrilateral) =
-  echo fmt"draw {x.repr}"
+func `$`*[N: static int](poly: Polygon[N]): string =
+  result =
+    case N
+    of 3: "triangle, "
+    of 4: "quadrilateral, "
+    else: fmt"{N}-sided polygon, "
+  for i, v in poly.vertices:
+    if i > 0: result &= "--"
+    result &= fmt"({v.x},{v.y})"
+  result &= fmt", colours "
+  for i, v in poly.vertices:
+    if i > 0: result &= "--"
+    result &= fmt"#{word(v.colour):06x}"
+  result &= fmt", {poly.transparency}"
+  if poly.texture.isSome: result &= fmt", texture {poly.texture.get()}"
+
+proc draw(x: Polygon[3]) =
+  echo fmt"draw {x}"
+
+proc draw(x: Polygon[4]) =
+  echo fmt"draw {x}"
 
 var
   commandQueue = initDeque[word]()
@@ -248,9 +269,9 @@ proc processCommand =
         v2 = Vertex(args[1])
         v3 = Vertex(args[2])
         transparency =
-          if value[command] == 0x20: none(TransparencyMode)
-          else: some(drawing.transparency)
-      draw Triangle(transparency: transparency,
+          if value[command] == 0x20: Opaque
+          else: drawing.transparency
+      draw Polygon[3](transparency: transparency,
                     vertices: [(x: v1.x, y: v1.y, colour: colour),
                                (x: v2.x, y: v2.y, colour: colour),
                                (x: v3.x, y: v3.y, colour: colour)])
@@ -264,9 +285,9 @@ proc processCommand =
         v3 = Vertex(args[2])
         v4 = Vertex(args[3])
         transparency =
-          if value[command] == 0x28: none(TransparencyMode)
-          else: some(drawing.transparency)
-      draw Quadrilateral(transparency: transparency,
+          if value[command] == 0x28: Opaque
+          else: drawing.transparency
+      draw Polygon[4](transparency: transparency,
                          vertices: [(x: v1.x, y: v1.y, colour: colour),
                                     (x: v2.x, y: v2.y, colour: colour),
                                     (x: v3.x, y: v3.y, colour: colour),
@@ -285,10 +306,10 @@ proc processCommand =
         v3 = Vertex(args[4])
         coord3 = TexCoord(args[5][word2])
         transparency =
-          if value[command] in {0x26, 0x27}: some(drawing.transparency)
-          else: none(TransparencyMode)
+          if value[command] in {0x26, 0x27}: drawing.transparency
+          else: Opaque
         blended = value[command] in {0x24, 0x26}
-      draw Triangle(transparency: transparency,
+      draw Polygon[3](transparency: transparency,
                     vertices: [(x: v1.x, y: v1.y, colour: colour),
                                (x: v2.x, y: v2.y, colour: colour),
                                (x: v3.x, y: v3.y, colour: colour)],
@@ -313,10 +334,10 @@ proc processCommand =
         v4 = Vertex(args[6])
         coord4 = TexCoord(args[7][word2])
         transparency =
-          if value[command] in {0x2e, 0x2f}: some(drawing.transparency)
-          else: none(TransparencyMode)
+          if value[command] in {0x2e, 0x2f}: drawing.transparency
+          else: Opaque
         blended = value[command] in {0x2c, 0x2e}
-      draw Quadrilateral(transparency: transparency,
+      draw Polygon[4](transparency: transparency,
                          vertices: [(x: v1.x, y: v1.y, colour: colour),
                                     (x: v2.x, y: v2.y, colour: colour),
                                     (x: v3.x, y: v3.y, colour: colour),
@@ -337,9 +358,9 @@ proc processCommand =
         colour3 = Colour(args[3])
         v3 = Vertex(args[4])
         transparency =
-          if value[command] == 0x30: none(TransparencyMode)
-          else: some(drawing.transparency)
-      draw Triangle(transparency: transparency,
+          if value[command] == 0x30: Opaque
+          else: drawing.transparency
+      draw Polygon[3](transparency: transparency,
                     vertices: [(x: v1.x, y: v1.y, colour: colour1),
                                (x: v2.x, y: v2.y, colour: colour2),
                                (x: v3.x, y: v3.y, colour: colour3)])
@@ -356,9 +377,9 @@ proc processCommand =
         colour4 = Colour(args[5])
         v4 = Vertex(args[6])
         transparency =
-          if value[command] == 0x38: none(TransparencyMode)
-          else: some(drawing.transparency)
-      draw Quadrilateral(transparency: transparency,
+          if value[command] == 0x38: Opaque
+          else: drawing.transparency
+      draw Polygon[4](transparency: transparency,
                          vertices: [(x: v1.x, y: v1.y, colour: colour1),
                                     (x: v2.x, y: v2.y, colour: colour2),
                                     (x: v3.x, y: v3.y, colour: colour3),
@@ -379,10 +400,10 @@ proc processCommand =
         v3 = Vertex(args[6])
         coord3 = TexCoord(args[7][word2])
         transparency =
-          if value[command] == 0x36: some(drawing.transparency)
-          else: none(TransparencyMode)
+          if value[command] == 0x36: drawing.transparency
+          else: Opaque
         blended = true
-      draw Triangle(transparency: transparency,
+      draw Polygon[3](transparency: transparency,
                     vertices: [(x: v1.x, y: v1.y, colour: colour1),
                                (x: v2.x, y: v2.y, colour: colour2),
                                (x: v3.x, y: v3.y, colour: colour3)],
@@ -410,10 +431,10 @@ proc processCommand =
         v4 = Vertex(args[9])
         coord4 = TexCoord(args[10][word2])
         transparency =
-          if value[command] == 0x3e: some(drawing.transparency)
-          else: none(TransparencyMode)
+          if value[command] == 0x3e: drawing.transparency
+          else: Opaque
         blended = true
-      draw Quadrilateral(transparency: transparency,
+      draw Polygon[4](transparency: transparency,
                          vertices: [(x: v1.x, y: v1.y, colour: colour1),
                                     (x: v2.x, y: v2.y, colour: colour2),
                                     (x: v3.x, y: v3.y, colour: colour3),
