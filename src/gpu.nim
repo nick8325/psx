@@ -1,7 +1,7 @@
 ## The GPU.
 
 import basics, memory, utils, irq, eventqueue
-import std/[bitops, strformat, logging, deques]
+import std/[bitops, strformat, logging, deques, options]
 from cpu import nil
 
 var logger = newLogger("GPU", lvlDebug)
@@ -119,9 +119,22 @@ var
   screen = ScreenSettings()
   control = ControlSettings()
 
+type
+  TriangleTexture = object
+    palette: tuple[x: int, y: int]
+    texpage: tuple[x: int, y: int]
+    coordinate: tuple[x: int, y: int]
+  Triangle = object
+    transparency: Option[TransparencyMode]
+    vertices: array[3, tuple[x: int, y: int, colour: Colour]]
+    textures: Option[TriangleTexture]
+
+proc drawTriangle(x: Triangle) =
+  echo "draw {x.repr}"
+
 var
-  commandQueue: Deque[word]
-  resultQueue: Deque[word]
+  commandQueue = initDeque[word]()
+  resultQueue = initDeque[word]()
 
 proc readyToSendVRAM: bool =
   resultQueue.len > 0
@@ -135,6 +148,7 @@ proc readyToReceiveCommand: bool =
 
 let
   command = BitSlice[int, word](pos: 24, width: 8)
+  rest = BitSlice[int, word](pos: 0, width: 24)
   byte1 = BitSlice[int, word](pos: 16, width: 8)
   byte2 = BitSlice[int, word](pos: 8, width: 8)
   byte3 = BitSlice[int, word](pos: 0, width: 8)
@@ -180,17 +194,46 @@ proc updateGPUStat* =
 updateGPUStat()
 
 proc processCommand =
-  discard
+  template args(n: int): seq[word] =
+    block:
+      # Remove the command and arguments, but only if all arguments are available.
+      if commandQueue.len < n+1: # include command itself
+        return
+      commandQueue.popFirst
+      var res: seq[word] = @[]
+      for i in 1..n: res.add commandQueue.popFirst
+      res
+
+  if commandQueue.len > 0:
+    let value = commandQueue[0]
+    case value[command]
+    of 0x00: discard args 0 # NOP
+    of 0x1f:
+      # Interrupt requested
+      discard args 0
+      control.interruptRequested = true
+      irqs.signal 1
+    of 0x20, 0x22:
+      # Monochrome triangle
+      let
+        args = args 3
+        colour = Colour(value[rest])
+        v1 = Vertex(args[0])
+        v2 = Vertex(args[1])
+        v3 = Vertex(args[2])
+        transparency =
+          if value[command] == 0x20: none(TransparencyMode)
+          else: some(drawing.transparency)
+      drawTriangle Triangle(transparency: transparency,
+                            vertices: [[v1.x, v1.y, colour],
+                                       [v2.x, v2.y, colour],
+                                       [v3.x, v3.y, colour]],
+                            textures: none)
 
 proc gp0*(value: word) =
   logger.debug fmt"GP0 {value:08x}"
   commandQueue.addLast(value)
   processCommand()
-  # case value[byte1]
-  # of 0x1f:
-  #   # Interrupt requested
-  #   control.interruptRequested = true
-  #   irqs.signal 1
   updateGPUStat()
 
 proc gp1*(value: word) =
