@@ -236,6 +236,7 @@ proc processCommand =
     block:
       # Remove the command and arguments, but only if all arguments are available.
       if commandQueue.len < n+1: # include command itself
+        logger.debug "Not enough arguments yet, " & $(n+1) & " needed but " & $commandQueue.len & " found"
         return
       commandQueue.popFirst
       var res: seq[word] = @[]
@@ -484,8 +485,8 @@ proc processCommand =
       # Copy rectangle to VRAM
       let
         args = peek 2
-        height = args[1][half1]
-        width = args[1][half2]
+        height = args[1][word1]
+        width = args[1][word2]
         size = (height * width + 1) div 2 # round up
       discard args (2 + size)
       logger.warn fmt"Skipping copy to VRAM of {width}*{height} halfwords"
@@ -504,8 +505,8 @@ proc gp1*(value: word) =
   case value[command] and 0x3f
   of 0x00:
     # Reset
-    let cmds= [0x01_000000u32, 0x02_000000u32, 0x03_000001u32, 0x04_000000u32,
-               0x05_000000u32, 0x06_c00_200u32, 0x07_100_010u32, 0x08000001u32]
+    let cmds = [0x01_000000u32, 0x02_000000u32, 0x03_000001u32, 0x04_000000u32,
+                0x05_000000u32, 0x06_c00_200u32, 0x07_100_010u32, 0x08000001u32]
     for cmd in cmds:
       gp1 cmd
 
