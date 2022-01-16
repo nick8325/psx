@@ -1,8 +1,7 @@
 ## The GPU.
 
-import basics, memory, utils, irq, eventqueue
+import basics, utils, irq, eventqueue
 import std/[bitops, strformat, logging, deques, options]
-from cpu import nil
 
 var logger = newLogger("GPU", lvlDebug)
 
@@ -225,10 +224,11 @@ proc processCommand =
           if value[command] == 0x20: none(TransparencyMode)
           else: some(drawing.transparency)
       drawTriangle Triangle(transparency: transparency,
-                            vertices: [[v1.x, v1.y, colour],
-                                       [v2.x, v2.y, colour],
-                                       [v3.x, v3.y, colour]],
-                            textures: none)
+                            vertices: [(x: v1.x, y: v1.y, colour: colour),
+                                       (x: v2.x, y: v2.y, colour: colour),
+                                       (x: v3.x, y: v3.y, colour: colour)])
+    else:
+      logger.warn fmt"Unrecognised GP0 command {value[command]:02x}"
 
 proc gp0*(value: word) =
   logger.debug fmt"GP0 {value:08x}"
