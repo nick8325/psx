@@ -73,7 +73,7 @@ static:
   assert signExtendFrom(0x8f, 7) == -113
   assert signExtendFrom(0x7f, 7) == 127
 
-func unsign[T, U](slice: SignedBitSlice[T, U]): BitSlice[T, U] =
+func unsign[T, U](slice: SignedBitSlice[T, U]): BitSlice[T, U] {.inline.} =
   BitSlice[T, U](pos: slice.pos, width: slice.width)
 
 func `[]`*[T, U](value: U, slice: SignedBitSlice[T, U]): T {.inline.} =
@@ -98,16 +98,16 @@ type
   ## A pattern that matches a given part of a word against a given value
   Pattern*[T: SomeInteger] = tuple[mask: T, value: T]
 
-func initPattern*[T](mask: T, value: T): Pattern[T] =
+func initPattern*[T](mask: T, value: T): Pattern[T] {.inline.} =
   ## Create a pattern from a bitmask and a value
   (mask: mask, value: mask and value)
 
-func equals*[T, U](slice: BitSlice[T, U], value: U): Pattern[U] =
+func equals*[T, U](slice: BitSlice[T, U], value: U): Pattern[U] {.inline.} =
   ## Create a pattern given a bitslice and an (unshifted) value
   let mask = toMask[U](slice.pos ..< slice.pos+slice.width)
   initPattern(mask, value shl slice.pos)
 
-func `and`*[T](m1, m2: Pattern[T]): Pattern[T] =
+func `and`*[T](m1, m2: Pattern[T]): Pattern[T] {.inline.} =
   ## Take the conjunction of two patterns.
   let commonMask = m1.mask and m2.mask
   assert (m1.value and commonMask) == (m2.value and commonMask)
@@ -152,5 +152,5 @@ template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidt
   proc `name =`(whole: var U, part: T) {.inject, used, inline.} =
     whole[slice] = part
 
-func clampedConvert*[T](x: int): T =
+func clampedConvert*[T](x: int): T {.inline.} =
   x.clamp(T.low.int, T.high.int).T
