@@ -118,5 +118,6 @@ proc runSystem*() =
       cpu.cpu.step
       events.fastForward(cpuClock)
     if not events.runNext: break
+    if events.time >= 5*clockRate: break
 
 runSystem()
