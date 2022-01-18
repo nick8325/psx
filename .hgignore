@@ -4,3 +4,5 @@ tools
 zig-cache
 zig-out
 *.bin
+*.orig
+perf.data
