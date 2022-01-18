@@ -121,7 +121,6 @@ var
   control = ControlSettings()
 
 var
-  commandQueue = initDeque[word]()
   resultQueue = initDeque[word]()
 
 proc readyToSendVRAM: bool =
@@ -178,34 +177,22 @@ proc gpustat*: word =
   word(screen.oddLine) shl 31
   # logger.debug fmt"GPUSTAT returned {result:08x}"
 
-proc processCommand =
-  template args(n: int): seq[word] =
-    block:
-      # Remove the command and arguments, but only if all arguments are available.
-      if commandQueue.len < n+1: # include command itself
-        logger.debug "Not enough arguments yet, " & $(n+1) & " needed but " & $commandQueue.len & " found"
-        return
-      commandQueue.popFirst
-      var res: seq[word] = @[]
-      for i in 1..n: res.add commandQueue.popFirst
-      res
 
-  template peek(n: int): seq[word] =
-    block:
-      if commandQueue.len < n+1: # include command itself
-        return
-      var res: seq[word] = @[]
-      for i in 1..n: res.add commandQueue[i]
-      res
+var
+  gp0Buffer: word
 
-  if commandQueue.len > 0:
-    let value = commandQueue[0]
+iterator processCommand {.closure.} =
+  template take: word =
+    yield
+    gp0Buffer
+
+  while true:
+    let value = take
     case value[command]
-    of 0x00: discard args 0 # NOP
-    of 0x01: discard args 0 # Clear cache
+    of 0x00: discard # NOP
+    of 0x01: discard # Clear cache
     of 0x1f:
       # Interrupt requested
-      discard args 0
       control.interruptRequested = true
       irqs.signal 1
     # of 0x20, 0x22:
@@ -394,8 +381,7 @@ proc processCommand =
     #                        coords: [coord1, coord2, coord3, coord4]))
     of 0xe1:
       # Texpage
-      discard args 0
-      let page = TexPage(value[rest])
+      let page = value[rest].TexPage
       textures.base.x64 = page.baseX64
       textures.base.y256 = page.baseY256
       drawing.transparency = page.transparency
@@ -408,55 +394,52 @@ proc processCommand =
       textures.flip.y = page.flipY
 
     of 0xe2:
-      discard args 0
-      textures.window = TextureWindow(value[rest])
+      textures.window = value[rest].TextureWindow
 
     of 0xe3:
-      discard args 0
-      drawing.drawingAreaTopLeft = PackedCoord(value[rest])
+      drawing.drawingAreaTopLeft = value[rest].PackedCoord
 
     of 0xe4:
-      discard args 0
-      drawing.drawingAreaBottomRight = PackedCoord(value[rest])
+      drawing.drawingAreaBottomRight = value[rest].PackedCoord
 
     of 0xe5:
-      discard args 0
-      drawing.drawingAreaOffset = PackedSignedCoord(value[rest])
+      drawing.drawingAreaOffset = value[rest].PackedSignedCoord
 
     of 0xe6:
       # Mask bit settings
-      discard args 0
       drawing.setMaskBit = value.testBit 0
       drawing.skipMaskedPixels = value.testBit 1
 
     of 0xa0:
       # Copy rectangle to VRAM
       let
-        args = peek 2
-        height = args[1][word1]
-        width = args[1][word2]
-        size = (height * width + 1) div 2 # round up
-      discard args (2 + size)
-      logger.warn fmt"Skipping copy to VRAM of {width}*{height} halfwords"
+        coord = take.PackedCoord
+        size = take.PackedCoord
+        length = (size.x * size.y + 1) div 2 # round up
+      for i in 1..length: discard take
+      logger.warn fmt"Skipping copy to VRAM of {size.x}*{size.y} halfwords"
 
     of 0xc0:
       # Copy rectangle to CPU
       let
-        args = args 2
-        height = args[1][word1]
-        width = args[1][word2]
-        size = (height * width + 1) div 2 # round up
-      logger.warn fmt"Faking copy to CPU of {width}*{height} halfwords"
-      for i in 1..size:
+        coord = take.PackedCoord
+        size = take.PackedCoord
+        length = (size.x * size.y + 1) div 2 # round up
+      logger.warn fmt"Faking copy to CPU of {size.x}*{size.y} halfwords"
+      for i in 1..length:
         resultQueue.addLast 0
 
     else:
       logger.warn fmt"Unrecognised GP0 command {value[command]:02x}"
+      while true: yield
 
 proc gp0*(value: word) =
+  var iter {.global.} = processCommand
+
   logger.debug fmt"GP0 {value:08x}"
-  commandQueue.addLast(value)
-  processCommand()
+  gp0Buffer = value
+  assert not iter.finished
+  iter()
 
 proc gp1*(value: word) =
   logger.debug fmt"GP1 {value:08x}"
@@ -471,11 +454,8 @@ proc gp1*(value: word) =
     for cmd in 0xe1..0x6:
       gp0 (word(cmd) shl 24)
   of 0x01:
-    # Reset command buffer
-    commandQueue.clear
-    if resultQueue.len > 0:
-      logger.warn "Result queue non-empty on GP1(1)"
-    resultQueue.clear
+    # Supposed to reset command buffer
+    discard
   of 0x02:
     # Acknowledge interrupt
     control.interruptRequested = false
