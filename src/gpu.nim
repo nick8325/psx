@@ -43,8 +43,8 @@ type
   Palette = distinct uint16
   TexCoord = distinct uint16
 
-Vertex.bitfield x, int, 0, 10, signed=true
-Vertex.bitfield y, int, 26, 10, signed=true
+Vertex.bitfield x, int, 0, 11, signed=true
+Vertex.bitfield y, int, 16, 11, signed=true
 
 Colour.bitfield red, int, 0, 8
 Colour.bitfield green, int, 8, 8
@@ -144,7 +144,7 @@ func `$`*[N: static int](tex: PolygonTexture[N]): string =
   result &= fmt", page={word(tex.page):02x}, "
   for i, coord in tex.coords:
     if i > 0: result &= "--"
-    result &= fmt"(coord.x,coord.y)"
+    result &= fmt"({coord.x},{coord.y})"
 
 func `$`*[N: static int](poly: Polygon[N]): string =
   result =
@@ -490,6 +490,17 @@ proc processCommand =
         size = (height * width + 1) div 2 # round up
       discard args (2 + size)
       logger.warn fmt"Skipping copy to VRAM of {width}*{height} halfwords"
+
+    of 0xc0:
+      # Copy rectangle to CPU
+      let
+        args = args 2
+        height = args[1][word1]
+        width = args[1][word2]
+        size = (height * width + 1) div 2 # round up
+      logger.warn fmt"Faking copy to CPU of {width}*{height} halfwords"
+      for i in 1..size:
+        resultQueue.addLast 0
 
     else:
       logger.warn fmt"Unrecognised GP0 command {value[command]:02x}"
