@@ -1,5 +1,6 @@
 ## The backend of the GPU - converts drawing commands into a framebuffer.
 
+import utils
 import std/[options, strformat]
 
 type
@@ -17,6 +18,8 @@ type
     red: uint8
     green: uint8
     blue: uint8
+
+  Pixel* = distinct uint16
 
   TransparencyMode* {.pure.} = enum
     ## A transparency mode. 0-3 must match what the GPU uses.
@@ -46,10 +49,9 @@ type
     colourMode*: TextureColourMode
 
   Settings* = object
-    ## Global drawing settings.
+    ## Common drawing settings.
     drawingArea*: Rect
-    displayArea*: Option[Rect] ## \
-      ## This is only set if the display area should be skipped.
+    displayArea*: Rect
     transparency*: TransparencyMode
     dither*: bool
     setMaskBit*: bool ## Force mask bit to 1 when drawing
@@ -72,6 +74,17 @@ type
     ## A straight line.
     start*: tuple[x: int, y: int, colour: Colour]
     stop*: tuple[x: int, y: int, colour: Colour]
+
+Pixel.bitfield red5, int, 0, 5
+Pixel.bitfield green5, int, 5, 5
+Pixel.bitfield blue5, int, 10, 5
+Pixel.bitfield mask, bool, 15, 1
+
+func toPixel(c: Colour, mask: bool = false): Pixel =
+  result.red5 = int(c.red shr 3)
+  result.green5 = int(c.green shr 3)
+  result.blue5 = int(c.blue shr 3)
+  result.mask = mask
 
 func `$`*(c: Colour): string =
   fmt"#{c.red:02x}{c.green:02x}{c.blue:02x}"
@@ -110,5 +123,61 @@ func `$`*(rect: Rectangle): string =
   if rect.flipY:
     result &= ", y flipped"
 
-proc draw*(x: Triangle) =
+var
+  vram: array[1024, array[512, Pixel]]
+
+proc getPixel*(xIn, yIn: int): Pixel {.inline.} =
+  let x = xIn mod 1024
+  let y = yIn mod 512
+  vram[x][y]
+
+proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
+  ## Put a pixel to the VRAM. Handles:
+  ## * Mask bit
+  ## * Transparency
+  ## * Cropping to the drawing area
+  ## * Skipping the display area
+  ## Does not handle dithering yet.
+
+  # TODO: speed up drawing
+
+  # Handle wraparound
+  let x = xIn mod 1024
+  let y = yIn mod 512
+
+  # Check pixel against drawing/display areas
+  if x < settings.drawingArea.x1 or x >= settings.drawingArea.x2 or
+     y < settings.drawingArea.y1 or y >= settings.drawingArea.y2:
+    return
+  if x >= settings.displayArea.x1 and x < settings.displayArea.x2 and
+     y >= settings.displayArea.y1 and y < settings.displayArea.y2:
+    return
+
+  # Check existing pixel's mask
+  let oldPixel = getPixel(x, y)
+  if settings.skipMaskedPixels and oldPixel.mask:
+    return
+
+  # Force mask bit if requested
+  var pixel = pixelIn
+  if settings.setMaskBit: pixel.mask = true
+
+  # Handle transparency
+  func blend(c1, c2: int): int =
+    result =
+      case settings.transparency
+      of Mean: (c1+c2) div 2
+      of Add: c1+c2
+      of Subtract: c1-c2
+      of AddQuarter: c1 + c2 div 4
+      of Opaque: c2
+    result = result.clamp(0, 31)
+
+  # Write pixel with possible transparency
+  pixel.red5 = blend(oldPixel.red5, pixel.red5)
+  pixel.green5 = blend(oldPixel.green5, pixel.green5)
+  pixel.blue5 = blend(oldPixel.blue5, pixel.blue5)
+  vram[x][y] = pixel
+
+proc draw*(settings: Settings, x: Triangle) =
   echo fmt"draw {x}"

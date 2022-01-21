@@ -168,7 +168,7 @@ proc displayArea: Rect =
   result.x2 = result.x1 + width
   result.y2 = result.y1 + height
 
-proc rasteriserSettings(opaque: bool): rasteriser.Settings =
+proc rasteriserSettings(transparent: bool): rasteriser.Settings =
   result.drawingArea =
     (x1: drawing.drawingAreaTopLeft.x,
      y1: drawing.drawingAreaTopLeft.y,
@@ -176,11 +176,13 @@ proc rasteriserSettings(opaque: bool): rasteriser.Settings =
      y2: drawing.drawingAreaBottomRight.y+1)
 
   if drawing.drawToDisplayArea:
-    result.displayArea = some(displayArea()) # else none
+    result.displayArea = displayArea()
+  else:
+    result.displayArea = (x1: -1, y1: -1, x2: -1, y2: -1)
 
   result.transparency =
-    if opaque: Opaque
-    else: drawing.transparency
+    if transparent: drawing.transparency
+    else: Opaque
 
   result.dither = drawing.dither
   result.setMaskBit = drawing.setMaskBit
@@ -319,7 +321,8 @@ let processCommand = consumer(word):
               colourMode: texpage.colourMode(palette))
           else:
             none(Texture[3])
-        draw Triangle(vertices: vs, colours: cs, texture: texture)
+        let settings = rasteriserSettings(transparent)
+        settings.draw Triangle(vertices: vs, colours: cs, texture: texture)
 
     of 0xe1:
       # Texpage
@@ -357,20 +360,52 @@ let processCommand = consumer(word):
       let
         coord = take.Vertex
         size = take.Vertex
-        length = (size.x * size.y + 1) div 2 # round up
-      for i in 1..length: discard take()
-      logger.warn fmt"Skipping copy to VRAM of {size.x}*{size.y} halfwords"
+        settings = rasteriserSettings(false)
 
+      var
+        arg: word = 0
+        even = true
+        read = 0
+      logger.info fmt"j: {coord.y}..<{coord.y+size.y}"
+      logger.info fmt"i: {coord.x}..<{coord.x+size.x}"
+      for j in coord.y..<coord.y+size.y:
+        logger.info fmt"j={j}"
+        for i in coord.x..<coord.x+size.x:
+          logger.info fmt"j={j}, i={i}"
+          if even:
+            logger.info "even"
+            arg = take()
+            read += 1
+            putPixel(i, j, arg[word2].Pixel, settings)
+            even = false
+          else:
+            logger.info "odd"
+            putPixel(i, j, arg[word1].Pixel, settings)
+            even = true
+
+      logger.info fmt"write {size.x}*{size.y}: {read}"
     of 0xc0:
       # Copy rectangle to CPU
       let
         coord = take.Vertex
         size = take.Vertex
-        length = (size.x * size.y + 1) div 2 # round up
-      logger.warn fmt"Faking copy to CPU of {size.x}*{size.y} halfwords"
-      for i in 1..length:
-        resultQueue.addLast 0
 
+      var
+        val: word = 0
+        even = true
+        read = 0
+      for j in coord.y..<coord.y+size.y:
+        for i in coord.x..<coord.x+size.x:
+          if even:
+            val = getPixel(i, j).word
+            even = false
+          else:
+            val = val or (getPixel(i, j).word shl 16)
+            resultQueue.addLast val
+            read += 1
+            even = true
+
+      logger.info fmt"read {size.x}*{size.y}: {read}"
     else:
       logger.warn fmt"Unrecognised GP0 command {value[command]:02x}"
       while true: yield
