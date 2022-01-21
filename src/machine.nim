@@ -110,10 +110,10 @@ addressSpace.ioHandler32 = handleIO32
 dma.channels[2].read = gpuReadDMA
 dma.channels[2].write = gpuWriteDMA
 
-proc runSystem*() =
+proc runSystem*(hz: int) =
   ## Run the system.
 
-  let stop = events.time + clockRate div 25
+  let stop = events.time + clockRate div hz.uint64
   while true:
     while events.nextTime >= cpuClock:
       cpu.cpu.step
