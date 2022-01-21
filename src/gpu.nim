@@ -248,7 +248,8 @@ proc gpustat*: word =
 let processCommand = consumer(word):
   while true:
     let value = take
-    case value[command]
+    let cmd = value[command]
+    case cmd
     of 0x00: discard # NOP
     of 0x01: discard # Clear cache
     of 0x1f:
@@ -276,11 +277,11 @@ let processCommand = consumer(word):
       # * Colours (3),(6),(9) (but not 0) skipped for unshaded polygons
 
       let
-        rawTextures = value.testBit 0
-        transparent = value.testBit 1
-        textured = value.testBit 2
-        quad = value.testBit 3
-        shaded = value.testBit 4
+        rawTextures = cmd.testBit 0
+        transparent = cmd.testBit 1
+        textured = cmd.testBit 2
+        quad = cmd.testBit 3
+        shaded = cmd.testBit 4
         sides = if quad: 4 else: 3
 
       var
@@ -365,25 +366,15 @@ let processCommand = consumer(word):
       var
         arg: word = 0
         even = true
-        read = 0
-      logger.info fmt"j: {coord.y}..<{coord.y+size.y}"
-      logger.info fmt"i: {coord.x}..<{coord.x+size.x}"
       for j in coord.y..<coord.y+size.y:
-        logger.info fmt"j={j}"
         for i in coord.x..<coord.x+size.x:
-          logger.info fmt"j={j}, i={i}"
           if even:
-            logger.info "even"
             arg = take()
-            read += 1
             putPixel(i, j, arg[word2].Pixel, settings)
             even = false
           else:
-            logger.info "odd"
             putPixel(i, j, arg[word1].Pixel, settings)
             even = true
-
-      logger.info fmt"write {size.x}*{size.y}: {read}"
     of 0xc0:
       # Copy rectangle to CPU
       let
@@ -393,7 +384,6 @@ let processCommand = consumer(word):
       var
         val: word = 0
         even = true
-        read = 0
       for j in coord.y..<coord.y+size.y:
         for i in coord.x..<coord.x+size.x:
           if even:
@@ -402,10 +392,7 @@ let processCommand = consumer(word):
           else:
             val = val or (getPixel(i, j).word shl 16)
             resultQueue.addLast val
-            read += 1
             even = true
-
-      logger.info fmt"read {size.x}*{size.y}: {read}"
     else:
       logger.warn fmt"Unrecognised GP0 command {value[command]:02x}"
       while true: yield
