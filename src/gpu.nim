@@ -90,15 +90,15 @@ type
     setMaskBit: bool                 # GPUSTAT 11
     skipMaskedPixels: bool           # GPUSTAT 12
     drawToDisplayArea: bool          # GPUSTAT 10
-    displayAreaDepth: ColourDepth    # GPUSTAT 21
     dither: bool                     # GPUSTAT 9
-    displayAreaStart: PackedCoord    # GP1(05h)
     drawingAreaTopLeft: PackedCoord  # GP0(E3h)
     drawingAreaBottomRight: PackedCoord # GP0(E4h)
     drawingAreaOffset: PackedSignedCoord # GP0(E5h)
 
   # Screen settings
   ScreenSettings = object
+    displayAreaStart: PackedCoord    # GP1(05h)
+    displayAreaDepth: ColourDepth    # GPUSTAT 21
     horizontalRes: HorizontalRes   # GPUSTAT 16-18
     verticalRes: VerticalRes       # GPUSTAT 19
     verticalInterlace: bool        # GPUSTAT 22
@@ -165,7 +165,7 @@ proc gpustat*: word =
   (if screen.horizontalRes == Res368: 0u32 else: word(screen.horizontalRes)) shl 17 or
   word(screen.verticalRes) shl 19 or
   word(region) shl 20 or
-  word(drawing.displayAreaDepth) shl 21 or
+  word(screen.displayAreaDepth) shl 21 or
   word(screen.verticalInterlace) shl 22 or
   word(not screen.enabled) shl 23 or
   word(control.interruptRequested) shl 24 or
@@ -177,15 +177,7 @@ proc gpustat*: word =
   word(screen.oddLine) shl 31
   # logger.debug fmt"GPUSTAT returned {result:08x}"
 
-
-var
-  gp0Buffer: word
-
-iterator processCommand {.closure.} =
-  template take: word =
-    yield
-    gp0Buffer
-
+let processCommand = consumer(word):
   while true:
     let value = take
     case value[command]
@@ -416,7 +408,7 @@ iterator processCommand {.closure.} =
         coord = take.PackedCoord
         size = take.PackedCoord
         length = (size.x * size.y + 1) div 2 # round up
-      for i in 1..length: discard take
+      for i in 1..length: discard take()
       logger.warn fmt"Skipping copy to VRAM of {size.x}*{size.y} halfwords"
 
     of 0xc0:
@@ -433,13 +425,10 @@ iterator processCommand {.closure.} =
       logger.warn fmt"Unrecognised GP0 command {value[command]:02x}"
       while true: yield
 
+var iter = processCommand.start
 proc gp0*(value: word) =
-  var iter {.global.} = processCommand
-
   logger.debug fmt"GP0 {value:08x}"
-  gp0Buffer = value
-  assert not iter.finished
-  iter()
+  iter.give(value)
 
 proc gp1*(value: word) =
   logger.debug fmt"GP1 {value:08x}"
@@ -467,8 +456,8 @@ proc gp1*(value: word) =
     control.dmaDirection = DMADirection(value and 3)
   of 0x05:
     # Start of display area
-    drawing.displayAreaStart.x = value[half1]
-    drawing.displayAreaStart.y = value[half2]
+    screen.displayAreaStart.x = value[half1]
+    screen.displayAreaStart.y = value[half2]
   of 0x06:
     # Horizontal display range
     screen.horizontalRange = (start: value[half1], stop: value[half2])
@@ -481,7 +470,7 @@ proc gp1*(value: word) =
       if value.testBit 6: Res368 else: HorizontalRes(value and 3)
     screen.verticalRes = VerticalRes(value.testBit 2)
     region = Region(value.testBit 3)
-    drawing.displayAreaDepth = ColourDepth(value.testBit 4)
+    screen.displayAreaDepth = ColourDepth(value.testBit 4)
     screen.verticalInterlace = value.testBit 5
   of 0x09:
     # Texture disable

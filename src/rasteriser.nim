@@ -17,6 +17,9 @@ type
     EightBit = 1,
     FifteenBit = 2
 
+  Coord* = tuple
+    x, y: int
+
   Colour* = tuple
     red: uint8
     green: uint8
@@ -24,34 +27,43 @@ type
 
   TextureColourMode* = object
     case depth*: TextureColourDepth
-    of FourBit, EightBit: palette*: tuple[x: int, y: int]
+    of FourBit, EightBit: palette*: Coord
     of FifteenBit: discard
 
   Texture*[N: static int] = object
-    blended*: bool
-    coords*: array[N, tuple[x: int, y: int]]
+    base*: Coord
+    coords*: array[N, Coord]
     colourMode*: TextureColourMode
 
-  Polygon*[N: static int] = object
-    vertices*: array[N, tuple[x: int, y: int, colour: Colour]]
+  Settings* = object
+    drawingArea*: tuple[x1, x2, y1, y2: int]
+    displayArea*: Option[tuple[x1, x2, y1, y2: int]]
     transparency*: TransparencyMode
     dither*: bool
-    texture*: Option[Texture[N]]
+    setMaskBit*: bool
+    skipMaskedPixels*: bool
+
+  Triangle* = object
+    vertices*: array[3, Coord]
+    colours*: Option[array[3, Colour]]
+    texture*: Option[Texture[3]]
 
   Rectangle* = object
     position*: tuple[x: int, y: int]
     size*: tuple[x: int, y: int]
-    colour*: Colour
+    colour*: Option[Colour]
     texture*: Option[Texture[1]]
     flipX*, flipY*: bool
 
   Line* = object
     start*: tuple[x: int, y: int, colour: Colour]
     stop*: tuple[x: int, y: int, colour: Colour]
-    dither*: bool
+
+func `$`*(c: Colour): string =
+  fmt"#{c.red:02x}{c.green:02x}{c.blue:02x}"
 
 func `$`*[N: static int](tex: Texture[N]): string =
-  result = if tex.blended: "blended" else: "raw"
+  result = fmt"({tex.base.x:04x}, {tex.base.y:04x})"
   result &= fmt", colour mode=({tex.colourMode.depth})"
   if tex.colourMode.depth != FifteenBit:
     result &= fmt", palette=({tex.colourMode.palette.x}, {tex.colourMode.palette.y})"
@@ -59,45 +71,31 @@ func `$`*[N: static int](tex: Texture[N]): string =
     if i > 0: result &= "--"
     result &= fmt"({coord.x},{coord.y})"
 
-func `$`*[N: static int](poly: Polygon[N]): string =
-  result =
-    case N
-    of 3: "triangle, "
-    of 4: "quadrilateral, "
-    else: fmt"{N}-sided polygon, "
-  for i, v in poly.vertices:
+func `$`*(tri: Triangle): string =
+  result = "triangle, "
+  for i, v in tri.vertices:
     if i > 0: result &= "--"
     result &= fmt"({v.x},{v.y})"
-  result &= fmt", colours "
-  for i, v in poly.vertices:
-    if i > 0: result &= "--"
-    result &= fmt"#{v.colour.red:02x}{v.colour.green:02x}{v.colour.blue:02x}"
-  result &= fmt", {poly.transparency}"
-  if poly.dither:
-    result &= ", dithered"
-  if poly.texture.isSome: result &= fmt", texture {poly.texture.get()}"
+  if tri.colours.isSome:
+    result &= fmt", colours "
+    for i, c in tri.colours.get():
+      if i > 0: result &= "--"
+      result &= $c
+  if tri.texture.isSome: result &= fmt", texture {tri.texture.get()}"
 
-proc draw*(x: Polygon[3]) =
+func `$`*(rect: Rectangle): string =
+  result = "rectangle, "
+  let x1 = rect.position.x + rect.size.x - 1
+  let y1 = rect.position.y + rect.size.y - 1
+  result &= fmt"({rect.position.x}, {rect.position.y})--({x1},{y1})"
+  if rect.colour.isSome:
+    result &= fmt", colour {rect.colour.get()}"
+  if rect.texture.isSome:
+    result &= fmt", texture {rect.texture.get()}"
+  if rect.flipX:
+    result &= ", x flipped"
+  if rect.flipY:
+    result &= ", y flipped"
+
+proc draw*(x: Triangle) =
   echo fmt"draw {x}"
-
-proc draw*(poly: Polygon[4]) =
-  # Split a rectangle into two triangles
-
-  let v = poly.vertices
-  var poly1 = Polygon[3](vertices: [v[0], v[1], v[2]],
-                         transparency: poly.transparency,
-                         dither: poly.dither)
-  var poly2 = Polygon[3](vertices: [v[1], v[2], v[3]],
-                         transparency: poly.transparency,
-                         dither: poly.dither)
-  if poly.texture.isSome:
-    let t = poly.texture.get()
-    let c = t.coords
-    poly1.texture = some(
-      Texture[3](blended: t.blended, colourMode: t.colourMode,
-                 coords: [c[0], c[1], c[2]]))
-    poly2.texture = some(
-      Texture[3](blended: t.blended, colourMode: t.colourMode,
-                 coords: [c[1], c[2], c[3]]))
-  poly1.draw
-  poly2.draw

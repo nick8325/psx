@@ -154,3 +154,28 @@ template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidt
 
 func clampedConvert*[T](x: int): T {.inline.} =
   x.clamp(T.low.int, T.high.int).T
+
+type
+  Consumer*[T] = distinct iterator(t: T)
+
+template consumer*[T](_: typedesc[T], body: untyped): untyped =
+  mixin consumerArg
+  iterator it(consumerArg {.inject.}: T) {.closure.} =
+    body
+  it
+
+proc toIter[T](co: Consumer[T]): iterator(t: T) =
+  (iterator(t: T))(co)
+
+proc start*[T](iter: iterator(t: T)): Consumer[T] =
+  result = Consumer[T](iter)
+  toIter(result)(T.default)
+
+proc give*[T](co: Consumer[T], value: T) =
+  assert not toIter(co).finished
+  toIter(co)(value)
+
+template take*: untyped =
+  mixin consumerArg
+  yield
+  consumerArg
