@@ -1,7 +1,7 @@
 ## The GPU.
 
 import basics, utils, irq, eventqueue, rasteriser
-import std/[bitops, strformat, logging, deques, options]
+import std/[bitops, strformat, deques, options]
 
 var logger = newLogger("GPU")
 
@@ -298,6 +298,8 @@ let processCommand = consumer(word):
           if shaded: colours[i] = Colour(take()).unpack
           else: colours[i] = colours[0] # monochrome
         vertices[i] = Vertex(take()).unpack
+        vertices[i].x += drawing.drawingAreaTopLeft.x + drawing.drawingAreaOffset.x
+        vertices[i].y += drawing.drawingAreaTopLeft.y + drawing.drawingAreaOffset.y
         if textured:
           let arg = take()
           texcoords[i] = TexCoord(arg[word2]).unpack
@@ -361,7 +363,9 @@ let processCommand = consumer(word):
       let
         coord = take.Vertex
         size = take.Vertex
-        settings = rasteriserSettings(false)
+      var settings = rasteriserSettings(false)
+      settings.drawingArea = (x1: 0, y1: 0, x2: 1024, y2: 512)
+      settings.displayArea = (x1: -1, y1: -1, x2: -1, y2: -1)
 
       var
         arg: word = 0

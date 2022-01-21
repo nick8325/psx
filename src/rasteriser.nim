@@ -1,7 +1,11 @@
 ## The backend of the GPU - converts drawing commands into a framebuffer.
 
 import utils
-import std/[options, strformat]
+import std/[options, strformat, logging]
+import fusion/matching
+{.experimental: "caseStmtMacros".}
+
+var logger = newLogger("Rasteriser")
 
 type
   Coord* = tuple
@@ -124,7 +128,7 @@ func `$`*(rect: Rectangle): string =
     result &= ", y flipped"
 
 var
-  vram: array[1024, array[512, Pixel]]
+  vram*: array[1024, array[512, Pixel]]
 
 proc getPixel*(xIn, yIn: int): Pixel {.inline.} =
   let x = xIn mod 1024
@@ -148,14 +152,17 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
   # Check pixel against drawing/display areas
   if x < settings.drawingArea.x1 or x >= settings.drawingArea.x2 or
      y < settings.drawingArea.y1 or y >= settings.drawingArea.y2:
+    logger.debug fmt"skip write to {x},{y} since out of drawing area {settings.drawingArea}"
     return
   if x >= settings.displayArea.x1 and x < settings.displayArea.x2 and
      y >= settings.displayArea.y1 and y < settings.displayArea.y2:
+    logger.debug fmt"skip write to {x},{y} since inside display area {settings.displayArea}"
     return
 
   # Check existing pixel's mask
   let oldPixel = getPixel(x, y)
   if settings.skipMaskedPixels and oldPixel.mask:
+    logger.debug fmt"skip write to {x},{y} since masked"
     return
 
   # Force mask bit if requested
@@ -177,7 +184,31 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
   pixel.red5 = blend(oldPixel.red5, pixel.red5)
   pixel.green5 = blend(oldPixel.green5, pixel.green5)
   pixel.blue5 = blend(oldPixel.blue5, pixel.blue5)
+  #logger.info fmt"setting vram {x},{y} to {uint16(pixel):04x}"
   vram[x][y] = pixel
 
-proc draw*(settings: Settings, x: Triangle) =
-  echo fmt"draw {x}"
+import sdl2, sdl2/gfx
+let surface = createRGBSurfaceFrom(addr vram, 1024, 512, 16, 2*1024, 0x1f, 0x1fu32 shl 5, 0x1fu32 shl 10, 0)
+
+proc draw*(settings: Settings, tri: Triangle) =
+  logger.debug fmt"draw {tri}"
+
+  var colour: Colour
+  case tri.colours
+  of None(): colour = (red: 0u8, green: 0xffu8, blue: 0u8)
+  of Some(@arr): colour = arr[0]
+
+  let
+    v0 = tri.vertices[0]
+    v1 = tri.vertices[1]
+    v2 = tri.vertices[2]
+
+  if v0.y == v1.y and v0.x == v2.x:
+    let w = v1.x-v0.x+1
+    let h = v2.y-v0.y+1
+    for j in 0..<h:
+      for i in 0..<(w*j) div h:
+        putPixel(v0.x+i, v0.y+j, colour.toPixel, settings)
+
+  else:
+    logger.info fmt"unhandled {tri}"

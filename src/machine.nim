@@ -113,11 +113,10 @@ dma.channels[2].write = gpuWriteDMA
 proc runSystem*() =
   ## Run the system.
 
+  let stop = events.time + clockRate div 25
   while true:
     while events.nextTime >= cpuClock:
       cpu.cpu.step
       events.fastForward(cpuClock)
     if not events.runNext: break
-    if events.time >= 5*clockRate: break
-
-runSystem()
+    if events.time >= stop: break
