@@ -170,8 +170,8 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
   if settings.setMaskBit: pixel.mask = true
 
   # Handle transparency
-  func blend(c1, c2: int): int =
-    result =
+  template blend(c1, c2: int): int =
+    var result =
       case settings.transparency
       of Mean: (c1+c2) div 2
       of Add: c1+c2
@@ -179,6 +179,7 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
       of AddQuarter: c1 + c2 div 4
       of Opaque: c2
     result = result.clamp(0, 31)
+    result
 
   # Write pixel with possible transparency
   pixel.red5 = blend(oldPixel.red5, pixel.red5)

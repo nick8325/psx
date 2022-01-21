@@ -61,6 +61,7 @@ const
   im = BitSlice[word, word](pos: 8, width: 8)
   ku = [bit[word] 1, bit[word] 3, bit[word] 5]
   ie = [bit[word] 0, bit[word] 2, bit[word] 4]
+  ie0 = ie[0]
 
   # IRQ bits in COP0.CAUSE.
   ip = BitSlice[word, word](pos: 8, width: 8)
@@ -683,7 +684,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
 proc step*(cpu: var CPU) {.inline.} =
   try:
     # Check for IRQs first.
-    if cpu.cop0.sr[ie[0]] and (cpu.cop0.sr[im] and cpu.cop0.cause[ip]) != 0:
+    if cpu.cop0.sr[ie0] and (cpu.cop0.sr[im] and cpu.cop0.cause[ip]) != 0:
       raise MachineError(error: Interrupt)
 
     let
