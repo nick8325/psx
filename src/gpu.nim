@@ -36,11 +36,14 @@ type
 Vertex.bitfield x, int, 0, 11, signed=true
 Vertex.bitfield y, int, 16, 11, signed=true
 
+func unpack(v: Vertex): rasteriser.Coord =
+  (x: v.x, y: v.y)
+
 Colour.bitfield red, uint8, 0, 8
 Colour.bitfield green, uint8, 8, 8
 Colour.bitfield blue, uint8, 16, 8
 
-func toRaster(c: Colour): rasteriser.Colour =
+func unpack(c: Colour): rasteriser.Colour =
   (red: c.red, green: c.green, blue: c.blue)
 
 TexPage.bitfield baseX64, int, 0, 4
@@ -54,23 +57,48 @@ TexPage.bitfield textureDisable, bool, 11, 1
 TexPage.bitfield flipX, bool, 12, 1
 TexPage.bitfield flipY, bool, 13, 1
 
+func base(page: TexPage): rasteriser.Coord =
+  (x: page.baseX64 * 64, y: page.baseY256 * 256)
+
 TextureWindow.bitfield mask, PackedMiniCoord, 0, 10
 TextureWindow.bitfield offset, PackedMiniCoord, 10, 10
 
 PackedMiniCoord.bitfield x8, int, 0, 5
 PackedMiniCoord.bitfield y8, int, 5, 5
 
+func unpack(c: PackedMiniCoord): rasteriser.Coord =
+  (x: c.x8 * 8, y: c.y8 * 8)
+
 PackedCoord.bitfield x, int, 0, 10
 PackedCoord.bitfield y, int, 10, 10
+
+func unpack(c: PackedCoord): rasteriser.Coord =
+  (x: c.x, y: c.y)
 
 PackedSignedCoord.bitfield x, int, 0, 11, signed=true
 PackedSignedCoord.bitfield y, int, 11, 11, signed=true
 
+func unpack(c: PackedSignedCoord): rasteriser.Coord =
+  (x: c.x, y: c.y)
+
 TexCoord.bitfield x, int, 0, 8
 TexCoord.bitfield y, int, 8, 8
 
+func unpack(c: TexCoord): rasteriser.Coord =
+  (x: c.x, y: c.y)
+
 Palette.bitfield x16, int, 0, 6
 Palette.bitfield y, int, 6, 9
+
+func unpack(p: Palette): rasteriser.Coord =
+  (x: p.x16 * 16, y: p.y)
+
+func colourMode(page: TexPage, palette: Coord): TextureColourMode =
+  # depth=3 apparently is treated as 15-bit
+  case page.colours.clampedConvert[:TextureColourDepth]
+  of FourBit: TextureColourMode(depth: FourBit, palette: palette)
+  of EightBit: TextureColourMode(depth: EightBit, palette: palette)
+  of FifteenBit: TextureColourMode(depth: FifteenBit)
 
 type
   # Texture settings
@@ -119,6 +147,44 @@ var
   drawing = DrawingSettings()
   screen = ScreenSettings()
   control = ControlSettings()
+
+proc displayArea: Rect =
+  result.x1 = screen.displayAreaStart.x
+  result.x2 = screen.displayAreaStart.y
+  let
+    ## TODO: calculate width/height using horizontalRange/verticalRange.
+    ## horizontalRes and verticalRes supposedly encode dotclock speed
+    width =
+      case screen.horizontalRes
+      of Res256: 256
+      of Res320: 320
+      of Res512: 512
+      of Res640: 640
+      of Res368: 368
+    height =
+      case screen.verticalRes
+      of Res240: 240
+      of Res480: 480
+  result.x2 = result.x1 + width
+  result.y2 = result.y1 + height
+
+proc rasteriserSettings(opaque: bool): rasteriser.Settings =
+  result.drawingArea =
+    (x1: drawing.drawingAreaTopLeft.x,
+     y1: drawing.drawingAreaTopLeft.y,
+     x2: drawing.drawingAreaBottomRight.x+1,
+     y2: drawing.drawingAreaBottomRight.y+1)
+
+  if drawing.drawToDisplayArea:
+    result.displayArea = some(displayArea()) # else none
+
+  result.transparency =
+    if opaque: Opaque
+    else: drawing.transparency
+
+  result.dither = drawing.dither
+  result.setMaskBit = drawing.setMaskBit
+  result.skipMaskedPixels = drawing.skipMaskedPixels
 
 var
   resultQueue = initDeque[word]()
@@ -187,190 +253,74 @@ let processCommand = consumer(word):
       # Interrupt requested
       control.interruptRequested = true
       irqs.signal 1
-    # of 0x20, 0x22:
-    #   # Monochrome triangle
-    #   let
-    #     args = args 3
-    #     colour = Colour(value[rest]).toRaster
-    #     v1 = Vertex(args[0])
-    #     v2 = Vertex(args[1])
-    #     v3 = Vertex(args[2])
-    #     transparency =
-    #       if value[command] == 0x20: Opaque
-    #       else: drawing.transparency
-    #   draw Polygon[3](transparency: transparency,
-    #                 vertices: [(x: v1.x, y: v1.y, colour: colour),
-    #                            (x: v2.x, y: v2.y, colour: colour),
-    #                            (x: v3.x, y: v3.y, colour: colour)])
-    # of 0x28, 0x2a:
-    #   # Monochrome quadrilateral
-    #   let
-    #     args = args 4
-    #     colour = Colour(value[rest]).toRaster
-    #     v1 = Vertex(args[0])
-    #     v2 = Vertex(args[1])
-    #     v3 = Vertex(args[2])
-    #     v4 = Vertex(args[3])
-    #     transparency =
-    #       if value[command] == 0x28: Opaque
-    #       else: drawing.transparency
-    #   draw Polygon[4](transparency: transparency,
-    #                      vertices: [(x: v1.x, y: v1.y, colour: colour),
-    #                                 (x: v2.x, y: v2.y, colour: colour),
-    #                                 (x: v3.x, y: v3.y, colour: colour),
-    #                                 (x: v4.x, y: v4.y, colour: colour)])
-    # of 0x24..0x27:
-    #   # Textured triangle
-    #   let
-    #     args = args 6
-    #     colour = Colour(value[rest]).toRaster
-    #     v1 = Vertex(args[0])
-    #     palette = Palette(args[1][word1])
-    #     coord1 = TexCoord(args[1][word2])
-    #     v2 = Vertex(args[2])
-    #     page = TexPage(args[3][word1])
-    #     coord2 = TexCoord(args[3][word2])
-    #     v3 = Vertex(args[4])
-    #     coord3 = TexCoord(args[5][word2])
-    #     transparency =
-    #       if value[command] in {0x26, 0x27}: drawing.transparency
-    #       else: Opaque
-    #     blended = value[command] in {0x24, 0x26}
-    #   draw Polygon[3](transparency: transparency,
-    #                 vertices: [(x: v1.x, y: v1.y, colour: colour),
-    #                            (x: v2.x, y: v2.y, colour: colour),
-    #                            (x: v3.x, y: v3.y, colour: colour)],
-    #                 texture: some Texture[3](
-    #                   blended: blended,
-    #                   palette: palette,
-    #                   page: page,
-    #                   coords: [coord1, coord2, coord3]))
-    # of 0x2c..0x2f:
-    #   # Textured quadrilateral
-    #   let
-    #     args = args 8
-    #     colour = Colour(value[rest]).toRaster
-    #     v1 = Vertex(args[0])
-    #     palette = Palette(args[1][word1])
-    #     coord1 = TexCoord(args[1][word2])
-    #     v2 = Vertex(args[2])
-    #     page = TexPage(args[3][word1])
-    #     coord2 = TexCoord(args[3][word2])
-    #     v3 = Vertex(args[4])
-    #     coord3 = TexCoord(args[5][word2])
-    #     v4 = Vertex(args[6])
-    #     coord4 = TexCoord(args[7][word2])
-    #     transparency =
-    #       if value[command] in {0x2e, 0x2f}: drawing.transparency
-    #       else: Opaque
-    #     blended = value[command] in {0x2c, 0x2e}
-    #   draw Polygon[4](transparency: transparency,
-    #                      vertices: [(x: v1.x, y: v1.y, colour: colour),
-    #                                 (x: v2.x, y: v2.y, colour: colour),
-    #                                 (x: v3.x, y: v3.y, colour: colour),
-    #                                 (x: v4.x, y: v4.y, colour: colour)],
-    #                 texture: some PolygonTexture[4](
-    #                   blended: blended,
-    #                   palette: palette,
-    #                   page: page,
-    #                   coords: [coord1, coord2, coord3, coord4]))
-    # of 0x30, 0x32:
-    #   # Shaded triangle
-    #   let
-    #     args = args 5
-    #     colour1 = Colour(value[rest]).toRaster
-    #     v1 = Vertex(args[0])
-    #     colour2 = Colour(args[1]).toRaster
-    #     v2 = Vertex(args[2])
-    #     colour3 = Colour(args[3]).toRaster
-    #     v3 = Vertex(args[4])
-    #     transparency =
-    #       if value[command] == 0x30: Opaque
-    #       else: drawing.transparency
-    #   draw Polygon[3](transparency: transparency,
-    #                 vertices: [(x: v1.x, y: v1.y, colour: colour1),
-    #                            (x: v2.x, y: v2.y, colour: colour2),
-    #                            (x: v3.x, y: v3.y, colour: colour3)])
-    # of 0x38, 0x3a:
-    #   # Shaded quadrilateral
-    #   let
-    #     args = args 7
-    #     colour1 = Colour(value[rest]).toRaster
-    #     v1 = Vertex(args[0])
-    #     colour2 = Colour(args[1]).toRaster
-    #     v2 = Vertex(args[2])
-    #     colour3 = Colour(args[3]).toRaster
-    #     v3 = Vertex(args[4])
-    #     colour4 = Colour(args[5]).toRaster
-    #     v4 = Vertex(args[6])
-    #     transparency =
-    #       if value[command] == 0x38: Opaque
-    #       else: drawing.transparency
-    #   draw Polygon[4](transparency: transparency,
-    #                      vertices: [(x: v1.x, y: v1.y, colour: colour1),
-    #                                 (x: v2.x, y: v2.y, colour: colour2),
-    #                                 (x: v3.x, y: v3.y, colour: colour3),
-    #                                 (x: v4.x, y: v4.y, colour: colour4)])
-    # of 0x34, 0x36:
-    #   # Shaded textured triangle
-    #   let
-    #     args = args 8
-    #     colour1 = Colour(value[rest]).toRaster
-    #     v1 = Vertex(args[0])
-    #     palette = Palette(args[1][word1])
-    #     coord1 = TexCoord(args[1][word2])
-    #     colour2 = Colour(args[2]).toRaster
-    #     v2 = Vertex(args[3])
-    #     page = TexPage(args[4][word1])
-    #     coord2 = TexCoord(args[4][word2])
-    #     colour3 = Colour(args[5]).toRaster
-    #     v3 = Vertex(args[6])
-    #     coord3 = TexCoord(args[7][word2])
-    #     transparency =
-    #       if value[command] == 0x36: drawing.transparency
-    #       else: Opaque
-    #     blended = true
-    #   draw Polygon[3](transparency: transparency,
-    #                 vertices: [(x: v1.x, y: v1.y, colour: colour1),
-    #                            (x: v2.x, y: v2.y, colour: colour2),
-    #                            (x: v3.x, y: v3.y, colour: colour3)],
-    #                 texture: some PolygonTexture[3](
-    #                   blended: blended,
-    #                   palette: palette,
-    #                   page: page,
-    #                   coords: [coord1, coord2, coord3]))
-    # of 0x3c, 0x3e:
-    #   # Shaded textured quadrilateral
-    #   let
-    #     args = args 11
-    #     colour1 = Colour(value[rest]).toRaster
-    #     v1 = Vertex(args[0])
-    #     palette = Palette(args[1][word1])
-    #     coord1 = TexCoord(args[1][word2])
-    #     colour2 = Colour(args[2]).toRaster
-    #     v2 = Vertex(args[3])
-    #     page = TexPage(args[4][word1])
-    #     coord2 = TexCoord(args[4][word2])
-    #     colour3 = Colour(args[5]).toRaster
-    #     v3 = Vertex(args[6])
-    #     coord3 = TexCoord(args[7][word2])
-    #     colour4 = Colour(args[8]).toRaster
-    #     v4 = Vertex(args[9])
-    #     coord4 = TexCoord(args[10][word2])
-    #     transparency =
-    #       if value[command] == 0x3e: drawing.transparency
-    #       else: Opaque
-    #     blended = true
-    #   draw Polygon[4](transparency: transparency,
-    #                      vertices: [(x: v1.x, y: v1.y, colour: colour1),
-    #                                 (x: v2.x, y: v2.y, colour: colour2),
-    #                                 (x: v3.x, y: v3.y, colour: colour3),
-    #                                 (x: v4.x, y: v4.y, colour: colour4)],
-    #                      texture: some PolygonTexture[4](
-    #                        blended: blended,
-    #                        palette: palette,
-    #                        page: page,
-    #                        coords: [coord1, coord2, coord3, coord4]))
+    of 0x20..0x3f:
+      # A polygon.
+      # The bits of the command word have the following meaning:
+      # * bit 0: if 1 then texture blending is disabled
+      # * bit 1: enable transparency (using global transparency settings)
+      # * bit 2: polygon is textured
+      # * bit 3: if 0, draw a triangle; if 1, draw a quadrilateral
+      # * bit 4: polygon is shaded
+      #
+      # The parameters come in the following order, where (0) is the command word:
+      # (0) command+colour (1) vertex (2) texcoord+palette
+      # (3) colour (4) vertex (5) texcoord+texpage
+      # (6) colour (7) vertex (8) texcoord
+      # (9) colour (10) vertex (11) texcoord
+      # but only those parameters appropriate to the particular drawing
+      # command are sent:
+      # * (9)-(11) skipped for triangles
+      # * Texcoords skipped for untextured polygons
+      # * Colours (3),(6),(9) (but not 0) skipped for unshaded polygons
+
+      let
+        rawTextures = value.testBit 0
+        transparent = value.testBit 1
+        textured = value.testBit 2
+        quad = value.testBit 3
+        shaded = value.testBit 4
+        sides = if quad: 4 else: 3
+
+      var
+        vertices: array[4, Coord]
+        colours: array[4, rasteriser.Colour]
+        texcoords: array[4, Coord]
+        texpage: TexPage
+        palette: Coord
+
+      colours[0] = Colour(value[rest]).unpack
+
+      for i in 0..<sides:
+        if i > 0:
+          if shaded: colours[i] = Colour(take()).unpack
+          else: colours[i] = colours[0] # monochrome
+        vertices[i] = Vertex(take()).unpack
+        if textured:
+          let arg = take()
+          texcoords[i] = TexCoord(arg[word2]).unpack
+          case i
+          of 0: palette = Palette(arg[word1]).unpack
+          of 1: texpage = TexPage(arg[word1])
+          else: discard
+
+      for i in 0..<(if quad: 2 else: 1):
+        # Convert vertices [i,i+1,i+2] to a triangle
+        let vs = [vertices[i], vertices[i+1], vertices[i+2]]
+        let cs =
+          if textured and rawTextures: none(array[3, rasteriser.Colour])
+          else: some [colours[i], colours[i+1], colours[i+2]]
+        let texture =
+          if textured:
+            some Texture[3](
+              page: texpage.base,
+              windowMask: textures.window.mask.unpack,
+              windowOffset: textures.window.offset.unpack,
+              coords: [texcoords[i], texcoords[i+1], texcoords[i+2]],
+              colourMode: texpage.colourMode(palette))
+          else:
+            none(Texture[3])
+        draw Triangle(vertices: vs, colours: cs, texture: texture)
+
     of 0xe1:
       # Texpage
       let page = value[rest].TexPage
@@ -405,8 +355,8 @@ let processCommand = consumer(word):
     of 0xa0:
       # Copy rectangle to VRAM
       let
-        coord = take.PackedCoord
-        size = take.PackedCoord
+        coord = take.Vertex
+        size = take.Vertex
         length = (size.x * size.y + 1) div 2 # round up
       for i in 1..length: discard take()
       logger.warn fmt"Skipping copy to VRAM of {size.x}*{size.y} halfwords"
@@ -414,8 +364,8 @@ let processCommand = consumer(word):
     of 0xc0:
       # Copy rectangle to CPU
       let
-        coord = take.PackedCoord
-        size = take.PackedCoord
+        coord = take.Vertex
+        size = take.Vertex
         length = (size.x * size.y + 1) div 2 # round up
       logger.warn fmt"Faking copy to CPU of {size.x}*{size.y} halfwords"
       for i in 1..length:
