@@ -192,6 +192,11 @@ import sdl2, sdl2/gfx
 let surface = createRGBSurfaceFrom(addr vram, 1024, 512, 16, 2*1024, 0x1f, 0x1fu32 shl 5, 0x1fu32 shl 10, 0)
 
 proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
+  ## Compute a line from p1 to p2 (using integer coordinates).
+  ## If it is not possible to stay exactly on the line, keep
+  ## to the left of it. Here left is interpreted relative to
+  ## the direction of motion p1->p2.
+
   # Idea: at every step, move towards the line if we can,
   # otherwise move away. The directions of "towards" and
   # "away" depend on the orientation of the line, but are
@@ -200,44 +205,20 @@ proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
   let
     dx = abs (p2.x - p1.x)
     dy = abs (p2.y - p1.y)
-    sgx = signum (p2.x - p1.x)
-    sgy = signum (p2.y - p1.y)
+    sx = signum (p2.x - p1.x)
+    sy = signum (p2.y - p1.y)
 
-  assert sgx != 0 or sgy != 0 # Should be handled by collinear triangle case
-
-  # How to take steps depending on direction of line:
-  # "/" - away: y += sgy, towards: x += sgx
-  # "\" - away: x += sgx, towards: y += sgy
-  # "|" - away: N/A, towards: y += sgy
-  # "-" - away: N/A, towards: x += sgx
-
-  # Identify the case and set up the parameters
-  type Direction = enum XAway, YAway
   var
     p = p1
     err = 0
-    sx, sy: int
-    dir: Direction
 
-  if sgx == 0: # Vertical line
-    dir = XAway
-    sx = 0
-    sy = sgy
-  elif sgy == 0: # Horizontal line
-    dir = YAway
-    sy = 0
-    sx = sgx
-  elif sgx == sgy: # Line of "\" shape
-    dir = XAway
-    sx = sgx
-    sy = sgy
-  else: # Line of "/" shape
-    dir = YAway
-    sx = sgx
-    sy = sgy
+  # How to take steps depending on direction of line:
+  # "/" - away: y += sy, towards: x += sx
+  # "\" - away: x += sx, towards: y += sy
+  # "|" - away: N/A, towards: y += sy (treat as "\")
+  # "-" - away: N/A, towards: x += sx (treat as "/")
 
-  case dir
-  of XAway:
+  if sx == sy or sx == 0: # Line of "\" or "|" shape
     while p != p2:
       result.add (p, err == 0)
       if err >= dx:
@@ -246,7 +227,7 @@ proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
       else:
         p.x += sx
         err += dy
-  of YAway:
+  else: # Line of "/" or "-" shape
     while p != p2:
       result.add (p, err == 0)
       if err >= dy:
@@ -255,6 +236,8 @@ proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
       else:
         p.y += sy
         err += dx
+
+  # Add endpoint
   result.add (p, true)
 
 proc draw*(settings: Settings, tri: Triangle) =
@@ -281,67 +264,68 @@ proc draw*(settings: Settings, tri: Triangle) =
     cmp((p1.x-p0.x)*(p2.y-p0.y), (p2.x-p0.x)*(p1.y-p0.y))
 
   # Special case: if all vertices are collinear, nothing should be drawn
-  # (everything is on the "bottom right" edge of the triangle)
   if cmpAngle(vs[1], vs[2]) == 0:
     logger.debug fmt"skip collinear triangle {tri}"
     return
 
-  # Put vs[1] and vs[2] in order of angle
+  # Put vs[1] and vs[2] in order of angle, so that the movement
+  # vs[0]->vs[1]->vs[2]->vs[0] goes anticlockwise around the triangle
   if cmpAngle(vs[1], vs[2]) > 0:
     swap(vs[1], vs[2])
 
-  # Now we draw the edges vs[0]->vs[1], vs[1]->vs[2] and vs[2]->vs[0],
-  # which effectively moves anticlockwise around the triangle from vs[0].
-  # To stay in the triangle we add the rule that we should only choose points to
-  # the left of the direction of movement.
+  # Classify each line as either on the left or right side of the
+  # triangle, or horizontal. Points exactly on a right-sided line of the
+  # triangle are not drawn. Points on a horizontal bottom line of the triangle
+  # should also not be drawn.
+  type Kind = enum Left, Right, Horizontal
+  var kinds: array[3, Kind]
+  # vs[0] -> vs[1]
+  kinds[0] = Left # cannot be horizontal, or all 3 points would be collinear
+  # vs[1] -> vs[2]
+  kinds[1] =
+    if vs[1].y < vs[2].y: Left # going down from vs[1] to vs[2]
+    elif vs[1].y > vs[2].y: Right # going up from vs[1] to vs[2]
+    else: Horizontal # going straight along
+  # vs[2] -> vs[0]
+  kinds[2] = if vs[2].y == vs[0].y: Horizontal else: Right
+
+  # Next step: figure out the minimum and maximum x-coordinate we should draw
+  # for each y-coordinate.
 
   let ytop = vs[0].y
   let ybot = max(vs[1].y, vs[2].y)
-
-  # Work out which kind of edge each line is
-  # The kind determines whether points exactly on the line may be drawn
-  # Left/top: drawn
-  # Right: not drawn but check if point to left should be drawn
-  # Bottom: not drawn but check if point above should be drawn
-  type Kind = enum Left, Right, Top, Bottom
-  var kinds: array[3, Kind]
-  kinds[0] = Left # vs[0] -> vs[1]
-  kinds[1] = # vs[1] -> vs[2]
-    if vs[1].y < vs[2].y: Left
-    elif vs[1].y == vs[2].y: Bottom
-    else: Right
-  kinds[2] = # vs[2] -> vs[0]
-    if vs[2].y == vs[0].y: Top
-    else: Right
-
   var mins, maxs: seq[int]
   for _ in ytop..ybot:
     mins.add int.high
     maxs.add int.low
 
-  template updateMin(p: Point) =
-    if mins[p.y - ytop] > p.x: mins[p.y - ytop] = p.x
-  template updateMax(p: Point) =
-    if maxs[p.y - ytop] < p.x: maxs[p.y - ytop] = p.x
+  # We traverse the triangle anticlockwise, vs[0]->vs[1]->vs[2]->vs[0].
+  # We convert each line into a set of points, but in order to stay inside the
+  # triangle we only consider points that lie on the line or to the left of it
+  # (relative to the direction of travel around the triangle). The computed
+  # points are used to update mins or maxs depending on what kind of line it is:
+  # * Left line: update mins
+  # * Right line: update maxs. If the point lies exactly on the line, reduce
+  #   x-coordinate by 1 first.
+  # * Horizontal line: ignored - both endpoints must connect to another line,
+  #   so we rely on those instead. If the line is at the bottom of the triangle,
+  #   we don't draw the bottom row of the triangle.
+
   template update(pp: (Point, bool), kind: Kind) =
     var (p, onLine) = pp
     case kind
-    of Left: p.updateMin
-    of Top:
-      p.updateMin
-      if not onLine: p.updateMax
+    of Left:
+      if mins[p.y - ytop] > p.x: mins[p.y - ytop] = p.x
     of Right:
       if onLine: p.x -= 1
-      p.updateMax
-    of Bottom:
-      if not onLine:
-        p.updateMin
-        p.updateMax
+      if maxs[p.y - ytop] < p.x: maxs[p.y - ytop] = p.x
+    of Horizontal: discard
 
   for p in lineKeepingLeft(vs[0], vs[1]): p.update(kinds[0])
   for p in lineKeepingLeft(vs[1], vs[2]): p.update(kinds[1])
   for p in lineKeepingLeft(vs[2], vs[0]): p.update(kinds[2])
 
-  for y in ytop..ybot:
+  # Skip last line if vs[1]->vs[2] is horizontal (bottom line)
+  for y in ytop..ybot - (if kinds[1] == Horizontal: 1 else: 0):
     for x in mins[y-ytop]..maxs[y-ytop]:
       putPixel(x, y, colour.toPixel, settings)
