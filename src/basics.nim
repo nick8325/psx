@@ -48,8 +48,8 @@ const
   cpuClock* = 11 # ~33.8MHz
   gpuClock* = 7  # ~53.2MHz
   systemClock* = cpuClock * 8 # ~4.23MHz
-  refreshRate*: array[Region, uint64] =
-    [NTSC: 60u64, PAL: 50u64]
+  refreshRate*: array[Region, int] =
+    [NTSC: 60, PAL: 50]
 
 var
   region*: Region = NTSC ## The game's region. Updated by the BIOS.

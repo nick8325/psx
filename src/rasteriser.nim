@@ -8,7 +8,7 @@ import fusion/matching
 var logger = newLogger("Rasteriser")
 
 type
-  Coord* = tuple
+  Point* = tuple
     ## A pixel coordinate.
     x, y: int
 
@@ -42,14 +42,14 @@ type
   TextureColourMode* = object
     ## The colour depth of a texture, plus palette if needed.
     case depth*: TextureColourDepth
-    of FourBit, EightBit: palette*: Coord
+    of FourBit, EightBit: palette*: Point
     of FifteenBit: discard
 
   Texture*[N: static int] = object
     ## A texture with N vertices.
-    page*: Coord ## x must be a multiple of 64, y a multiple of 256.
-    windowMask*, windowOffset*: Coord
-    coords*: array[N, Coord] ## relative to page.
+    page*: Point ## x must be a multiple of 64, y a multiple of 256.
+    windowMask*, windowOffset*: Point
+    coords*: array[N, Point] ## relative to page.
     colourMode*: TextureColourMode
 
   Settings* = object
@@ -63,7 +63,7 @@ type
 
   Triangle* = object
     ## A triangle. At least one of 'colours' and 'texture' should be set.
-    vertices*: array[3, Coord]
+    vertices*: array[3, Point]
     colours*: Option[array[3, Colour]]
     texture*: Option[Texture[3]]
 
@@ -191,6 +191,72 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
 import sdl2, sdl2/gfx
 let surface = createRGBSurfaceFrom(addr vram, 1024, 512, 16, 2*1024, 0x1f, 0x1fu32 shl 5, 0x1fu32 shl 10, 0)
 
+proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
+  # Idea: at every step, move towards the line if we can,
+  # otherwise move away. The directions of "towards" and
+  # "away" depend on the orientation of the line, but are
+  # always increasing/decreasing x or y by 1.
+
+  let
+    dx = abs (p2.x - p1.x)
+    dy = abs (p2.y - p1.y)
+    sgx = signum (p2.x - p1.x)
+    sgy = signum (p2.y - p1.y)
+
+  assert sgx != 0 or sgy != 0 # Should be handled by collinear triangle case
+
+  # How to take steps depending on direction of line:
+  # "/" - away: y += sgy, towards: x += sgx
+  # "\" - away: x += sgx, towards: y += sgy
+  # "|" - away: N/A, towards: y += sgy
+  # "-" - away: N/A, towards: x += sgx
+
+  # Identify the case and set up the parameters
+  type Direction = enum XAway, YAway
+  var
+    p = p1
+    err = 0
+    sx, sy: int
+    dir: Direction
+
+  if sgx == 0: # Vertical line
+    dir = XAway
+    sx = 0
+    sy = sgy
+  elif sgy == 0: # Horizontal line
+    dir = YAway
+    sy = 0
+    sx = sgx
+  elif sgx == sgy: # Line of "\" shape
+    dir = XAway
+    sx = sgx
+    sy = sgy
+  else: # Line of "/" shape
+    dir = YAway
+    sx = sgx
+    sy = sgy
+
+  case dir
+  of XAway:
+    while p != p2:
+      result.add (p, err == 0)
+      if err >= dx:
+        p.y += sy
+        err -= dx
+      else:
+        p.x += sx
+        err += dy
+  of YAway:
+    while p != p2:
+      result.add (p, err == 0)
+      if err >= dy:
+        p.x += sx
+        err -= dy
+      else:
+        p.y += sy
+        err += dx
+  result.add (p, true)
+
 proc draw*(settings: Settings, tri: Triangle) =
   logger.debug fmt"draw {tri}"
 
@@ -199,25 +265,83 @@ proc draw*(settings: Settings, tri: Triangle) =
   of None(): colour = (red: 0u8, green: 0xffu8, blue: 0u8)
   of Some(@arr): colour = arr[0]
 
-  # Highest point first, using leftmost point for tie-breaks
-  var vs = tri.vertices.sorted((c1, c2: Coord) => cmp(c1.x, c2.x))
-  vs.sort((c1, c2: Coord) => cmp(c1.y, c2.y))
+  var vs = tri.vertices
 
-  let x1 = min(vs[0].x, min(vs[1].x, vs[2].x))
-  let y1 = min(vs[0].y, min(vs[1].y, vs[2].y))
-  let x2 = max(vs[0].x, max(vs[1].x, vs[2].x))
-  let y2 = max(vs[0].y, max(vs[1].y, vs[2].y))
+  # Put the topmost point at vs[0], using leftmost to break ties
+  vs.sort cmpKey[Point]((p: Point) => (p.y, p.x))
 
-  for j in y1..y2:
-    for i in x1..x2:
-      putPixel(i, j, colour.toPixel, settings)
+  # Compare angle of two points relative to point vs[0].
+  # Returns -1 if p1 is clockwise of p2, 1 if anticlockwise.
+  proc cmpAngle(p1, p2: Point): int =
+    let p0 = vs[0]
+    # Return 1 if
+    #     (x1-x0)/(y1-y0) < (x2-x0)/(y2-y0)
+    # <=> (x1-x0)(y2-y0) < (x2-x0)(y1-y0) since y0 <= y1,y2
+    # Also works if y2=y0 or y1=y0
+    cmp((p1.x-p0.x)*(p2.y-p0.y), (p2.x-p0.x)*(p1.y-p0.y))
 
-  # if vs[0].y == vs[1].y and vs[0].x == vs[2].x:
-  #   let w = vs[1].x-vs[0].x+1
-  #   let h = vs[2].y-vs[0].y+1
-  #   for j in 0..<h:
-  #     for i in 0..<(w*j) div h:
-  #       putPixel(vs[0].x+i, vs[0].y+j, colour.toPixel, settings)
+  # Special case: if all vertices are collinear, nothing should be drawn
+  # (everything is on the "bottom right" edge of the triangle)
+  if cmpAngle(vs[1], vs[2]) == 0:
+    logger.debug fmt"skip collinear triangle {tri}"
+    return
 
-  # else:
-  #   logger.info fmt"unhandled {tri}"
+  # Put vs[1] and vs[2] in order of angle
+  if cmpAngle(vs[1], vs[2]) > 0:
+    swap(vs[1], vs[2])
+
+  # Now we draw the edges vs[0]->vs[1], vs[1]->vs[2] and vs[2]->vs[0],
+  # which effectively moves anticlockwise around the triangle from vs[0].
+  # To stay in the triangle we add the rule that we should only choose points to
+  # the left of the direction of movement.
+
+  let ytop = vs[0].y
+  let ybot = max(vs[1].y, vs[2].y)
+
+  # Work out which kind of edge each line is
+  # The kind determines whether points exactly on the line may be drawn
+  # Left/top: drawn
+  # Right: not drawn but check if point to left should be drawn
+  # Bottom: not drawn but check if point above should be drawn
+  type Kind = enum Left, Right, Top, Bottom
+  var kinds: array[3, Kind]
+  kinds[0] = Left # vs[0] -> vs[1]
+  kinds[1] = # vs[1] -> vs[2]
+    if vs[1].y < vs[2].y: Left
+    elif vs[1].y == vs[2].y: Bottom
+    else: Right
+  kinds[2] = # vs[2] -> vs[0]
+    if vs[2].y == vs[0].y: Top
+    else: Right
+
+  var mins, maxs: seq[int]
+  for _ in ytop..ybot:
+    mins.add int.high
+    maxs.add int.low
+
+  template updateMin(p: Point) =
+    if mins[p.y - ytop] > p.x: mins[p.y - ytop] = p.x
+  template updateMax(p: Point) =
+    if maxs[p.y - ytop] < p.x: maxs[p.y - ytop] = p.x
+  template update(pp: (Point, bool), kind: Kind) =
+    var (p, onLine) = pp
+    case kind
+    of Left: p.updateMin
+    of Top:
+      p.updateMin
+      if not onLine: p.updateMax
+    of Right:
+      if onLine: p.x -= 1
+      p.updateMax
+    of Bottom:
+      if not onLine:
+        p.updateMin
+        p.updateMax
+
+  for p in lineKeepingLeft(vs[0], vs[1]): p.update(kinds[0])
+  for p in lineKeepingLeft(vs[1], vs[2]): p.update(kinds[1])
+  for p in lineKeepingLeft(vs[2], vs[0]): p.update(kinds[2])
+
+  for y in ytop..ybot:
+    for x in mins[y-ytop]..maxs[y-ytop]:
+      putPixel(x, y, colour.toPixel, settings)

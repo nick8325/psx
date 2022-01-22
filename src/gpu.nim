@@ -36,7 +36,7 @@ type
 Vertex.bitfield x, int, 0, 11, signed=true
 Vertex.bitfield y, int, 16, 11, signed=true
 
-func unpack(v: Vertex): rasteriser.Coord =
+func unpack(v: Vertex): Point =
   (x: v.x, y: v.y)
 
 Colour.bitfield red, uint8, 0, 8
@@ -57,7 +57,7 @@ TexPage.bitfield textureDisable, bool, 11, 1
 TexPage.bitfield flipX, bool, 12, 1
 TexPage.bitfield flipY, bool, 13, 1
 
-func base(page: TexPage): rasteriser.Coord =
+func base(page: TexPage): Point =
   (x: page.baseX64 * 64, y: page.baseY256 * 256)
 
 TextureWindow.bitfield mask, PackedMiniCoord, 0, 10
@@ -66,34 +66,34 @@ TextureWindow.bitfield offset, PackedMiniCoord, 10, 10
 PackedMiniCoord.bitfield x8, int, 0, 5
 PackedMiniCoord.bitfield y8, int, 5, 5
 
-func unpack(c: PackedMiniCoord): rasteriser.Coord =
+func unpack(c: PackedMiniCoord): Point =
   (x: c.x8 * 8, y: c.y8 * 8)
 
 PackedCoord.bitfield x, int, 0, 10
 PackedCoord.bitfield y, int, 10, 10
 
-func unpack(c: PackedCoord): rasteriser.Coord =
+func unpack(c: PackedCoord): Point =
   (x: c.x, y: c.y)
 
 PackedSignedCoord.bitfield x, int, 0, 11, signed=true
 PackedSignedCoord.bitfield y, int, 11, 11, signed=true
 
-func unpack(c: PackedSignedCoord): rasteriser.Coord =
+func unpack(c: PackedSignedCoord): Point =
   (x: c.x, y: c.y)
 
 TexCoord.bitfield x, int, 0, 8
 TexCoord.bitfield y, int, 8, 8
 
-func unpack(c: TexCoord): rasteriser.Coord =
+func unpack(c: TexCoord): Point =
   (x: c.x, y: c.y)
 
 Palette.bitfield x16, int, 0, 6
 Palette.bitfield y, int, 6, 9
 
-func unpack(p: Palette): rasteriser.Coord =
+func unpack(p: Palette): Point =
   (x: p.x16 * 16, y: p.y)
 
-func colourMode(page: TexPage, palette: Coord): TextureColourMode =
+func colourMode(page: TexPage, palette: Point): TextureColourMode =
   # depth=3 apparently is treated as 15-bit
   case page.colours.clampedConvert[:TextureColourDepth]
   of FourBit: TextureColourMode(depth: FourBit, palette: palette)
@@ -154,6 +154,18 @@ proc displayArea: Rect =
   let
     ## TODO: calculate width/height using horizontalRange/verticalRange.
     ## horizontalRes and verticalRes supposedly encode dotclock speed
+
+    ## TODO: for clipping, PSX library reference says:
+    ## "It is calculated without regard to the value of disp, using the standard
+    ## monitor screen upper left-hand point (0, 0) and lower right-hand point
+    ## (256, 240)."
+    ##
+    ## "If you set the dfe flage of your DRAWENV structure to zero, drawing is
+    ## prohibited to the areas of the screen currently being displayed. This has
+    ## the effect of allowing drawing only to the odd lines when even lines are
+    ## being displayed, and even lines when odd lines are being displayed. This
+    ## is the equivalent of the usual double-buffer switching. You don’t need to
+    ## do any explicit switching between display and drawing environments."
     width =
       case screen.horizontalRes
       of Res256: 256
@@ -285,11 +297,11 @@ let processCommand = consumer(word):
         sides = if quad: 4 else: 3
 
       var
-        vertices: array[4, Coord]
+        vertices: array[4, Point]
         colours: array[4, rasteriser.Colour]
-        texcoords: array[4, Coord]
+        texcoords: array[4, Point]
         texpage: TexPage
-        palette: Coord
+        palette: Point
 
       colours[0] = Colour(value[rest]).unpack
 
@@ -485,7 +497,7 @@ proc gpuReadDMA*: word =
 
 # VBLANK IRQ
 proc signalVBlank =
-  events.after(clockRate div refreshRate[region]) do ():
+  events.after(clockRate div refreshRate[region].uint64) do ():
     logger.debug "VBLANK"
     screen.oddLine = not screen.oddLine
     irqs.signal 0

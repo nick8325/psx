@@ -179,3 +179,12 @@ template take*: untyped =
   mixin consumerArg
   yield
   consumerArg
+
+template cmpKey*[T](key: untyped): untyped =
+  proc compare(x, y: T): int = cmp(key(x), key(y))
+  compare
+
+func signum*[T](x: T): T =
+  if x > 0: return 1
+  elif x < 0: return -1
+  else: return 0
