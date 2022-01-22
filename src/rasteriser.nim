@@ -1,7 +1,7 @@
 ## The backend of the GPU - converts drawing commands into a framebuffer.
 
 import utils
-import std/[options, strformat, logging]
+import std/[options, strformat, logging, sugar, algorithm]
 import fusion/matching
 {.experimental: "caseStmtMacros".}
 
@@ -128,12 +128,12 @@ func `$`*(rect: Rectangle): string =
     result &= ", y flipped"
 
 var
-  vram*: array[1024, array[512, Pixel]]
+  vram*: array[512, array[1024, Pixel]]
 
 proc getPixel*(xIn, yIn: int): Pixel {.inline.} =
   let x = xIn mod 1024
   let y = yIn mod 512
-  vram[x][y]
+  vram[y][x]
 
 proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
   ## Put a pixel to the VRAM. Handles:
@@ -186,7 +186,7 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
   pixel.green5 = blend(oldPixel.green5, pixel.green5)
   pixel.blue5 = blend(oldPixel.blue5, pixel.blue5)
   #logger.info fmt"setting vram {x},{y} to {uint16(pixel):04x}"
-  vram[x][y] = pixel
+  vram[y][x] = pixel
 
 import sdl2, sdl2/gfx
 let surface = createRGBSurfaceFrom(addr vram, 1024, 512, 16, 2*1024, 0x1f, 0x1fu32 shl 5, 0x1fu32 shl 10, 0)
@@ -199,17 +199,25 @@ proc draw*(settings: Settings, tri: Triangle) =
   of None(): colour = (red: 0u8, green: 0xffu8, blue: 0u8)
   of Some(@arr): colour = arr[0]
 
-  let
-    v0 = tri.vertices[0]
-    v1 = tri.vertices[1]
-    v2 = tri.vertices[2]
+  # Highest point first, using leftmost point for tie-breaks
+  var vs = tri.vertices.sorted((c1, c2: Coord) => cmp(c1.x, c2.x))
+  vs.sort((c1, c2: Coord) => cmp(c1.y, c2.y))
 
-  if v0.y == v1.y and v0.x == v2.x:
-    let w = v1.x-v0.x+1
-    let h = v2.y-v0.y+1
-    for j in 0..<h:
-      for i in 0..<(w*j) div h:
-        putPixel(v0.x+i, v0.y+j, colour.toPixel, settings)
+  let x1 = min(vs[0].x, min(vs[1].x, vs[2].x))
+  let y1 = min(vs[0].y, min(vs[1].y, vs[2].y))
+  let x2 = max(vs[0].x, max(vs[1].x, vs[2].x))
+  let y2 = max(vs[0].y, max(vs[1].y, vs[2].y))
 
-  else:
-    logger.info fmt"unhandled {tri}"
+  for j in y1..y2:
+    for i in x1..x2:
+      putPixel(i, j, colour.toPixel, settings)
+
+  # if vs[0].y == vs[1].y and vs[0].x == vs[2].x:
+  #   let w = vs[1].x-vs[0].x+1
+  #   let h = vs[2].y-vs[0].y+1
+  #   for j in 0..<h:
+  #     for i in 0..<(w*j) div h:
+  #       putPixel(vs[0].x+i, vs[0].y+j, colour.toPixel, settings)
+
+  # else:
+  #   logger.info fmt"unhandled {tri}"

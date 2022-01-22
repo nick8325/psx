@@ -39,7 +39,7 @@ while runGame:
   discard window.updateSurface()
   fps.delay
 
-  if events.time >= 5*clockRate: break
+#  if events.time >= 5*clockRate: break
 
 destroy render
 destroy window
