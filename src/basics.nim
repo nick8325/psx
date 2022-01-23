@@ -51,5 +51,9 @@ const
   refreshRate*: array[Region, int] =
     [NTSC: 60, PAL: 50]
 
+  # Width and height of the VRAM, in pixels.
+  vramWidth* = 1024
+  vramHeight* = 512
+
 var
   region*: Region = NTSC ## The game's region. Updated by the BIOS.

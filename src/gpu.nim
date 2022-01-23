@@ -1,7 +1,7 @@
 ## The GPU.
 
 import basics, utils, irq, eventqueue, rasteriser
-import std/[bitops, strformat, deques, options]
+import std/[bitops, strformat, deques, options, logging]
 
 var logger = newLogger("GPU")
 
@@ -24,11 +24,13 @@ type
     Write = 2,
     Read = 3
   Vertex = distinct word
+  ScreenCoord = distinct word
   Colour = distinct word
   TexPage = distinct uint16
   TextureWindow = distinct word
   PackedMiniCoord = distinct word
   PackedCoord = distinct word
+  PackedScreenCoord = distinct word
   PackedSignedCoord = distinct word
   Palette = distinct uint16
   TexCoord = distinct uint16
@@ -37,6 +39,12 @@ Vertex.bitfield x, int, 0, 11, signed=true
 Vertex.bitfield y, int, 16, 11, signed=true
 
 func unpack(v: Vertex): Point =
+  (x: v.x, y: v.y)
+
+ScreenCoord.bitfield x, int, 0, 10
+ScreenCoord.bitfield y, int, 16, 9
+
+func unpack(v: ScreenCoord): Point =
   (x: v.x, y: v.y)
 
 Colour.bitfield red, uint8, 0, 8
@@ -73,6 +81,13 @@ PackedCoord.bitfield x, int, 0, 10
 PackedCoord.bitfield y, int, 10, 10
 
 func unpack(c: PackedCoord): Point =
+  (x: c.x, y: c.y)
+
+# Absolute screen coordinates seem to get masked to 0<=y<512
+PackedScreenCoord.bitfield x, int, 0, 10
+PackedScreenCoord.bitfield y, int, 10, 9
+
+func unpack(c: PackedScreenCoord): Point =
   (x: c.x, y: c.y)
 
 PackedSignedCoord.bitfield x, int, 0, 11, signed=true
@@ -119,13 +134,13 @@ type
     skipMaskedPixels: bool           # GPUSTAT 12
     drawToDisplayArea: bool          # GPUSTAT 10
     dither: bool                     # GPUSTAT 9
-    drawingAreaTopLeft: PackedCoord  # GP0(E3h)
-    drawingAreaBottomRight: PackedCoord # GP0(E4h)
+    drawingAreaTopLeft: PackedScreenCoord  # GP0(E3h)
+    drawingAreaBottomRight: PackedScreenCoord # GP0(E4h)
     drawingAreaOffset: PackedSignedCoord # GP0(E5h)
 
   # Screen settings
   ScreenSettings = object
-    displayAreaStart: PackedCoord    # GP1(05h)
+    displayAreaStart: PackedScreenCoord # GP1(05h)
     displayAreaDepth: ColourDepth    # GPUSTAT 21
     horizontalRes: HorizontalRes   # GPUSTAT 16-18
     verticalRes: VerticalRes       # GPUSTAT 19
@@ -311,8 +326,8 @@ let processCommand = consumer(word):
           if shaded: colours[i] = Colour(take()).unpack
           else: colours[i] = colours[0] # monochrome
         vertices[i] = Vertex(take()).unpack
-        vertices[i].x += drawing.drawingAreaTopLeft.x + drawing.drawingAreaOffset.x
-        vertices[i].y += drawing.drawingAreaTopLeft.y + drawing.drawingAreaOffset.y
+        vertices[i].x += drawing.drawingAreaOffset.x
+        vertices[i].y += drawing.drawingAreaOffset.y
         if textured:
           let arg = take()
           texcoords[i] = TexCoord(arg[word2]).unpack
@@ -358,10 +373,10 @@ let processCommand = consumer(word):
       textures.window = value[rest].TextureWindow
 
     of 0xe3:
-      drawing.drawingAreaTopLeft = value[rest].PackedCoord
+      drawing.drawingAreaTopLeft = value[rest].PackedScreenCoord
 
     of 0xe4:
-      drawing.drawingAreaBottomRight = value[rest].PackedCoord
+      drawing.drawingAreaBottomRight = value[rest].PackedScreenCoord
 
     of 0xe5:
       drawing.drawingAreaOffset = value[rest].PackedSignedCoord
@@ -373,18 +388,19 @@ let processCommand = consumer(word):
 
     of 0xa0:
       # Copy rectangle to VRAM
-      let
-        coord = take.Vertex
-        size = take.Vertex
+      var
+        coord = take.ScreenCoord
+        size = take.ScreenCoord
       var settings = rasteriserSettings(false)
-      settings.drawingArea = (x1: 0, y1: 0, x2: 1024, y2: 512)
+      settings.drawingArea = (x1: 0, y1: 0, x2: vramWidth, y2: vramHeight)
       settings.displayArea = (x1: -1, y1: -1, x2: -1, y2: -1)
 
       var
         arg: word = 0
         even = true
-      for j in coord.y..<coord.y+size.y:
-        for i in coord.x..<coord.x+size.x:
+      # This detail comes from Nocash PSX
+      for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
+        for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
           if even:
             arg = take()
             putPixel(i, j, arg[word2].Pixel, settings)
@@ -401,8 +417,8 @@ let processCommand = consumer(word):
       var
         val: word = 0
         even = true
-      for j in coord.y..<coord.y+size.y:
-        for i in coord.x..<coord.x+size.x:
+      for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
+        for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
           if even:
             val = getPixel(i, j).word
             even = false
@@ -445,6 +461,7 @@ proc gp1*(value: word) =
     control.dmaDirection = DMADirection(value and 3)
   of 0x05:
     # Start of display area
+    # TODO wrong! TODO check all the other commands!
     screen.displayAreaStart.x = value[half1]
     screen.displayAreaStart.y = value[half2]
   of 0x06:

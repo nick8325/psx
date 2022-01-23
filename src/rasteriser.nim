@@ -264,10 +264,10 @@ proc draw*(settings: Settings, tri: Triangle) =
     # Also works if y2=y0 or y1=y0
     cmp((p1.x-p0.x)*(p2.y-p0.y), (p2.x-p0.x)*(p1.y-p0.y))
 
-  # Special case: if all vertices are collinear, nothing should be drawn
-  if cmpAngle(vs[1], vs[2]) == 0:
-    logger.debug fmt"skip collinear triangle {tri}"
-    return
+  # # Special case: if all vertices are collinear, nothing should be drawn
+  # if cmpAngle(vs[1], vs[2]) == 0:
+  #   logger.debug fmt"skip collinear triangle {tri}"
+  #   return
 
   # Put vs[1] and vs[2] in order of angle, so that the movement
   # vs[0]->vs[1]->vs[2]->vs[0] goes anticlockwise around the triangle
@@ -293,12 +293,21 @@ proc draw*(settings: Settings, tri: Triangle) =
   # Next step: figure out the minimum and maximum x-coordinate we should draw
   # for each y-coordinate.
 
-  let ytop = vs[0].y
-  let ybot = max(vs[1].y, vs[2].y)
-  var mins, maxs: seq[int]
-  for _ in ytop..ybot:
-    mins.add int.high
-    maxs.add int.low
+  var ytop = vs[0].y
+  var ybot = max(vs[1].y, vs[2].y)
+
+  # Skip last line if vs[1]->vs[2] is horizontal (bottom line)
+  if kinds[1] == Horizontal: ybot -= 1
+
+  # Clamp to drawing area
+  ytop = max(ytop, settings.drawingArea.y1)
+  ybot = min(ybot, settings.drawingArea.y2)
+
+  # Use a global variable to avoid an allocation for each triangle
+  var mins, maxs {.global.}: array[512, int]
+  for i in ytop..ybot:
+    mins[i] = int.high
+    maxs[i] = int.low
 
   # We traverse the triangle anticlockwise, vs[0]->vs[1]->vs[2]->vs[0].
   # We convert each line into a set of points, but in order to stay inside the
@@ -316,17 +325,22 @@ proc draw*(settings: Settings, tri: Triangle) =
     var (p, onLine) = pp
     case kind
     of Left:
-      if mins[p.y - ytop] > p.x: mins[p.y - ytop] = p.x
+      if p.y >= ytop and p.y <= ybot and mins[p.y] > p.x: mins[p.y] = p.x
     of Right:
       if onLine: p.x -= 1
-      if maxs[p.y - ytop] < p.x: maxs[p.y - ytop] = p.x
+      if p.y >= ytop and p.y <= ybot and maxs[p.y] < p.x: maxs[p.y] = p.x
     of Horizontal: discard
 
   for p in lineKeepingLeft(vs[0], vs[1]): p.update(kinds[0])
   for p in lineKeepingLeft(vs[1], vs[2]): p.update(kinds[1])
   for p in lineKeepingLeft(vs[2], vs[0]): p.update(kinds[2])
 
-  # Skip last line if vs[1]->vs[2] is horizontal (bottom line)
-  for y in ytop..ybot - (if kinds[1] == Horizontal: 1 else: 0):
-    for x in mins[y-ytop]..maxs[y-ytop]:
+  logger.debug fmt"triangle, vs: {vs}, range: {ytop}--{ybot}, horiz: {kinds[1] == Horizontal}"
+  logger.debug fmt"mins: {mins[ytop..ybot]}"
+  logger.debug fmt"maxs: {maxs[ytop..ybot]}"
+
+  for y in ytop..ybot:
+    for x in mins[y]..maxs[y]:
       putPixel(x, y, colour.toPixel, settings)
+
+draw Settings(), Triangle(vertices: [(x: 6, y: 0), (x: 3, y: 0), (x: 0, y: 0)])
