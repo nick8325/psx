@@ -154,6 +154,7 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
      y < settings.drawingArea.y1 or y >= settings.drawingArea.y2:
     logger.debug fmt"skip write to {x},{y} since out of drawing area {settings.drawingArea}"
     return
+  # TODO in interlaced mode, only currently drawn part should be masked
   if x >= settings.displayArea.x1 and x < settings.displayArea.x2 and
      y >= settings.displayArea.y1 and y < settings.displayArea.y2:
     logger.debug fmt"skip write to {x},{y} since inside display area {settings.displayArea}"

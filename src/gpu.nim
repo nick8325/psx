@@ -131,6 +131,7 @@ type
     verticalRes: VerticalRes       # GPUSTAT 19
     verticalInterlace: bool        # GPUSTAT 22
     enabled: bool                  # GPUSTAT 23
+    # TODO see p129 of LIBOVR46
     oddLine: bool                  # GPUSTAT 31
     # In GPU clocks, not in pixels!
     horizontalRange: tuple[start: int, stop: int]
