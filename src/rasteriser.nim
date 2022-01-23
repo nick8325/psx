@@ -4,6 +4,7 @@ import utils, basics
 import std/[options, strformat, logging, sugar, algorithm]
 import fusion/matching
 {.experimental: "caseStmtMacros".}
+import glm
 
 var logger = newLogger("Rasteriser")
 
@@ -188,6 +189,31 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
   #logger.info fmt"setting vram {x},{y} to {uint16(pixel):04x}"
   vram[y][x] = pixel
 
+type
+  Interpolator = distinct Vec3d
+
+func makeInterpolator[T](inputs: array[3, Point],
+                         outputs: array[3, T]): Interpolator =
+  # Call the inputs x1,y1..x3,y3, and the outputs z1..z3
+  # Define M = [x1 y1 1; x2 y2 1; x3 y3 1] and N = [z1; z2; z3].
+  # Then we are looking for A such that MA = N, that is, A = M^-1 N.
+
+  # Note: mat3 takes a list of column vectors.
+  let M = mat3(vec3(inputs[0].x.float64, inputs[1].x.float64, inputs[2].x.float64),
+               vec3(inputs[0].y.float64, inputs[1].y.float64, inputs[2].y.float64),
+               vec3(1.float64, 1, 1))
+  let N = vec3(outputs[0].float64, outputs[1].float64, outputs[2].float64)
+  Interpolator(M.inverse * N)
+
+func interpolate(interpolator: Interpolator, p: Point): float64 =
+  let M = vec3(p.x.float64, p.y.float64, 1)
+  # Multiplication, viewing M as a 3x1 matrix
+  M.dot(interpolator.Vec3d)
+
+func step(i: Interpolator): tuple[x, y: float64] =
+  (x: i.interpolate((x: 1, y: 0)) - i.interpolate((x: 0, y: 0)),
+   y: i.interpolate((x: 0, y: 1)) - i.interpolate((x: 0, y: 0)))
+
 iterator lineKeepingLeft(p1, p2: Point): (Point, bool) =
   ## Compute a line from p1 to p2 (using integer coordinates).
   ## If it is not possible to stay exactly on the line, keep
@@ -240,10 +266,8 @@ iterator lineKeepingLeft(p1, p2: Point): (Point, bool) =
 proc draw*(settings: Settings, tri: Triangle) =
   logger.debug fmt"draw {tri}"
 
-  var colour: Colour
-  case tri.colours
-  of None(): colour = (red: 0u8, green: 0xffu8, blue: 0u8)
-  of Some(@arr): colour = arr[0]
+  var colours: array[3, Colour]
+  if tri.colours.isSome(): colours = tri.colours.get()
 
   var vs = tri.vertices
 
@@ -330,6 +354,15 @@ proc draw*(settings: Settings, tri: Triangle) =
   logger.debug fmt"mins: {mins[ytop..ybot]}"
   logger.debug fmt"maxs: {maxs[ytop..ybot]}"
 
+  let red = makeInterpolator(tri.vertices, [colours[0].red.float64, colours[1].red.float64, colours[2].red.float64])
+  let green = makeInterpolator(tri.vertices, [colours[0].green.float64, colours[1].green.float64, colours[2].green.float64])
+  let blue = makeInterpolator(tri.vertices, [colours[0].blue.float64, colours[1].blue.float64, colours[2].blue.float64])
+
   for y in ytop..ybot:
     for x in mins[y]..maxs[y]:
+      let p = (x: x, y: y)
+      var colour: Colour
+      colour.red = red.interpolate(p).clamp(0, 255).uint8
+      colour.green = green.interpolate(p).clamp(0, 255).uint8
+      colour.blue = blue.interpolate(p).clamp(0, 255).uint8
       putPixel(x, y, colour.toPixel, settings)
