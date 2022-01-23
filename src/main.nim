@@ -21,6 +21,22 @@ var fps: FpsManager
 fps.init
 fps.setFramerate refreshRate[region].cint
 
+func rampVal(i: int): int =
+  const
+    midpoint = 64
+    midval = 128*256
+    endpoint = 256
+    endval = 256*256
+
+  if i < midpoint:
+    i * midval div midpoint
+  else:
+    midval + (i - midpoint) * (endval - midval) div (endpoint - midpoint)
+
+var ramp: array[256, uint16]
+for i in 0..<256: ramp[i] = rampVal(i).uint16
+discard window.setGammaRamp(addr ramp[0], addr ramp[0], addr ramp[0])
+
 while runGame:
   while pollEvent(evt):
     if evt.kind == QuitEvent:
