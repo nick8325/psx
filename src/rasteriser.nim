@@ -1,7 +1,7 @@
 ## The backend of the GPU - converts drawing commands into a framebuffer.
 
 import utils, basics
-import std/[options, strformat, logging, sugar, algorithm]
+import std/[options, strformat, sugar, algorithm]
 import glm
 
 var logger = newLogger("Rasteriser")
@@ -82,6 +82,10 @@ type
     dither*: bool ## Fake dithering by using 24-bit colour.
     setMaskBit*: bool ## Force mask bit to 1 when drawing
     skipMaskedPixels*: bool ## Don't overwrite masked pixels
+
+func `+`*(p1, p2: Point): Point =
+  result.x = p1.x + p2.x
+  result.y = p1.y + p2.y
 
 func `$`*(c: Colour): string =
   fmt"#{c.red:02x}{c.green:02x}{c.blue:02x}"

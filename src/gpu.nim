@@ -168,20 +168,8 @@ proc displayArea: Rect =
   result.x1 = screen.displayAreaStart.x
   result.x2 = screen.displayAreaStart.y
   let
-    ## TODO: calculate width/height using horizontalRange/verticalRange.
-    ## horizontalRes and verticalRes supposedly encode dotclock speed
-
-    ## TODO: for clipping, PSX library reference says:
-    ## "It is calculated without regard to the value of disp, using the standard
-    ## monitor screen upper left-hand point (0, 0) and lower right-hand point
-    ## (256, 240)."
-    ##
-    ## "If you set the dfe flage of your DRAWENV structure to zero, drawing is
-    ## prohibited to the areas of the screen currently being displayed. This has
-    ## the effect of allowing drawing only to the odd lines when even lines are
-    ## being displayed, and even lines when odd lines are being displayed. This
-    ## is the equivalent of the usual double-buffer switching. You don’t need to
-    ## do any explicit switching between display and drawing environments."
+    # TODO: calculate width/height using horizontalRange/verticalRange?
+    # horizontalRes and verticalRes supposedly encode dotclock speed
     width =
       case screen.horizontalRes
       of Res256: 256
@@ -200,9 +188,9 @@ proc rasteriserSettings(transparent: bool, dither: bool, crop: bool): rasteriser
   if crop:
     result.drawingArea =
       (x1: drawing.drawingAreaTopLeft.x,
-      y1: drawing.drawingAreaTopLeft.y,
-      x2: drawing.drawingAreaBottomRight.x+1,
-      y2: drawing.drawingAreaBottomRight.y+1)
+       y1: drawing.drawingAreaTopLeft.y,
+       x2: drawing.drawingAreaBottomRight.x+1,
+       y2: drawing.drawingAreaBottomRight.y+1)
 
     if screen.verticalRes == Res480 and
       screen.verticalInterlace and
@@ -235,9 +223,6 @@ proc readyToReceiveCommand: bool =
 let
   command = BitSlice[int, word](pos: 24, width: 8)
   rest = BitSlice[int, word](pos: 0, width: 24)
-  byte1 = BitSlice[int, word](pos: 16, width: 8)
-  byte2 = BitSlice[int, word](pos: 8, width: 8)
-  byte3 = BitSlice[int, word](pos: 0, width: 8)
   half1 = BitSlice[int, word](pos: 12, width: 12)
   half2 = BitSlice[int, word](pos: 0, width: 12)
   word1 = BitSlice[int, word](pos: 16, width: 16)
@@ -328,9 +313,7 @@ let processCommand = consumer(word):
         if i > 0:
           if shaded: colours[i] = Colour(take()).unpack
           else: colours[i] = colours[0] # monochrome
-        vertices[i] = Vertex(take()).unpack
-        vertices[i].x += drawing.drawingAreaOffset.x
-        vertices[i].y += drawing.drawingAreaOffset.y
+        vertices[i] = Vertex(take()).unpack + drawing.drawingAreaOffset.unpack
         if textured:
           let arg = take()
           texcoords[i] = TexCoord(arg[word2]).unpack
@@ -466,9 +449,7 @@ proc gp1*(value: word) =
     control.dmaDirection = DMADirection(value and 3)
   of 0x05:
     # Start of display area
-    # TODO wrong! TODO check all the other commands!
-    screen.displayAreaStart.x = value[half1]
-    screen.displayAreaStart.y = value[half2]
+    screen.displayAreaStart = value[rest].PackedScreenCoord
   of 0x06:
     # Horizontal display range
     screen.horizontalRange = (start: value[half1], stop: value[half2])
@@ -494,6 +475,7 @@ proc gp1*(value: word) =
     of 4: control.result = word(drawing.drawingAreaBottomRight)
     of 5: control.result = word(drawing.drawingAreaOffset)
     of 7: control.result = 2 # GPU Type
+    of 8: control.result = 0
     else:
       logger.warn fmt"Unrecognised GPU info query {value[command]:02x}"
     logger.debug fmt"GPU info returned {control.result:08x}"

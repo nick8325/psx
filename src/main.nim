@@ -47,8 +47,6 @@ while runGame:
   # Figure out what rate to run main loop at
   # (maybe better with polled keyboard inputs to match hardware?)
   runSystem(refreshRate[region])
-  var dstRect = rect
-  var srcRect = rect
   surface.blitSurface nil, window.getSurface, nil
   discard window.updateSurface()
   if fps.getFramerate != refreshRate[region].cint:
