@@ -55,7 +55,7 @@ type
   Settings* = object
     ## Common drawing settings.
     drawingArea*: Rect
-    displayArea*: Rect
+    skipLines*: Option[bool] # false=skip even lines, true=skip odd lines
     transparency*: TransparencyMode
     dither*: bool
     setMaskBit*: bool ## Force mask bit to 1 when drawing
@@ -154,11 +154,10 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
      y < settings.drawingArea.y1 or y >= settings.drawingArea.y2:
     logger.debug fmt"skip write to {x},{y} since out of drawing area {settings.drawingArea}"
     return
-  # TODO in interlaced mode, only currently drawn part should be masked
-  if x >= settings.displayArea.x1 and x < settings.displayArea.x2 and
-     y >= settings.displayArea.y1 and y < settings.displayArea.y2:
-    logger.debug fmt"skip write to {x},{y} since inside display area {settings.displayArea}"
-    return
+  if settings.skipLines.isSome:
+    if settings.skipLines.get.int == (y and 1):
+      logger.debug fmt"skip write to {x},{y} in interlaced mode"
+      return
 
   # Check existing pixel's mask
   let oldPixel = getPixel(x, y)
@@ -342,5 +341,3 @@ proc draw*(settings: Settings, tri: Triangle) =
   for y in ytop..ybot:
     for x in mins[y]..maxs[y]:
       putPixel(x, y, colour.toPixel, settings)
-
-draw Settings(), Triangle(vertices: [(x: 6, y: 0), (x: 3, y: 0), (x: 0, y: 0)])

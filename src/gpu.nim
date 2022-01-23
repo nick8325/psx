@@ -203,10 +203,10 @@ proc rasteriserSettings(transparent: bool): rasteriser.Settings =
      x2: drawing.drawingAreaBottomRight.x+1,
      y2: drawing.drawingAreaBottomRight.y+1)
 
-  if drawing.drawToDisplayArea:
-    result.displayArea = displayArea()
-  else:
-    result.displayArea = (x1: -1, y1: -1, x2: -1, y2: -1)
+  if screen.verticalRes == Res480 and
+     screen.verticalInterlace and
+     not drawing.drawToDisplayArea:
+    result.skipLines = some(screen.oddLine)
 
   result.transparency =
     if transparent: drawing.transparency
@@ -386,14 +386,14 @@ let processCommand = consumer(word):
       drawing.setMaskBit = value.testBit 0
       drawing.skipMaskedPixels = value.testBit 1
 
-    of 0xa0:
+    of 0xa0..0xbf:
       # Copy rectangle to VRAM
       var
         coord = take.ScreenCoord
         size = take.ScreenCoord
       var settings = rasteriserSettings(false)
       settings.drawingArea = (x1: 0, y1: 0, x2: vramWidth, y2: vramHeight)
-      settings.displayArea = (x1: -1, y1: -1, x2: -1, y2: -1)
+      settings.skipLines = none[bool]()
 
       var
         arg: word = 0
@@ -408,7 +408,7 @@ let processCommand = consumer(word):
           else:
             putPixel(i, j, arg[word1].Pixel, settings)
             even = true
-    of 0xc0:
+    of 0xc0..0xdf:
       # Copy rectangle to CPU
       let
         coord = take.Vertex
