@@ -1,6 +1,6 @@
 ## The backend of the GPU - converts drawing commands into a framebuffer.
 
-import utils
+import utils, basics
 import std/[options, strformat, logging, sugar, algorithm]
 import fusion/matching
 {.experimental: "caseStmtMacros".}
@@ -188,10 +188,7 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
   #logger.info fmt"setting vram {x},{y} to {uint16(pixel):04x}"
   vram[y][x] = pixel
 
-import sdl2, sdl2/gfx
-let surface = createRGBSurfaceFrom(addr vram, 1024, 512, 16, 2*1024, 0x1f, 0x1fu32 shl 5, 0x1fu32 shl 10, 0)
-
-proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
+iterator lineKeepingLeft(p1, p2: Point): (Point, bool) =
   ## Compute a line from p1 to p2 (using integer coordinates).
   ## If it is not possible to stay exactly on the line, keep
   ## to the left of it. Here left is interpreted relative to
@@ -220,7 +217,7 @@ proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
 
   if sx == sy or sx == 0: # Line of "\" or "|" shape
     while p != p2:
-      result.add (p, err == 0)
+      yield (p, err == 0)
       if err >= dx:
         p.y += sy
         err -= dx
@@ -229,7 +226,7 @@ proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
         err += dy
   else: # Line of "/" or "-" shape
     while p != p2:
-      result.add (p, err == 0)
+      yield (p, err == 0)
       if err >= dy:
         p.x += sx
         err -= dy
@@ -238,7 +235,7 @@ proc lineKeepingLeft(p1, p2: Point): seq[(Point, bool)] =
         err += dx
 
   # Add endpoint
-  result.add (p, true)
+  yield (p, true)
 
 proc draw*(settings: Settings, tri: Triangle) =
   logger.debug fmt"draw {tri}"
@@ -262,11 +259,6 @@ proc draw*(settings: Settings, tri: Triangle) =
     # <=> (x1-x0)(y2-y0) < (x2-x0)(y1-y0) since y0 <= y1,y2
     # Also works if y2=y0 or y1=y0
     cmp((p1.x-p0.x)*(p2.y-p0.y), (p2.x-p0.x)*(p1.y-p0.y))
-
-  # # Special case: if all vertices are collinear, nothing should be drawn
-  # if cmpAngle(vs[1], vs[2]) == 0:
-  #   logger.debug fmt"skip collinear triangle {tri}"
-  #   return
 
   # Put vs[1] and vs[2] in order of angle, so that the movement
   # vs[0]->vs[1]->vs[2]->vs[0] goes anticlockwise around the triangle
@@ -303,7 +295,7 @@ proc draw*(settings: Settings, tri: Triangle) =
   ybot = min(ybot, settings.drawingArea.y2)
 
   # Use a global variable to avoid an allocation for each triangle
-  var mins, maxs {.global.}: array[512, int]
+  var mins, maxs {.global.}: array[vramHeight, int]
   for i in ytop..ybot:
     mins[i] = int.high
     maxs[i] = int.low
