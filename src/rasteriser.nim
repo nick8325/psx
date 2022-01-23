@@ -78,16 +78,41 @@ type
     start*: tuple[x: int, y: int, colour: Colour]
     stop*: tuple[x: int, y: int, colour: Colour]
 
+  Pixel32 = distinct uint32
+
 Pixel.bitfield red5, int, 0, 5
 Pixel.bitfield green5, int, 5, 5
 Pixel.bitfield blue5, int, 10, 5
 Pixel.bitfield mask, bool, 15, 1
+
+Pixel32.bitfield red, int, 0, 8
+Pixel32.bitfield green, int, 8, 8
+Pixel32.bitfield blue, int, 16, 8
+Pixel32.bitfield mask, bool, 24, 1
 
 func toPixel(c: Colour, mask: bool = false): Pixel =
   result.red5 = int(c.red shr 3)
   result.green5 = int(c.green shr 3)
   result.blue5 = int(c.blue shr 3)
   result.mask = mask
+
+func toPixel(p: Pixel32): Pixel =
+  result.red5 = int(p.red shr 3)
+  result.green5 = int(p.green shr 3)
+  result.blue5 = int(p.blue shr 3)
+  result.mask = p.mask
+
+func toPixel32(c: Colour, mask: bool = false): Pixel32 =
+  result.red = int(c.red)
+  result.green = int(c.green)
+  result.blue = int(c.blue)
+  result.mask = mask
+
+func toPixel32(p: Pixel): Pixel32 =
+  result.red = p.red5 * 8
+  result.green = p.green5 * 8
+  result.blue = p.blue5 * 8
+  result.mask = p.mask
 
 func `$`*(c: Colour): string =
   fmt"#{c.red:02x}{c.green:02x}{c.blue:02x}"
@@ -130,13 +155,19 @@ func `$`*(rect: Rectangle): string =
 
 var
   vram*: array[512, array[1024, Pixel]]
+  vram32*: array[512, array[1024, Pixel32]]
 
 proc getPixel*(xIn, yIn: int): Pixel {.inline.} =
   let x = xIn mod 1024
   let y = yIn mod 512
   vram[y][x]
 
-proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
+proc getPixel32*(xIn, yIn: int): Pixel32 {.inline.} =
+  let x = xIn mod 1024
+  let y = yIn mod 512
+  vram32[y][x]
+
+proc putPixel*(xIn, yIn: int, pixelIn: Pixel32, settings: Settings) {.inline.} =
   ## Put a pixel to the VRAM. Handles:
   ## * Mask bit
   ## * Transparency
@@ -161,7 +192,7 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
       return
 
   # Check existing pixel's mask
-  let oldPixel = getPixel(x, y)
+  let oldPixel = getPixel32(x, y)
   if settings.skipMaskedPixels and oldPixel.mask:
     logger.debug fmt"skip write to {x},{y} since masked"
     return
@@ -179,15 +210,22 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
       of Subtract: c1-c2
       of AddQuarter: c1 + c2 div 4
       of Opaque: c2
-    result = result.clamp(0, 31)
+    result = result.clamp(0, 255)
     result
 
   # Write pixel with possible transparency
-  pixel.red5 = blend(oldPixel.red5, pixel.red5)
-  pixel.green5 = blend(oldPixel.green5, pixel.green5)
-  pixel.blue5 = blend(oldPixel.blue5, pixel.blue5)
+  pixel.red = blend(oldPixel.red, pixel.red)
+  pixel.green = blend(oldPixel.green, pixel.green)
+  pixel.blue = blend(oldPixel.blue, pixel.blue)
   #logger.info fmt"setting vram {x},{y} to {uint16(pixel):04x}"
-  vram[y][x] = pixel
+  vram[y][x] = pixel.toPixel
+  vram32[y][x] = pixel
+
+proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
+  putPixel(xIn, yIn, pixelIn.toPixel32, settings)
+
+proc putPixel*(xIn, yIn: int, c: Colour, settings: Settings) {.inline.} =
+  putPixel(xIn, yIn, c.toPixel32, settings)
 
 type
   Interpolator = distinct Vec3d
@@ -381,32 +419,32 @@ proc draw*(settings: Settings, tri: Triangle) =
         # Now look up pixel data
         var textureColour =
           case texture.colourMode.depth:
-          of FifteenBit: getPixel(texture.page.x + xtex, texture.page.y + ytex)
+          of FifteenBit: getPixel32(texture.page.x + xtex, texture.page.y + ytex)
           of EightBit:
             let val = getPixel(texture.page.x + xtex div 2, texture.page.y + ytex)
             let palette = texture.colourMode.palette
             if xtex mod 2 == 0:
-              getPixel(palette.x + (val.int and 0xff), palette.y)
+              getPixel32(palette.x + (val.int and 0xff), palette.y)
             else:
-              getPixel(palette.x + (val.int shr 8), palette.y)
+              getPixel32(palette.x + (val.int shr 8), palette.y)
           of FourBit:
             let val = getPixel(texture.page.x + xtex div 4, texture.page.y + ytex)
             let palette = texture.colourMode.palette
             if xtex mod 4 == 0:
-              getPixel(palette.x + (val.int and 0xf), palette.y)
+              getPixel32(palette.x + (val.int and 0xf), palette.y)
             elif xtex mod 4 == 1:
-              getPixel(palette.x + ((val.int shr 4) and 0xf), palette.y)
+              getPixel32(palette.x + ((val.int shr 4) and 0xf), palette.y)
             elif xtex mod 4 == 2:
-              getPixel(palette.x + ((val.int shr 8) and 0xf), palette.y)
+              getPixel32(palette.x + ((val.int shr 8) and 0xf), palette.y)
             else:
-              getPixel(palette.x + ((val.int shr 12) and 0xf), palette.y)
+              getPixel32(palette.x + ((val.int shr 12) and 0xf), palette.y)
 
         if textureColour.uint16 != 0:
           if tri.colours.isSome():
-            textureColour.red5 = (colour.red.int * textureColour.red5) div 128
-            textureColour.green5 = (colour.green.int * textureColour.green5) div 128
-            textureColour.blue5 = (colour.blue.int * textureColour.blue5) div 128
+            textureColour.red = (colour.red.int * textureColour.red) div 128
+            textureColour.green = (colour.green.int * textureColour.green) div 128
+            textureColour.blue = (colour.blue.int * textureColour.blue) div 128
 
           putPixel(x, y, textureColour, settings)
       else:
-        putPixel(x, y, colour.toPixel, settings)
+        putPixel(x, y, colour, settings)
