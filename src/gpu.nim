@@ -47,9 +47,9 @@ ScreenCoord.bitfield y, int, 16, 9
 func unpack(v: ScreenCoord): Point =
   (x: v.x, y: v.y)
 
-Colour.bitfield red, uint8, 0, 8
-Colour.bitfield green, uint8, 8, 8
-Colour.bitfield blue, uint8, 16, 8
+Colour.bitfield red, int, 0, 8
+Colour.bitfield green, int, 8, 8
+Colour.bitfield blue, int, 16, 8
 
 func unpack(c: Colour): rasteriser.Colour =
   (red: c.red, green: c.green, blue: c.blue)
@@ -341,23 +341,25 @@ let processCommand = consumer(word):
 
       for i in 0..<(if quad: 2 else: 1):
         # Convert vertices [i,i+1,i+2] to a triangle
-        let vs = [vertices[i], vertices[i+1], vertices[i+2]]
-        let cs =
-          if textured and rawTextures: none(array[3, rasteriser.Colour])
-          else: some [colours[i], colours[i+1], colours[i+2]]
-        let texture =
-          if textures.enabled and textured:
-            some Texture[3](
-              page: texpage.base,
-              windowMask: textures.window.mask.unpack,
-              windowOffset: textures.window.offset.unpack,
-              coords: [texcoords[i], texcoords[i+1], texcoords[i+2]],
-              colourMode: texpage.colourMode(palette))
-          else:
-            none(Texture[3])
+        let
+          vs = [vertices[i], vertices[i+1], vertices[i+2]]
+          cs = [colours[i], colours[i+1], colours[i+2]]
+          texture = Texture[3](
+            page: texpage.base,
+            windowMask: textures.window.mask.unpack,
+            windowOffset: textures.window.offset.unpack,
+            coords: [texcoords[i], texcoords[i+1], texcoords[i+2]],
+            colourMode: texpage.colourMode(palette))
+
+          shadingMode =
+            if textured and textures.enabled:
+              if rawTextures: Textures else: Both
+            else: Colours
+
         let settings = rasteriserSettings(transparent = transparent,
                                           dither = true, crop = true)
-        settings.draw Triangle(vertices: vs, colours: cs, texture: texture)
+        settings.draw Triangle(vertices: vs, shadingMode: shadingMode,
+                               colours: cs, texture: texture)
 
     of 0xe1:
       # Texpage
@@ -406,10 +408,10 @@ let processCommand = consumer(word):
         for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
           if even:
             arg = take()
-            putPixel(i, j, arg[word2].Pixel, settings)
+            putHalfword(i, j, arg[word2], settings)
             even = false
           else:
-            putPixel(i, j, arg[word1].Pixel, settings)
+            putHalfword(i, j, arg[word1], settings)
             even = true
     of 0xc0..0xdf:
       # Copy rectangle to CPU
@@ -423,10 +425,10 @@ let processCommand = consumer(word):
       for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
         for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
           if even:
-            val = getPixel(i, j).word
+            val = getHalfword(i, j).word
             even = false
           else:
-            val = val or (getPixel(i, j).word shl 16)
+            val = val or (getHalfword(i, j).word shl 16)
             resultQueue.addLast val
             even = true
     else:

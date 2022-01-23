@@ -55,7 +55,7 @@ while runGame:
     fps.setFramerate refreshRate[region].cint
   fps.delay
 
-#  if events.time >= 5*clockRate: break
+  if events.time >= 5*clockRate: break
 
 destroy render
 destroy window

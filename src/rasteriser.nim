@@ -6,6 +6,8 @@ import glm
 
 var logger = newLogger("Rasteriser")
 
+# Type definitions for the rendering primitives.
+
 type
   Point* = tuple
     ## A pixel coordinate.
@@ -18,11 +20,9 @@ type
 
   Colour* = tuple
     ## A 24-bit colour.
-    red: uint8
-    green: uint8
-    blue: uint8
-
-  Pixel* = distinct uint16
+    red: int
+    green: int
+    blue: int
 
   TransparencyMode* {.pure.} = enum
     ## A transparency mode. 0-3 must match what the GPU uses.
@@ -51,26 +51,22 @@ type
     coords*: array[N, Point] ## relative to page.
     colourMode*: TextureColourMode
 
-  Settings* = object
-    ## Common drawing settings.
-    drawingArea*: Rect
-    skipLines*: Option[bool] # false=skip even lines, true=skip odd lines
-    transparency*: TransparencyMode
-    dither*: bool
-    setMaskBit*: bool ## Force mask bit to 1 when drawing
-    skipMaskedPixels*: bool ## Don't overwrite masked pixels
+  ShadingMode* {.pure.} = enum
+    Colours, Textures, Both
 
   Triangle* = object
     ## A triangle. At least one of 'colours' and 'texture' should be set.
     vertices*: array[3, Point]
-    colours*: Option[array[3, Colour]]
-    texture*: Option[Texture[3]]
+    shadingMode*: ShadingMode
+    colours*: array[3, Colour] # Only used if shadingMode is Colour or Both
+    texture*: Texture[3] # Only used if shadingMode is Texture or Both
 
   Rectangle* = object
     ## A rectangle. At least one of 'colours' and 'texture' should be set.
     rect*: Rect
-    colour*: Option[Colour]
-    texture*: Option[Texture[1]]
+    shadingMode*: ShadingMode
+    colour*: Colour # Only used if shadingMode is Colour or Both
+    texture*: Texture[1] # Only used if shadingMode is Texture or Both
     flipX*, flipY*: bool
 
   Line* = object
@@ -78,41 +74,14 @@ type
     start*: tuple[x: int, y: int, colour: Colour]
     stop*: tuple[x: int, y: int, colour: Colour]
 
-  Pixel32 = distinct uint32
-
-Pixel.bitfield red5, int, 0, 5
-Pixel.bitfield green5, int, 5, 5
-Pixel.bitfield blue5, int, 10, 5
-Pixel.bitfield mask, bool, 15, 1
-
-Pixel32.bitfield red, int, 0, 8
-Pixel32.bitfield green, int, 8, 8
-Pixel32.bitfield blue, int, 16, 8
-Pixel32.bitfield mask, bool, 24, 1
-
-func toPixel(c: Colour, mask: bool = false): Pixel =
-  result.red5 = int(c.red shr 3)
-  result.green5 = int(c.green shr 3)
-  result.blue5 = int(c.blue shr 3)
-  result.mask = mask
-
-func toPixel(p: Pixel32): Pixel =
-  result.red5 = int(p.red shr 3)
-  result.green5 = int(p.green shr 3)
-  result.blue5 = int(p.blue shr 3)
-  result.mask = p.mask
-
-func toPixel32(c: Colour, mask: bool = false): Pixel32 =
-  result.red = int(c.red)
-  result.green = int(c.green)
-  result.blue = int(c.blue)
-  result.mask = mask
-
-func toPixel32(p: Pixel): Pixel32 =
-  result.red = p.red5 * 8
-  result.green = p.green5 * 8
-  result.blue = p.blue5 * 8
-  result.mask = p.mask
+  Settings* = object
+    ## Drawing settings common to all primitives.
+    drawingArea*: Rect
+    skipLines*: Option[bool] ## false=skip even lines, true=skip odd lines
+    transparency*: TransparencyMode
+    dither*: bool ## Fake dithering by using 24-bit colour.
+    setMaskBit*: bool ## Force mask bit to 1 when drawing
+    skipMaskedPixels*: bool ## Don't overwrite masked pixels
 
 func `$`*(c: Colour): string =
   fmt"#{c.red:02x}{c.green:02x}{c.blue:02x}"
@@ -134,37 +103,106 @@ func `$`*(tri: Triangle): string =
   for i, v in tri.vertices:
     if i > 0: result &= "--"
     result &= fmt"({v.x},{v.y})"
-  if tri.colours.isSome:
+  if tri.shadingMode != Textures:
     result &= fmt", colours "
-    for i, c in tri.colours.get():
+    for i, c in tri.colours:
       if i > 0: result &= "--"
       result &= $c
-  if tri.texture.isSome: result &= fmt", texture {tri.texture.get()}"
+  if tri.shadingMode != Colours:
+    result &= fmt", texture {tri.texture}"
 
 func `$`*(rect: Rectangle): string =
   result = "rectangle, "
   result &= fmt"({rect.rect.x1}, {rect.rect.x2})--({rect.rect.y1},{rect.rect.y2})"
-  if rect.colour.isSome:
-    result &= fmt", colour {rect.colour.get()}"
-  if rect.texture.isSome:
-    result &= fmt", texture {rect.texture.get()}"
+  if rect.shadingMode != Textures:
+    result &= fmt", colour {rect.colour}"
+  if rect.shadingMode != Colours:
+    result &= fmt", texture {rect.texture}"
   if rect.flipX:
     result &= ", x flipped"
   if rect.flipY:
     result &= ", y flipped"
 
+# Pixel formats.
+# We use 24-bit colour internally, and convert to PSX format on demand.
+
+type
+  Pixel* = distinct uint32 ##\
+    ## A 24-bit colour plus semi-transparency mask bit,
+    ## ready for storing to VRAM.
+
+  Pixel16* = distinct uint16 ##\
+    ## A 16-bit colour in the native PSX format.
+
+Pixel.bitfield red, int, 0, 8
+Pixel.bitfield green, int, 8, 8
+Pixel.bitfield blue, int, 16, 8
+Pixel.bitfield mask, bool, 24, 1
+
+Pixel16.bitfield red5, int, 0, 5
+Pixel16.bitfield green5, int, 5, 5
+Pixel16.bitfield blue5, int, 10, 5
+Pixel16.bitfield mask, bool, 15, 1
+
+func toPixel(c: Colour, mask: bool = false): Pixel =
+  result.red = int(c.red)
+  result.green = int(c.green)
+  result.blue = int(c.blue)
+  result.mask = mask
+
+func toPixel(p: Pixel16): Pixel =
+  result.red = p.red5 * 8
+  result.green = p.green5 * 8
+  result.blue = p.blue5 * 8
+  result.mask = p.mask
+
+func toPixel16(p: Pixel): Pixel16 =
+  result.red5 = int(p.red shr 3)
+  result.green5 = int(p.green shr 3)
+  result.blue5 = int(p.blue shr 3)
+  result.mask = p.mask
+
+func toColour(p: Pixel): Colour =
+  result.red = p.red
+  result.green = p.green
+  result.blue = p.blue
+
+# Video RAM.
+
 var
-  vram*: array[512, array[1024, Pixel32]]
+  vram*: array[512, array[1024, Pixel]]
 
-proc getPixel32*(xIn, yIn: int): Pixel32 {.inline.} =
-  let x = xIn mod 1024
-  let y = yIn mod 512
-  vram[y][x]
+proc getPixel*(x, y: int): Pixel {.inline.} =
+  ## Read a pixel from the VRAM.
 
-proc getPixel*(xIn, yIn: int): Pixel {.inline.} =
-  getPixel32(xIn, yIn).toPixel
+  vram[y mod vramHeight][x mod vramWidth]
 
-proc putPixel*(xIn, yIn: int, pixelIn: Pixel32, settings: Settings) {.inline.} =
+proc getHalfword*(x, y: int): int {.inline.} =
+  ## Read halfword data from the VRAM.
+
+  getPixel(x, y).toPixel16.int
+
+proc getByte*(x, y: int): int {.inline.} =
+  ## Read byte data from the VRAM.
+
+  let val = getHalfword(x div 2, y)
+  if x mod 2 == 0:
+    return val and 0xff
+  else:
+    return val shr 8
+
+proc getNybble*(x, y: int): int {.inline.} =
+  ## Read nybble data from the VRAM.
+
+  let val = getHalfword(x div 4, y)
+  case x mod 4
+  of 0: return val and 0xf
+  of 1: return (val shr 4) and 0xf
+  of 2: return (val shr 8) and 0xf
+  of 3: return (val shr 12) and 0xf
+  else: assert false
+
+proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
   ## Put a pixel to the VRAM. Handles:
   ## * Mask bit
   ## * Transparency
@@ -173,10 +211,6 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel32, settings: Settings) {.inline.} =
   ## Does not handle dithering yet.
 
   # TODO: speed up drawing
-
-  # Handle wraparound
-  let x = xIn mod 1024
-  let y = yIn mod 512
 
   # Check pixel against drawing/display areas
   if x < settings.drawingArea.x1 or x >= settings.drawingArea.x2 or
@@ -189,14 +223,14 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel32, settings: Settings) {.inline.} =
       return
 
   # Check existing pixel's mask
-  let oldPixel = getPixel32(x, y)
+  let oldPixel = getPixel(x, y)
   if settings.skipMaskedPixels and oldPixel.mask:
     logger.debug fmt"skip write to {x},{y} since masked"
     return
 
   # Force mask bit if requested
-  var pixel = pixelIn
-  if settings.setMaskBit: pixel.mask = true
+  var finalPixel = pixel
+  if settings.setMaskBit: finalPixel.mask = true
 
   # Handle transparency
   template blend(c1, c2: int): int =
@@ -211,24 +245,28 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel32, settings: Settings) {.inline.} =
     result
 
   # Write pixel with possible transparency
-  pixel.red = blend(oldPixel.red, pixel.red)
-  pixel.green = blend(oldPixel.green, pixel.green)
-  pixel.blue = blend(oldPixel.blue, pixel.blue)
+  finalPixel.red = blend(oldPixel.red, pixel.red)
+  finalPixel.green = blend(oldPixel.green, pixel.green)
+  finalPixel.blue = blend(oldPixel.blue, pixel.blue)
 
   # We interpret "dither" as "draw in full 24-bit colour"
-  if not settings.dither: pixel = pixel.toPixel.toPixel32
-  #logger.info fmt"setting vram {x},{y} to {uint16(pixel):04x}"
-  vram[y][x] = pixel
+  if not settings.dither: finalPixel = finalPixel.toPixel16.toPixel
 
-proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
-  assert not settings.dither # you lost the 24-bit colour information!
-  putPixel(xIn, yIn, pixelIn.toPixel32, settings)
+  vram[y mod vramHeight][x mod vramWidth] = finalPixel
 
-proc putPixel*(xIn, yIn: int, c: Colour, settings: Settings) {.inline.} =
-  putPixel(xIn, yIn, c.toPixel32, settings)
+proc putPixel*(x, y: int, c: Colour, settings: Settings) {.inline.} =
+  ## Put a pixel to the VRAM.
 
-type
-  Interpolator = distinct Vec3d
+  putPixel(x, y, c.toPixel, settings)
+
+proc putHalfword*(x, y: int, value: int, settings: Settings) {.inline.} =
+  ## Write halfword data to the VRAM.
+
+  putPixel(x, y, value.Pixel16.toPixel, settings)
+
+# Shading and texture mapping.
+
+type Interpolator = distinct Vec3d ## Does bilinear interpolation
 
 func makeInterpolator[T](inputs: array[3, Point],
                          outputs: array[3, T]): Interpolator =
@@ -248,9 +286,73 @@ func interpolate(interpolator: Interpolator, p: Point): float64 =
   # Multiplication, viewing M as a 3x1 matrix
   M.dot(interpolator.Vec3d)
 
-func step(i: Interpolator): tuple[x, y: float64] =
-  (x: i.interpolate((x: 1, y: 0)) - i.interpolate((x: 0, y: 0)),
-   y: i.interpolate((x: 0, y: 1)) - i.interpolate((x: 0, y: 0)))
+type
+  ColourInterpolator = object
+    red, green, blue: Interpolator
+  PointInterpolator = object
+    x, y: Interpolator
+
+func makeInterpolator(inputs: array[3, Point], outputs: array[3, Colour]): ColourInterpolator =
+  ColourInterpolator(
+    red: inputs.makeInterpolator [outputs[0].red, outputs[1].red, outputs[2].red],
+    green: inputs.makeInterpolator [outputs[0].green, outputs[1].green, outputs[2].green],
+    blue: inputs.makeInterpolator [outputs[0].blue, outputs[1].blue, outputs[2].blue])
+
+func makeInterpolator(inputs: array[3, Point], outputs: array[3, Point]): PointInterpolator =
+  PointInterpolator(
+    x: inputs.makeInterpolator [outputs[0].x, outputs[1].x, outputs[2].x],
+    y: inputs.makeInterpolator [outputs[0].y, outputs[1].y, outputs[2].y])
+
+func interpolate(i: ColourInterpolator, p: Point): Colour =
+  (red: i.red.interpolate(p).int.clamp(0, 255),
+   green: i.green.interpolate(p).int.clamp(0, 255),
+   blue: i.blue.interpolate(p).int.clamp(0, 255))
+
+func interpolate(i: PointInterpolator, p: Point): Point =
+  (x: i.x.interpolate(p).int, y: i.y.interpolate(p).int)
+
+proc getPixel[N: static int](texture: Texture[N]; x, y: int): Pixel =
+  ## Look up a pixel coordinate in a texture.
+
+  let mask = texture.windowMask
+  let offset = texture.windowOffset
+
+  let xt = ((x mod 256) and not (mask.x * 8)) or ((offset.x and mask.x)*8)
+  let yt = ((y mod 256) and not (mask.y * 8)) or ((offset.y and mask.y)*8)
+
+  case texture.colourMode.depth:
+  of FifteenBit: getPixel(texture.page.x + xt, texture.page.y + yt)
+  of EightBit:
+    let val = getByte(texture.page.x*2 + xt, texture.page.y + yt)
+    let palette = texture.colourMode.palette
+    getPixel(palette.x + val, palette.y)
+  of FourBit:
+    let val = getNybble(texture.page.x*4 + xt, texture.page.y + yt)
+    let palette = texture.colourMode.palette
+    getPixel(palette.x + val, palette.y)
+
+func mix(c1, c2: Colour): Colour =
+  ## Mix two colours the same way as a shaded texture does it.
+  result.red = (c1.red * c2.red) div 128
+  result.green = (c1.green * c2.green) div 128
+  result.blue = (c1.blue * c2.blue) div 128
+
+func mix(p: Pixel, c: Colour): Pixel =
+  ## Mix a Gouraud-shaded colour into a texture-shaded pixel.
+
+  p.toColour.mix(c).toPixel(p.mask)
+
+proc putTexturePixel(x, y: int; textureColour: Pixel; settings: Settings) =
+  ## Put a pixel that came from a texture.
+
+  # Black is transparent
+  if textureColour.uint16 != 0:
+      # Bit 1 unset means always opaque
+      var newSettings = settings
+      if not textureColour.mask: newSettings.transparency = Opaque
+      putPixel(x, y, textureColour, newSettings)
+
+# Triangle drawing.
 
 iterator lineKeepingLeft(p1, p2: Point): (Point, bool) =
   ## Compute a line from p1 to p2 (using integer coordinates).
@@ -302,13 +404,9 @@ iterator lineKeepingLeft(p1, p2: Point): (Point, bool) =
   yield (p, true)
 
 proc draw*(settings: Settings, tri: Triangle) =
+  ## Draw a triangle.
+
   logger.debug fmt"draw {tri}"
-
-  var colours: array[3, Colour]
-  if tri.colours.isSome(): colours = tri.colours.get()
-
-  var texture: Texture[3]
-  if tri.texture.isSome(): texture = tri.texture.get()
 
   var vs = tri.vertices
 
@@ -395,56 +493,21 @@ proc draw*(settings: Settings, tri: Triangle) =
   logger.debug fmt"mins: {mins[ytop..ybot]}"
   logger.debug fmt"maxs: {maxs[ytop..ybot]}"
 
-  let red = makeInterpolator(tri.vertices, [colours[0].red, colours[1].red, colours[2].red])
-  let green = makeInterpolator(tri.vertices, [colours[0].green, colours[1].green, colours[2].green])
-  let blue = makeInterpolator(tri.vertices, [colours[0].blue, colours[1].blue, colours[2].blue])
-  let tx = makeInterpolator(tri.vertices, [texture.coords[0].x, texture.coords[1].x, texture.coords[2].x])
-  let ty = makeInterpolator(tri.vertices, [texture.coords[0].y, texture.coords[1].y, texture.coords[2].y])
+  let shader = tri.vertices.makeInterpolator tri.colours
+  let textureMapper = tri.vertices.makeInterpolator tri.texture.coords
 
   for y in ytop..ybot:
     for x in mins[y]..maxs[y]:
       let p = (x: x, y: y)
-      var colour: Colour
-      colour.red = red.interpolate(p).clamp(0, 255).uint8
-      colour.green = green.interpolate(p).clamp(0, 255).uint8
-      colour.blue = blue.interpolate(p).clamp(0, 255).uint8
 
-      if tri.texture.isSome():
-        # Coordinates relative to texture page
-        var xtex = tx.interpolate(p).int mod 256
-        var ytex = ty.interpolate(p).int mod 256
-        xtex = (xtex and not (texture.windowMask.x * 8)) or ((texture.windowOffset.x and texture.windowMask.x)*8)
-        ytex = (ytex and not (texture.windowMask.y * 8)) or ((texture.windowOffset.y and texture.windowMask.y)*8)
-
-        # Now look up pixel data
-        var textureColour =
-          case texture.colourMode.depth:
-          of FifteenBit: getPixel32(texture.page.x + xtex, texture.page.y + ytex)
-          of EightBit:
-            let val = getPixel(texture.page.x + xtex div 2, texture.page.y + ytex)
-            let palette = texture.colourMode.palette
-            if xtex mod 2 == 0:
-              getPixel32(palette.x + (val.int and 0xff), palette.y)
-            else:
-              getPixel32(palette.x + (val.int shr 8), palette.y)
-          of FourBit:
-            let val = getPixel(texture.page.x + xtex div 4, texture.page.y + ytex)
-            let palette = texture.colourMode.palette
-            if xtex mod 4 == 0:
-              getPixel32(palette.x + (val.int and 0xf), palette.y)
-            elif xtex mod 4 == 1:
-              getPixel32(palette.x + ((val.int shr 4) and 0xf), palette.y)
-            elif xtex mod 4 == 2:
-              getPixel32(palette.x + ((val.int shr 8) and 0xf), palette.y)
-            else:
-              getPixel32(palette.x + ((val.int shr 12) and 0xf), palette.y)
-
-        if textureColour.uint16 != 0:
-          if tri.colours.isSome():
-            textureColour.red = (colour.red.int * textureColour.red) div 128
-            textureColour.green = (colour.green.int * textureColour.green) div 128
-            textureColour.blue = (colour.blue.int * textureColour.blue) div 128
-
-          putPixel(x, y, textureColour, settings)
-      else:
+      case tri.shadingMode
+      of Colours:
+        let colour = shader.interpolate p
         putPixel(x, y, colour, settings)
+      of Textures:
+        let coord = textureMapper.interpolate p
+        putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y), settings)
+      of Both:
+        let colour = shader.interpolate p
+        let coord = textureMapper.interpolate p
+        putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y).mix(colour), settings)
