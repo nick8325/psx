@@ -2,20 +2,36 @@
 
 import std/[bitops, typetraits, logging]
 
-func newLogger*(name: string, level: Level = lvlInfo): Logger =
-  newConsoleLogger(levelThreshold = level,
-                   fmtStr = defaultFmtStr & name & ": ",
-                   useStderr = true)
+type
+  BoundedLogger[minLevel: static Level] = distinct ConsoleLogger
 
-template lazyLog*(logger: Logger, level: Level, args: varargs[string, `$`]) =
-  if level >= logger.levelThreshold:
-    logger.log(level, args)
-template debug* (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlDebug, args)
-template info*  (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlInfo, args)
-template notice*(logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlNotice, args)
-template warn*  (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlWarn, args)
-template error* (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlError, args)
-template fatal* (logger: Logger, args: varargs[string, `$`]) = logger.lazyLog(lvlFatal, args)
+func minLevel*[l: static Level](logger: BoundedLogger[l]): Level = l
+
+func newLogger*(name: string, minLevel: static Level = lvlInfo, level: Level = minLevel): BoundedLogger[minLevel] =
+  assert level >= minLevel
+  let logger =
+    newConsoleLogger(levelThreshold = level,
+                     fmtStr = defaultFmtStr & name & ": ",
+                    useStderr = true)
+  BoundedLogger[minLevel](logger)
+
+template lazyLog*[minLevel: static Level](
+  logger: BoundedLogger[minLevel], level: Level, args: varargs[string, `$`]) =
+  when level >= minLevel:
+    if level >= ConsoleLogger(logger).levelThreshold:
+      ConsoleLogger(logger).log(level, args)
+template debug* (logger: untyped, args: varargs[string, `$`]) =
+  logger.lazyLog(lvlDebug, args)
+template info*  (logger: untyped, args: varargs[string, `$`]) =
+  logger.lazyLog(lvlInfo, args)
+template notice*(logger: untyped, args: varargs[string, `$`]) =
+  logger.lazyLog(lvlNotice, args)
+template warn*  (logger: untyped, args: varargs[string, `$`]) =
+  logger.lazyLog(lvlWarn, args)
+template error* (logger: untyped, args: varargs[string, `$`]) =
+  logger.lazyLog(lvlError, args)
+template fatal* (logger: untyped, args: varargs[string, `$`]) =
+  logger.lazyLog(lvlFatal, args)
 
 func sliceArray*[size: static int, T](
   arr: var openArray[T], offset: int): ptr array[size, T] =
