@@ -343,7 +343,7 @@ let processCommand = consumer(word):
           if textured and rawTextures: none(array[3, rasteriser.Colour])
           else: some [colours[i], colours[i+1], colours[i+2]]
         let texture =
-          if textured:
+          if textures.enabled and textured:
             some Texture[3](
               page: texpage.base,
               windowMask: textures.window.mask.unpack,

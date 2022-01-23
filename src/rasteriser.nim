@@ -2,8 +2,6 @@
 
 import utils, basics
 import std/[options, strformat, logging, sugar, algorithm]
-import fusion/matching
-{.experimental: "caseStmtMacros".}
 import glm
 
 var logger = newLogger("Rasteriser")
@@ -95,7 +93,9 @@ func `$`*(c: Colour): string =
   fmt"#{c.red:02x}{c.green:02x}{c.blue:02x}"
 
 func `$`*[N: static int](tex: Texture[N]): string =
-  result = fmt"({tex.page.x:04x}, {tex.page.y:04x})"
+  result = fmt"page ({tex.page.x:04x}, {tex.page.y:04x})"
+  result &= fmt", window mask ({tex.windowMask.x:04x}, {tex.windowMask.y:04x})"
+  result &= fmt", window offset ({tex.windowOffset.x:04x}, {tex.windowOffset.y:04x})"
   result &= fmt", colour mode={tex.colourMode.depth}"
   if tex.colourMode.depth != FifteenBit:
     result &= fmt", palette=({tex.colourMode.palette.x}, {tex.colourMode.palette.y})"
@@ -269,6 +269,9 @@ proc draw*(settings: Settings, tri: Triangle) =
   var colours: array[3, Colour]
   if tri.colours.isSome(): colours = tri.colours.get()
 
+  var texture: Texture[3]
+  if tri.texture.isSome(): texture = tri.texture.get()
+
   var vs = tri.vertices
 
   # Put the topmost point at vs[0], using leftmost to break ties
@@ -354,9 +357,11 @@ proc draw*(settings: Settings, tri: Triangle) =
   logger.debug fmt"mins: {mins[ytop..ybot]}"
   logger.debug fmt"maxs: {maxs[ytop..ybot]}"
 
-  let red = makeInterpolator(tri.vertices, [colours[0].red.float64, colours[1].red.float64, colours[2].red.float64])
-  let green = makeInterpolator(tri.vertices, [colours[0].green.float64, colours[1].green.float64, colours[2].green.float64])
-  let blue = makeInterpolator(tri.vertices, [colours[0].blue.float64, colours[1].blue.float64, colours[2].blue.float64])
+  let red = makeInterpolator(tri.vertices, [colours[0].red, colours[1].red, colours[2].red])
+  let green = makeInterpolator(tri.vertices, [colours[0].green, colours[1].green, colours[2].green])
+  let blue = makeInterpolator(tri.vertices, [colours[0].blue, colours[1].blue, colours[2].blue])
+  let tx = makeInterpolator(tri.vertices, [texture.coords[0].x, texture.coords[1].x, texture.coords[2].x])
+  let ty = makeInterpolator(tri.vertices, [texture.coords[0].y, texture.coords[1].y, texture.coords[2].y])
 
   for y in ytop..ybot:
     for x in mins[y]..maxs[y]:
@@ -365,4 +370,43 @@ proc draw*(settings: Settings, tri: Triangle) =
       colour.red = red.interpolate(p).clamp(0, 255).uint8
       colour.green = green.interpolate(p).clamp(0, 255).uint8
       colour.blue = blue.interpolate(p).clamp(0, 255).uint8
-      putPixel(x, y, colour.toPixel, settings)
+
+      if tri.texture.isSome():
+        # Coordinates relative to texture page
+        var xtex = tx.interpolate(p).int mod 256
+        var ytex = ty.interpolate(p).int mod 256
+        xtex = (xtex and not (texture.windowMask.x * 8)) or ((texture.windowOffset.x and texture.windowMask.x)*8)
+        ytex = (ytex and not (texture.windowMask.y * 8)) or ((texture.windowOffset.y and texture.windowMask.y)*8)
+
+        # Now look up pixel data
+        var textureColour =
+          case texture.colourMode.depth:
+          of FifteenBit: getPixel(texture.page.x + xtex, texture.page.y + ytex)
+          of EightBit:
+            let val = getPixel(texture.page.x + xtex div 2, texture.page.y + ytex)
+            let palette = texture.colourMode.palette
+            if xtex mod 2 == 0:
+              getPixel(palette.x + (val.int and 0xff), palette.y)
+            else:
+              getPixel(palette.x + (val.int shr 8), palette.y)
+          of FourBit:
+            let val = getPixel(texture.page.x + xtex div 4, texture.page.y + ytex)
+            let palette = texture.colourMode.palette
+            if xtex mod 4 == 0:
+              getPixel(palette.x + (val.int and 0xf), palette.y)
+            elif xtex mod 4 == 1:
+              getPixel(palette.x + ((val.int shr 4) and 0xf), palette.y)
+            elif xtex mod 4 == 2:
+              getPixel(palette.x + ((val.int shr 8) and 0xf), palette.y)
+            else:
+              getPixel(palette.x + ((val.int shr 12) and 0xf), palette.y)
+
+        if textureColour.uint16 != 0:
+          if tri.colours.isSome():
+            textureColour.red5 = (colour.red.int * textureColour.red5) div 128
+            textureColour.green5 = (colour.green.int * textureColour.green5) div 128
+            textureColour.blue5 = (colour.blue.int * textureColour.blue5) div 128
+
+          putPixel(x, y, textureColour, settings)
+      else:
+        putPixel(x, y, colour.toPixel, settings)
