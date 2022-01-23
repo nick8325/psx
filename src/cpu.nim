@@ -653,6 +653,8 @@ func exceptionCode(error: MachineError): int =
 proc handleException(cpu: var CPU, error: MachineError) =
   ## Handle an exception, by jumping to the exception vector etc.
 
+  logger.info fmt"{error.error} interrupt: {cpu}"
+
   var branchDelay: bool = false
 
   if cpu.nextPC == cpu.pc + 4:
@@ -694,7 +696,6 @@ proc step*(cpu: var CPU) {.inline.} =
     cpu.execute(instr)
     logger.debug fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
   except MachineError as error:
-    logger.info fmt"{error.error} interrupt: {cpu}"
     cpu.handleException(error)
 
 var
