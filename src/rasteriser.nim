@@ -214,10 +214,14 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel32, settings: Settings) {.inline.} =
   pixel.red = blend(oldPixel.red, pixel.red)
   pixel.green = blend(oldPixel.green, pixel.green)
   pixel.blue = blend(oldPixel.blue, pixel.blue)
+
+  # We interpret "dither" as "draw in full 24-bit colour"
+  if not settings.dither: pixel = pixel.toPixel.toPixel32
   #logger.info fmt"setting vram {x},{y} to {uint16(pixel):04x}"
   vram[y][x] = pixel
 
 proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
+  assert not settings.dither # you lost the 24-bit colour information!
   putPixel(xIn, yIn, pixelIn.toPixel32, settings)
 
 proc putPixel*(xIn, yIn: int, c: Colour, settings: Settings) {.inline.} =

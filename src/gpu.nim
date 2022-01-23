@@ -196,23 +196,26 @@ proc displayArea: Rect =
   result.x2 = result.x1 + width
   result.y2 = result.y1 + height
 
-proc rasteriserSettings(transparent: bool): rasteriser.Settings =
-  result.drawingArea =
-    (x1: drawing.drawingAreaTopLeft.x,
-     y1: drawing.drawingAreaTopLeft.y,
-     x2: drawing.drawingAreaBottomRight.x+1,
-     y2: drawing.drawingAreaBottomRight.y+1)
+proc rasteriserSettings(transparent: bool, dither: bool, crop: bool): rasteriser.Settings =
+  if crop:
+    result.drawingArea =
+      (x1: drawing.drawingAreaTopLeft.x,
+      y1: drawing.drawingAreaTopLeft.y,
+      x2: drawing.drawingAreaBottomRight.x+1,
+      y2: drawing.drawingAreaBottomRight.y+1)
 
-  if screen.verticalRes == Res480 and
-     screen.verticalInterlace and
-     not drawing.drawToDisplayArea:
-    result.skipLines = some(screen.oddLine)
+    if screen.verticalRes == Res480 and
+      screen.verticalInterlace and
+      not drawing.drawToDisplayArea:
+      result.skipLines = some(screen.oddLine)
+  else:
+      result.drawingArea = (x1: 0, y1: 0, x2: vramWidth, y2: vramHeight)
 
   result.transparency =
     if transparent: drawing.transparency
     else: Opaque
 
-  result.dither = drawing.dither
+  result.dither = dither and drawing.dither
   result.setMaskBit = drawing.setMaskBit
   result.skipMaskedPixels = drawing.skipMaskedPixels
 
@@ -352,7 +355,8 @@ let processCommand = consumer(word):
               colourMode: texpage.colourMode(palette))
           else:
             none(Texture[3])
-        let settings = rasteriserSettings(transparent)
+        let settings = rasteriserSettings(transparent = transparent,
+                                          dither = true, crop = true)
         settings.draw Triangle(vertices: vs, colours: cs, texture: texture)
 
     of 0xe1:
@@ -391,9 +395,8 @@ let processCommand = consumer(word):
       var
         coord = take.ScreenCoord
         size = take.ScreenCoord
-      var settings = rasteriserSettings(false)
-      settings.drawingArea = (x1: 0, y1: 0, x2: vramWidth, y2: vramHeight)
-      settings.skipLines = none[bool]()
+      var settings = rasteriserSettings(transparent = false,
+                                        dither = false, crop = false)
 
       var
         arg: word = 0
