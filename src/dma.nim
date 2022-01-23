@@ -95,15 +95,11 @@ channels[6].channelControl[step] = Backwards
 proc checkInterrupt =
   ## Set bit 31 (irqMaster) if an interrupt is ready.
   ## If bit 31 is freshly triggered, signal IRQ 3.
-  let
-    oldInterrupt = interrupt[master]
-    newInterrupt =
-      interrupt[force] or
-      (interrupt[masterEnable] and
-       ((interrupt[enableIRQs] and interrupt[flagsIRQs]) != 0))
-  interrupt[master] = newInterrupt
-  if newInterrupt and not oldInterrupt:
-    irqs.signal(3)
+  interrupt[master] =
+    interrupt[force] or
+    (interrupt[masterEnable] and
+      ((interrupt[enableIRQs] and interrupt[flagsIRQs]) != 0))
+  irqs.set(3, interrupt[master])
 
 proc transfer(chan: Channel, startingAddress: word, size: word): word =
   ## Do a basic DMA transfer.

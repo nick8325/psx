@@ -1,6 +1,7 @@
 ## Hooking up the PSX itself.
 
 import basics, memory, eventqueue, irq, dma, gpu, cpu
+from cdrom import nil
 
 var
   bios {.align: 4096.}: array[0x80000, byte]
@@ -43,9 +44,28 @@ addressSpace.rawWrite[:word](0xfffe0130u32, 0x0001e988u32)
 
 # I/O handlers
 proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
-  return false
+  case address
+  of 0x1f801800:
+    # CD-ROM
+    case kind
+    of Read: value = cdrom.readStatus()
+    of Write: cdrom.writeStatus(value)
+    return true
+  of 0x1f801801..0x1f801803:
+    # CD-ROM
+    case kind
+    of Read: value = cdrom.readRegister(address mod 4)
+    of Write: cdrom.writeRegister(address mod 4, value)
+    return true
+  else:
+    return false
 
 proc handleIO16(address: word, value: var uint16, kind: IOKind): bool =
+  if address == 0x1f801802 and kind == Read:
+    # CD-ROM DATA FIFO
+    value = cdrom.readData16()
+    return true
+
   return false
 
 proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =

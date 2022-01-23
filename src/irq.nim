@@ -1,11 +1,13 @@
 ## The IRQ chip.
 
 import basics, memory, cpu
-import std/bitops
+import std/[bitops, setutils, strformat]
 
 type
   IRQs* = tuple
     stat, mask: word
+    # IRQ input pins, used to implement level-triggering
+    source: set[0..10]
 
 var
   irqs*: IRQs
@@ -15,16 +17,21 @@ proc setCPUIRQ(irqs: var IRQs) =
 
   cpu.cpu.setIRQ((irqs.stat and irqs.mask) != 0)
 
-proc signal*(irqs: var IRQs, irq: range[0..10]) =
-  ## Activate a given IRQ.
+proc set*(irqs: var IRQs, irq: range[0..10], val: bool) =
+  ## Change the value of an input IRQ pin.
 
-  irqs.stat.setBit int(irq)
+  # IRQs are edge-triggered
+  if val and not (irq in irqs.source):
+    echo fmt"Trigger IRQ {irq}"
+    irqs.stat.setBit int(irq)
+
+  irqs.source[irq] = val
   irqs.setCPUIRQ()
 
-proc clear*(irq: range[0..10]) =
-  ## Clear a given IRQ.
+proc signal*(irqs: var IRQs, irq: range[0..10]) =
+  ## Activate an input IRQ pin for an instant.
 
-  irqs.stat.clearBit int(irq)
+  irqs.stat.setBit int(irq)
   irqs.setCPUIRQ()
 
 proc handleStatus*(irqs: var IRQs, value: var word, kind: IOKind) =
