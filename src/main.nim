@@ -11,7 +11,7 @@ var
 window = createWindow("PSX Emulator", 100, 100, 1024, 512, SDL_WINDOW_SHOWN)
 #render = createRenderer(window, -1, Renderer_Accelerated or Renderer_PresentVsync or Renderer_TargetTexture)
 
-let surface = createRGBSurfaceFrom(addr vram32, 1024, 512, 32, 4*1024, 0xff, 0xff00u32, 0xff0000u32, 0)
+let surface = createRGBSurfaceFrom(addr vram, 1024, 512, 32, 4*1024, 0xff, 0xff00u32, 0xff0000u32, 0)
 
 var
   evt = sdl2.defaultEvent

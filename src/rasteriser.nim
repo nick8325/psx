@@ -154,18 +154,15 @@ func `$`*(rect: Rectangle): string =
     result &= ", y flipped"
 
 var
-  vram*: array[512, array[1024, Pixel]]
-  vram32*: array[512, array[1024, Pixel32]]
-
-proc getPixel*(xIn, yIn: int): Pixel {.inline.} =
-  let x = xIn mod 1024
-  let y = yIn mod 512
-  vram[y][x]
+  vram*: array[512, array[1024, Pixel32]]
 
 proc getPixel32*(xIn, yIn: int): Pixel32 {.inline.} =
   let x = xIn mod 1024
   let y = yIn mod 512
-  vram32[y][x]
+  vram[y][x]
+
+proc getPixel*(xIn, yIn: int): Pixel {.inline.} =
+  getPixel32(xIn, yIn).toPixel
 
 proc putPixel*(xIn, yIn: int, pixelIn: Pixel32, settings: Settings) {.inline.} =
   ## Put a pixel to the VRAM. Handles:
@@ -218,8 +215,7 @@ proc putPixel*(xIn, yIn: int, pixelIn: Pixel32, settings: Settings) {.inline.} =
   pixel.green = blend(oldPixel.green, pixel.green)
   pixel.blue = blend(oldPixel.blue, pixel.blue)
   #logger.info fmt"setting vram {x},{y} to {uint16(pixel):04x}"
-  vram[y][x] = pixel.toPixel
-  vram32[y][x] = pixel
+  vram[y][x] = pixel
 
 proc putPixel*(xIn, yIn: int, pixelIn: Pixel, settings: Settings) {.inline.} =
   putPixel(xIn, yIn, pixelIn.toPixel32, settings)
