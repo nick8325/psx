@@ -1,6 +1,6 @@
 ## Hooking up the PSX itself.
 
-import basics, memory, eventqueue, irq, dma, gpu, cpu
+import basics, memory, eventqueue, irq, dma, gpu, cpu, timer
 from cdrom import nil
 
 var
@@ -76,8 +76,25 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
   of 0x1f801c00u32 .. 0x1f801ffcu32:
     # SPU (TODO)
     return true
-  of 0x1f801100u32 .. 0x1f801128u32:
-    # Timers (TODO)
+  of 0x1f801100..0x1f801128:
+    # Timers
+    let n = (address div 16) mod 16
+    case address mod 16
+    of 0:
+      case kind
+      of Read: value = timers[n].value
+      of Write: timers[n].value = value
+    of 4:
+      case kind
+      of Read: value = timers[n].mode
+      of Write: timers[n].mode = value
+    of 8:
+      case kind
+      of Read: value = timers[n].target
+      of Write: timers[n].target = value
+    else:
+      return false
+
     return true
   of 0x1f801070u32:
     # Interrupt status
