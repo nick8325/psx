@@ -7,6 +7,10 @@ type
 
 func minLevel*[l: static Level](logger: BoundedLogger[l]): Level = l
 
+proc `level=`*[l: static Level](logger: var BoundedLogger[l], level: Level) =
+  assert level >= l
+  logger.ConsoleLogger.levelThreshold = level
+
 func newLogger*(name: string, minLevel: static Level = lvlInfo, level: Level = minLevel): BoundedLogger[minLevel] =
   assert level >= minLevel
   let logger =

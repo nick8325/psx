@@ -22,11 +22,16 @@ proc set*(irqs: var IRQs, irq: range[0..10], val: bool) =
 
   # IRQs are edge-triggered
   if val and not (irq in irqs.source):
-    echo fmt"Trigger IRQ {irq}"
+    echo fmt"Trigger IRQ {irq}, {cpu.cpu}"
     irqs.stat.setBit int(irq)
 
   irqs.source[irq] = val
   irqs.setCPUIRQ()
+
+proc set*(irqs: var IRQs, irq: range[0..10]) =
+  ## Toggle the value of an input IRQ pin.
+
+  irqs.set(irq, not (irq in irqs.source))
 
 proc signal*(irqs: var IRQs, irq: range[0..10]) =
   ## Activate an input IRQ pin for an instant.

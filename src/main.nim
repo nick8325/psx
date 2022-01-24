@@ -1,5 +1,5 @@
 import sdl2, sdl2/gfx
-import machine, rasteriser, basics, eventqueue
+import machine, rasteriser, basics, eventqueue, irq, gpu
 import std/segfaults
 
 discard sdl2.init(INIT_EVERYTHING)
@@ -46,14 +46,14 @@ while runGame:
   # TO DO: capture 'surface' some amount of time after emu VSYNC
   # Figure out what rate to run main loop at
   # (maybe better with polled keyboard inputs to match hardware?)
-  runSystem(refreshRate[region])
+  runSystem(frameTime())
   surface.blitSurface nil, window.getSurface, nil
   discard window.updateSurface()
   if fps.getFramerate != refreshRate[region].cint:
     fps.setFramerate refreshRate[region].cint
-  fps.delay
+#  fps.delay
 
-  if events.time >= 5*clockRate: break
+#  if events.time >= 5*clockRate: break
 
 destroy render
 destroy window

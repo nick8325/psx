@@ -35,6 +35,19 @@ type
   Palette = distinct uint16
   TexCoord = distinct uint16
 
+func width(res: HorizontalRes): int =
+  case res
+  of Res256: 256
+  of Res320: 320
+  of Res512: 512
+  of Res640: 640
+  of Res368: 368
+
+func height(res: VerticalRes): int =
+  case res
+  of Res240: 240
+  of Res480: 480
+
 Vertex.bitfield x, int, 0, 11, signed=true
 Vertex.bitfield y, int, 16, 11, signed=true
 
@@ -170,17 +183,8 @@ proc displayArea: Rect =
   let
     # TODO: calculate width/height using horizontalRange/verticalRange?
     # horizontalRes and verticalRes supposedly encode dotclock speed
-    width =
-      case screen.horizontalRes
-      of Res256: 256
-      of Res320: 320
-      of Res512: 512
-      of Res640: 640
-      of Res368: 368
-    height =
-      case screen.verticalRes
-      of Res240: 240
-      of Res480: 480
+    width = screen.horizontalRes.width
+    height = screen.verticalRes.height
   result.x2 = result.x1 + width
   result.y2 = result.y1 + height
 
@@ -500,12 +504,57 @@ proc gpuReadDMA*: word =
   of DMADirection.Read: result = gpuread()
   else: logger.warn "GPU DMA read while direction is {control.dmaDirection}"
 
-# VBLANK IRQ
-proc signalVBlank =
-  events.after(clockRate div refreshRate[region].uint64) do ():
-    logger.debug "VBLANK"
-    screen.oddLine = not screen.oddLine
-    irqs.signal 0
-    signalVBlank()
+# Dot-clock/HBLANK/VBLANK
 
-signalVBlank()
+const
+  scanlinesPerFrame*: array[Region, uint64] =
+    [NTSC: 263u64, PAL: 314]
+  gpuClocksPerScanline*: array[Region, uint64] =
+    [NTSC: 3413u64, PAL: 3406]
+  gpuClocksPerDotClock*: array[HorizontalRes, uint64] =
+    [Res256: 10u64, Res320: 8, Res512: 5, Res640: 4, Res368: 7]
+
+proc dotClockTime*: uint64 =
+  gpuClock * gpuClocksPerDotClock[screen.horizontalRes]
+
+proc scanlineTime*: uint64 =
+  gpuClock * gpuClocksPerScanline[region]
+
+proc frameTime*: uint64 =
+  scanlineTime() * scanlinesPerFrame[region]
+
+proc hblankTime*: uint64 =
+  scanlineTime() - dotClockTime() * screen.horizontalRes.width.uint64
+
+proc vblankTime*: uint64 =
+  frameTime() - scanlineTime() * screen.verticalRes.height.uint64
+
+var onHBlankHandlers, afterHBlankHandlers, onVBlankHandlers, afterVBlankHandlers: seq[proc()]
+
+proc onHBlank*(p: proc()) = onHBlankHandlers.add p
+proc afterHBlank*(p: proc()) = afterHBlankHandlers.add p
+proc onVBlank*(p: proc()) = onVBlankHandlers.add p
+proc afterVBlank*(p: proc()) = afterVBlankHandlers.add p
+
+proc hblankTask =
+  events.after(scanlineTime()) do ():
+    for handler in onHBlankHandlers: handler()
+    events.after(hblankTime()) do ():
+      for handler in afterHBlankHandlers: handler()
+    hblankTask()
+
+proc vblankTask =
+  events.after(frameTime()) do ():
+    for handler in onVBlankHandlers: handler()
+    events.after(vblankTime()) do ():
+      for handler in afterVBlankHandlers: handler()
+    vblankTask()
+
+hblankTask()
+vblankTask()
+
+# VBLANK IRQ
+onVBlank do ():
+  logger.debug "VBLANK"
+  screen.oddLine = not screen.oddLine
+  irqs.signal 0

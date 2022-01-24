@@ -94,12 +94,14 @@ proc command*(value: uint8) =
     queueInterrupt 5
 
 proc readStatus*: uint8 =
-  index.uint8 or
-  # TODO: XA-ADPCM FIFO empty
-  (uint8(parameters.len == 0) shl 3) or
-  (uint8(response.len != 0) shl 5) or
-  (uint8(data.len != 0) shl 6)
-  # TODO: need to set busy bit?
+  result =
+    index.uint8 or
+    # TODO: XA-ADPCM FIFO empty
+    (uint8(parameters.len == 0) shl 3) or
+    (uint8(response.len != 0) shl 5) or
+    (uint8(data.len != 0) shl 6)
+    # TODO: need to set busy bit?
+  echo fmt "read status {result:08x}"
 
 proc writeStatus*(value: uint8) =
   index = value and 3
@@ -108,6 +110,7 @@ proc readRegister*(address: 1..3): uint8 =
   case address
   of 1:
     # Response FIFO
+    echo fmt"read response {response}"
     discard readFIFO(response, result)
   of 2:
     # Data FIFO
@@ -123,10 +126,10 @@ proc readRegister*(address: 1..3): uint8 =
         result = interrupts[0].uint8
       if commandStart:
         result = result or 0x10
-  # logger.debug fmt"Reading from index {index}, address {address} => {result:02x}"
+  logger.debug fmt"Reading from index {index}, address {address} => {result:02x}"
 
 proc writeRegister*(address: 1..3, value: uint8) =
-  # logger.debug fmt"Writing {value:02x} to index {index}, address {address}"
+  logger.debug fmt"Writing {value:02x} to index {index}, address {address}"
   # The CD controller has a *lot* of registers!
   case index
   of 0:
