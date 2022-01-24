@@ -507,27 +507,27 @@ proc gpuReadDMA*: word =
 # Dot-clock/HBLANK/VBLANK
 
 const
-  scanlinesPerFrame*: array[Region, uint64] =
-    [NTSC: 263u64, PAL: 314]
-  gpuClocksPerScanline*: array[Region, uint64] =
-    [NTSC: 3413u64, PAL: 3406]
-  gpuClocksPerDotClock*: array[HorizontalRes, uint64] =
-    [Res256: 10u64, Res320: 8, Res512: 5, Res640: 4, Res368: 7]
+  scanlinesPerFrame*: array[Region, int64] =
+    [NTSC: 263i64, PAL: 314]
+  gpuClocksPerScanline*: array[Region, int64] =
+    [NTSC: 3413i64, PAL: 3406]
+  gpuClocksPerDotClock*: array[HorizontalRes, int64] =
+    [Res256: 10i64, Res320: 8, Res512: 5, Res640: 4, Res368: 7]
 
-proc dotClockTime*: uint64 =
+proc dotClockTime*: int64 =
   gpuClock * gpuClocksPerDotClock[screen.horizontalRes]
 
-proc scanlineTime*: uint64 =
+proc scanlineTime*: int64 =
   gpuClock * gpuClocksPerScanline[region]
 
-proc frameTime*: uint64 =
+proc frameTime*: int64 =
   scanlineTime() * scanlinesPerFrame[region]
 
-proc hblankTime*: uint64 =
-  scanlineTime() - dotClockTime() * screen.horizontalRes.width.uint64
+proc hblankTime*: int64 =
+  scanlineTime() - dotClockTime() * screen.horizontalRes.width.int64
 
-proc vblankTime*: uint64 =
-  frameTime() - scanlineTime() * screen.verticalRes.height.uint64
+proc vblankTime*: int64 =
+  frameTime() - scanlineTime() * screen.verticalRes.height.int64
 
 var onHBlankHandlers, afterHBlankHandlers, onVBlankHandlers, afterVBlankHandlers: seq[proc()]
 

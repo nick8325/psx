@@ -43,7 +43,7 @@ type
 
 const
   # This many timesteps occur per second.
-  clockRate*: uint64 = 44100 * 0x300 * 11 # ~372MHz
+  clockRate*: int64 = 44100 * 0x300 * 11 # ~372MHz
   # How many timesteps it takes for one clock cycle of each component.
   cpuClock* = 11 # ~33.8MHz
   gpuClock* = 7  # ~53.2MHz

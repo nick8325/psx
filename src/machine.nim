@@ -147,7 +147,7 @@ addressSpace.ioHandler32 = handleIO32
 dma.channels[2].read = gpuReadDMA
 dma.channels[2].write = gpuWriteDMA
 
-proc runSystem*(clocks: uint64) =
+proc runSystem*(clocks: int64) =
   ## Run the system.
 
   let stop = events.time + clocks
