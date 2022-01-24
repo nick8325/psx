@@ -151,9 +151,6 @@ proc runSystem*(clocks: int64) =
   ## Run the system.
 
   let stop = events.time + clocks
-  while true:
-    while events.nextTime >= cpuClock:
-      cpu.cpu.step
-      events.fastForward(cpuClock)
-    if not events.runNext: break
-    if events.time >= stop: break
+  while events.time < stop:
+    cpu.cpu.step
+    events.fastForward(cpuClock)
