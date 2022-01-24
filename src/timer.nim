@@ -3,7 +3,7 @@
 import basics, utils, irq
 import std/[bitops, strformat]
 
-var logger = newLogger("Timer")
+const loggerComponent = logTimer
 
 type
   TimerMode = distinct word

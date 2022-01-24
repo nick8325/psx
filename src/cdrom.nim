@@ -1,9 +1,9 @@
 ## The CD-ROM controller.
 
 import basics, utils, irq, eventqueue
-import std/[bitops, strformat, deques, options, logging]
+import std/[bitops, strformat, deques, options]
 
-var logger = newLogger("CD-ROM", minLevel = lvlDebug)
+const loggerComponent = logCDROM
 
 type
   Channel {.pure.} = enum Left, Right
@@ -51,7 +51,7 @@ proc readFIFO(fifo: var Deque[uint8], res: var uint8): bool =
     res = fifo.popFirst()
     return true
   else:
-    logger.warn "empty FIFO"
+    warn "empty FIFO"
     queueInterrupt 5
     return false
 
@@ -61,7 +61,7 @@ proc readData16*: uint16 =
     let y = data.popFirst()
     return x.uint16 + y.uint16 shl 8
   else:
-    logger.warn "empty FIFO"
+    warn "empty FIFO"
 
 proc respond*(interrupt: 0..5, values: openarray[int]) =
   for x in values: response.addLast x.uint8
@@ -70,7 +70,7 @@ proc respond*(interrupt: 0..5, values: openarray[int]) =
 proc command*(value: uint8) =
   # TODO: start of command interrupt
 
-  logger.debug fmt"Command {value:02x}"
+  debug fmt"Command {value:02x}"
   case value
   of 0x1:
     # Stat
@@ -83,14 +83,14 @@ proc command*(value: uint8) =
     of 0x20:
       respond 3, [0x97, 0x08, 0x14, 0xc2]
     else:
-      logger.debug fmt"Unknown test command {param:02x}"
+      debug fmt"Unknown test command {param:02x}"
       respond 5, []
   of 0x1a:
     # GetID
     respond 5, [0x11, 0x80]
     #respond 5, [0x08, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] # No disc
   else:
-    logger.warn fmt"Unknown command {value:02x}"
+    warn fmt"Unknown command {value:02x}"
     queueInterrupt 5
 
 proc readStatus*: uint8 =
@@ -126,10 +126,10 @@ proc readRegister*(address: 1..3): uint8 =
         result = interrupts[0].uint8
       if commandStart:
         result = result or 0x10
-  logger.debug fmt"Reading from index {index}, address {address} => {result:02x}"
+  debug fmt"Reading from index {index}, address {address} => {result:02x}"
 
 proc writeRegister*(address: 1..3, value: uint8) =
-  logger.debug fmt"Writing {value:02x} to index {index}, address {address}"
+  debug fmt"Writing {value:02x} to index {index}, address {address}"
   # The CD controller has a *lot* of registers!
   case index
   of 0:
@@ -150,7 +150,7 @@ proc writeRegister*(address: 1..3, value: uint8) =
     case address
     of 1:
       # Unknown
-      logger.warn "Write {value:02x} to unknown address/index {address}/{index}"
+      warn "Write {value:02x} to unknown address/index {address}/{index}"
     of 2:
       # Interrupt enable register
       enabledInterrupts = value and 0x1f
@@ -167,7 +167,7 @@ proc writeRegister*(address: 1..3, value: uint8) =
     case address
     of 1:
       # Unknown
-      logger.warn "Write {value:02x} to unknown address/index {address}/{index}"
+      warn "Write {value:02x} to unknown address/index {address}/{index}"
     of 2:
       # Audio volume left->left
       volume[Left][Left] = value

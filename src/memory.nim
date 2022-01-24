@@ -3,8 +3,6 @@
 import basics, utils
 import std/[strformat, strutils]
 
-var logger = newLogger("Memory")
-
 type
   # We represent the address space as a page table consisting of an array of
   # page descriptors. A page descriptor is a pointer to a page-aligned block
@@ -167,7 +165,7 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
   if not handled:
     let value = word(rawRead[T](memory, address))
     let kindStr = toLowerAscii $kind
-    logger.warn fmt"Unknown I/O, address {address:08x}, value {value:08x} ({T.sizeof}-byte {kindStr})"
+    warn fmt"Unknown I/O, address {address:08x}, value {value:08x} ({T.sizeof}-byte {kindStr})"
 
 proc read*[T](memory: Memory, address: word): T {.inline.} =
   ## Read data from memory.

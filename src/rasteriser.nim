@@ -4,7 +4,7 @@ import utils, basics
 import std/[options, strformat, sugar, algorithm]
 import glm
 
-var logger = newLogger("Rasteriser")
+const loggerComponent = logRasteriser
 
 # Type definitions for the rendering primitives.
 
@@ -219,17 +219,17 @@ proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
   # Check pixel against drawing/display areas
   if x < settings.drawingArea.x1 or x >= settings.drawingArea.x2 or
      y < settings.drawingArea.y1 or y >= settings.drawingArea.y2:
-    logger.debug fmt"skip write to {x},{y} since out of drawing area {settings.drawingArea}"
+    trace fmt"skip write to {x},{y} since out of drawing area {settings.drawingArea}"
     return
   if settings.skipLines.isSome:
     if settings.skipLines.get.int == (y and 1):
-      logger.debug fmt"skip write to {x},{y} in interlaced mode"
+      trace fmt"skip write to {x},{y} in interlaced mode"
       return
 
   # Check existing pixel's mask
   let oldPixel = getPixel(x, y)
   if settings.skipMaskedPixels and oldPixel.mask:
-    logger.debug fmt"skip write to {x},{y} since masked"
+    trace fmt"skip write to {x},{y} since masked"
     return
 
   # Force mask bit if requested
@@ -410,7 +410,7 @@ iterator lineKeepingLeft(p1, p2: Point): (Point, bool) =
 proc draw*(settings: Settings, tri: Triangle) =
   ## Draw a triangle.
 
-  logger.debug fmt"draw {tri}"
+  debug fmt"draw {tri}"
 
   var vs = tri.vertices
 
@@ -493,9 +493,9 @@ proc draw*(settings: Settings, tri: Triangle) =
   for p in lineKeepingLeft(vs[1], vs[2]): p.update(kinds[1])
   for p in lineKeepingLeft(vs[2], vs[0]): p.update(kinds[2])
 
-  logger.debug fmt"triangle, vs: {vs}, range: {ytop}--{ybot}, horiz: {kinds[1] == Horizontal}"
-  logger.debug fmt"mins: {mins[ytop..ybot]}"
-  logger.debug fmt"maxs: {maxs[ytop..ybot]}"
+  trace fmt"triangle, vs: {vs}, range: {ytop}--{ybot}, horiz: {kinds[1] == Horizontal}"
+  trace fmt"mins: {mins[ytop..ybot]}"
+  trace fmt"maxs: {maxs[ytop..ybot]}"
 
   let shader = tri.vertices.makeInterpolator tri.colours
   let textureMapper = tri.vertices.makeInterpolator tri.texture.coords

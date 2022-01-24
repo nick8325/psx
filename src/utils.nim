@@ -1,41 +1,64 @@
 ## Utility functions used throughout the program.
 
 import std/[bitops, typetraits, logging]
+export Level
+
+const
+  lvlTrace*: Level = lvlAll
 
 type
-  BoundedLogger[minLevel: static Level] = distinct ConsoleLogger
+  Component* = enum
+    logCPU, logMemory, logGPU, logRasteriser, logDMA, logIRQ, logTimer, logCDROM
 
-func minLevel*[l: static Level](logger: BoundedLogger[l]): Level = l
+const
+  minLevels: array[Component, Level] =
+    [logCPU: lvlInfo, logMemory: lvlInfo, logGPU: lvlInfo, logRasteriser: lvlInfo,
+     logDMA: lvlInfo, logIRQ: lvlInfo, logTimer: lvlInfo, logCDROM: lvlInfo]
 
-proc `level=`*[l: static Level](logger: var BoundedLogger[l], level: Level) =
-  assert level >= l
-  logger.ConsoleLogger.levelThreshold = level
+var
+  loggers: array[Component, Logger]
 
-func newLogger*(name: string, minLevel: static Level = lvlInfo, level: Level = minLevel): BoundedLogger[minLevel] =
-  assert level >= minLevel
-  let logger =
-    newConsoleLogger(levelThreshold = level,
-                     fmtStr = defaultFmtStr & name & ": ",
-                    useStderr = true)
-  BoundedLogger[minLevel](logger)
+for component in Component.low..Component.high:
+  loggers[component] =
+    newConsoleLogger(levelThreshold = minLevels[component],
+                     fmtStr = defaultFmtStr & $component & ": ",
+                     useStderr = true)
 
-template lazyLog*[minLevel: static Level](
-  logger: BoundedLogger[minLevel], level: Level, args: varargs[string, `$`]) =
-  when level >= minLevel:
-    if level >= ConsoleLogger(logger).levelThreshold:
-      ConsoleLogger(logger).log(level, args)
-template debug* (logger: untyped, args: varargs[string, `$`]) =
-  logger.lazyLog(lvlDebug, args)
-template info*  (logger: untyped, args: varargs[string, `$`]) =
-  logger.lazyLog(lvlInfo, args)
-template notice*(logger: untyped, args: varargs[string, `$`]) =
-  logger.lazyLog(lvlNotice, args)
-template warn*  (logger: untyped, args: varargs[string, `$`]) =
-  logger.lazyLog(lvlWarn, args)
-template error* (logger: untyped, args: varargs[string, `$`]) =
-  logger.lazyLog(lvlError, args)
-template fatal* (logger: untyped, args: varargs[string, `$`]) =
-  logger.lazyLog(lvlFatal, args)
+template minLevel*(component: Component): Level =
+  minLevels[component]
+
+template level*(component: Component): Level =
+  loggers[component].levelThreshold
+
+template `level=`*(component: var Component, level: Level) =
+  assert level >= minLevels[component]
+  loggers[component].levelThreshold = level
+
+template log*(component: Component, lev: Level, args: varargs[string, `$`]) =
+  when lev >= minLevels[component]:
+    if lev >= component.level:
+      loggers[component].log(lev, args)
+template trace* (args: varargs[string, `$`]) =
+  mixin loggerComponent
+  loggerComponent.log(lvlTrace, args)
+template debug* (args: varargs[string, `$`]) =
+  mixin loggerComponent
+  loggerComponent.log(lvlDebug, args)
+template info*  (args: varargs[string, `$`]) =
+  mixin loggerComponent
+  loggerComponent.log(lvlInfo, args)
+template notice*(args: varargs[string, `$`]) =
+  mixin loggerComponent
+  loggerComponent.log(lvlNotice, args)
+template warn*  (args: varargs[string, `$`]) =
+  mixin loggerComponent
+  loggerComponent.log(lvlWarn, args)
+template error* (args: varargs[string, `$`]) =
+  mixin loggerComponent
+  loggerComponent.log(lvlError, args)
+template fatal* (args: varargs[string, `$`]) =
+  mixin loggerComponent
+  loggerComponent.log(lvlFatal, args)
 
 func sliceArray*[size: static int, T](
   arr: var openArray[T], offset: int): ptr array[size, T] =

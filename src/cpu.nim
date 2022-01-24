@@ -3,7 +3,7 @@
 import utils, basics, memory
 import std/[tables, bitops, strformat]
 
-var logger = newLogger("CPU")
+const loggerComponent = logCPU
 
 # Processor state.
 
@@ -99,7 +99,7 @@ proc `[]`(cop0: COP0, reg: CoRegister): word =
   of CoRegister(14): cop0.epc
   of CoRegister(15): 2 # PRId - value from Nocash PSX
   else:
-    logger.warn fmt"Ignoring read of unknown COP register {reg}"
+    warn fmt"Ignoring read of unknown COP register {reg}"
     return 0
 
 proc `[]=`(cop0: var COP0, reg: CoRegister, val: word) =
@@ -114,12 +114,12 @@ proc `[]=`(cop0: var COP0, reg: CoRegister, val: word) =
   of CoRegister(12):
     let conflicting = (val and forbiddenSRBits) xor (cop0.sr and forbiddenSRBits)
     if conflicting != 0:
-      logger.warn fmt"Ignoring writes to forbidden SR bits: {conflicting:x}"
+      warn fmt"Ignoring writes to forbidden SR bits: {conflicting:x}"
     cop0.sr = (cop0.sr and fixedSRBits) or (val and writableSRBits)
   of CoRegister(13): discard
   of CoRegister(14): discard
   else:
-    logger.warn fmt"Ignoring write to unknown COP register {reg}"
+    warn fmt"Ignoring write to unknown COP register {reg}"
 
 proc leaveKernel(cop0: var COP0) =
   # Nocash PSX: RFE leaves IEo/KUo unchanged
@@ -653,7 +653,7 @@ func exceptionCode(error: MachineError): int =
 proc handleException(cpu: var CPU, error: MachineError) =
   ## Handle an exception, by jumping to the exception vector etc.
 
-  logger.debug fmt"{error.error} interrupt: {cpu}"
+  debug fmt"{error.error} interrupt: {cpu}"
 
   var branchDelay: bool = false
 
@@ -694,7 +694,7 @@ proc step*(cpu: var CPU) {.inline.} =
       instr = cpu.fetch
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(instr)
-    logger.debug fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
+    debug fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
   except MachineError as error:
     cpu.handleException(error)
 

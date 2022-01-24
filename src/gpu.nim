@@ -1,9 +1,9 @@
 ## The GPU.
 
 import basics, utils, irq, eventqueue, rasteriser
-import std/[bitops, strformat, deques, options, logging]
+import std/[bitops, strformat, deques, options]
 
-var logger = newLogger("GPU")
+const loggerComponent = logGPU
 
 type
   HorizontalRes {.pure.} = enum
@@ -238,32 +238,33 @@ proc gpustat*: word =
     of DMADirection.Write: readyToReceiveDMA()
     of DMADirection.Read: readyToSendVRAM()
     else: false
-  word(textures.base.x64) or
-  word(textures.base.y256) shl 4 or
-  word(drawing.transparency) shl 5 or
-  word(textures.colourDepth) shl 7 or
-  word(drawing.dither) shl 9 or
-  word(drawing.drawToDisplayArea) shl 10 or
-  word(drawing.setMaskBit) shl 11 or
-  word(drawing.skipMaskedPixels) shl 12 or
-  word(not screen.verticalInterlace) shl 13 or # TODO: is this right?
-  # Don't bother with GPUSTAT 14 (reverseflag)
-  word(not textures.enabled) shl 15 or
-  word(screen.horizontalRes == Res368) shl 16 or
-  (if screen.horizontalRes == Res368: 0u32 else: word(screen.horizontalRes)) shl 17 or
-  word(screen.verticalRes) shl 19 or
-  word(region) shl 20 or
-  word(screen.displayAreaDepth) shl 21 or
-  word(screen.verticalInterlace) shl 22 or
-  word(not screen.enabled) shl 23 or
-  word(control.interruptRequested) shl 24 or
-  word(bit25) shl 25 or
-  word(readyToReceiveCommand()) shl 26 or
-  word(readyToSendVRAM()) shl 27 or
-  word(readyToReceiveDMA()) shl 28 or
-  word(control.dmaDirection) shl 29 or
-  word(screen.oddLine) shl 31
-  # logger.debug fmt"GPUSTAT returned {result:08x}"
+  result =
+    word(textures.base.x64) or
+    word(textures.base.y256) shl 4 or
+    word(drawing.transparency) shl 5 or
+    word(textures.colourDepth) shl 7 or
+    word(drawing.dither) shl 9 or
+    word(drawing.drawToDisplayArea) shl 10 or
+    word(drawing.setMaskBit) shl 11 or
+    word(drawing.skipMaskedPixels) shl 12 or
+    word(not screen.verticalInterlace) shl 13 or # TODO: is this right?
+    # Don't bother with GPUSTAT 14 (reverseflag)
+    word(not textures.enabled) shl 15 or
+    word(screen.horizontalRes == Res368) shl 16 or
+    (if screen.horizontalRes == Res368: 0u32 else: word(screen.horizontalRes)) shl 17 or
+    word(screen.verticalRes) shl 19 or
+    word(region) shl 20 or
+    word(screen.displayAreaDepth) shl 21 or
+    word(screen.verticalInterlace) shl 22 or
+    word(not screen.enabled) shl 23 or
+    word(control.interruptRequested) shl 24 or
+    word(bit25) shl 25 or
+    word(readyToReceiveCommand()) shl 26 or
+    word(readyToSendVRAM()) shl 27 or
+    word(readyToReceiveDMA()) shl 28 or
+    word(control.dmaDirection) shl 29 or
+    word(screen.oddLine) shl 31
+  trace fmt"GPUSTAT returned {result:08x}"
 
 let processCommand = consumer(word):
   while true:
@@ -419,16 +420,16 @@ let processCommand = consumer(word):
             resultQueue.addLast val
             even = true
     else:
-      logger.warn fmt"Unrecognised GP0 command {value[command]:02x}"
+      warn fmt"Unrecognised GP0 command {value[command]:02x}"
       while true: yield
 
 var iter = processCommand.start
 proc gp0*(value: word) =
-  logger.debug fmt"GP0 {value:08x}"
+  trace fmt"GP0 {value:08x}"
   iter.give(value)
 
 proc gp1*(value: word) =
-  logger.debug fmt"GP1 {value:08x}"
+  debug fmt"GP1 {value:08x}"
   case value[command] and 0x3f
   of 0x00:
     # Reset
@@ -481,28 +482,28 @@ proc gp1*(value: word) =
     of 7: control.result = 2 # GPU Type
     of 8: control.result = 0
     else:
-      logger.warn fmt"Unrecognised GPU info query {value[command]:02x}"
-    logger.debug fmt"GPU info returned {control.result:08x}"
+      warn fmt"Unrecognised GPU info query {value[command]:02x}"
+    debug fmt"GPU info returned {control.result:08x}"
   else:
-    logger.warn fmt"Unrecognised GP1 command {value:08x}"
+    warn fmt"Unrecognised GP1 command {value:08x}"
 
 proc gpuread*: word =
   if resultQueue.len == 0:
     result = control.result
-    logger.debug fmt"GPUREAD returns {result:08x} (result)"
+    debug fmt"GPUREAD returns {result:08x} (result)"
   else:
     result = resultQueue.popFirst()
-    logger.debug fmt"GPUREAD returns {result:08x} (VRAM)"
+    trace fmt"GPUREAD returns {result:08x} (VRAM)"
 
 proc gpuWriteDMA*(value: word) =
   case control.dmaDirection
   of DMADirection.Write: gp0(value)
-  else: logger.warn fmt"GPU DMA write of {value:08x} while direction is {control.dmaDirection}"
+  else: warn fmt"GPU DMA write of {value:08x} while direction is {control.dmaDirection}"
 
 proc gpuReadDMA*: word =
   case control.dmaDirection
   of DMADirection.Read: result = gpuread()
-  else: logger.warn "GPU DMA read while direction is {control.dmaDirection}"
+  else: warn "GPU DMA read while direction is {control.dmaDirection}"
 
 # Dot-clock/HBLANK/VBLANK
 
@@ -555,6 +556,6 @@ vblankTask()
 
 # VBLANK IRQ
 onVBlank do ():
-  logger.debug "VBLANK"
+  debug "VBLANK"
   screen.oddLine = not screen.oddLine
   irqs.signal 0
