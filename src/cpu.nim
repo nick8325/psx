@@ -1,6 +1,6 @@
 ## An interpreter for the R3000A CPU.
 
-import utils, basics, memory
+import utils, basics, memory, gte
 import std/[tables, bitops, strformat]
 
 const loggerComponent = logCPU
@@ -142,12 +142,13 @@ type
     registers: array[Register, word] ## Registers.
     lo, hi: word ## LO/HI registers.
     cop0: COP0 ## COP0 registers.
+    gte: GTE ## GTE registers.
 
 let initCPU*: CPU = block:
   # The initial state of the CPU after reset.
   const pc = 0xbfc00000u32
   var registers: array[Register, word]
-  CPU(pc: pc, nextPC: pc+4, registers: registers, lo: 0, hi: 0, cop0: initCOP0)
+  CPU(pc: pc, nextPC: pc+4, registers: registers, lo: 0, hi: 0, cop0: initCOP0, gte: initGTE)
 
 func `[]`*(cpu: CPU, reg: Register): word =
   ## Access registers by number.
@@ -210,7 +211,9 @@ type
     BEQ, BNE, BGEZ, BGEZAL, BGTZ, BLEZ, BLTZ, BLTZAL,
     J, JR, JAL, JALR,
     # System
-    SYSCALL, BREAK, MFC0, MTC0, RFE
+    SYSCALL, BREAK, MFC0, MTC0, RFE,
+    # GTE
+    COP2, MFC2, MTC2, CFC2, CTC2
   Immediate = distinct uint16   ## An immediate operand.
   Target = distinct range[0 .. (1 shl 26)-1] ## A 26-bit jump target.
 
@@ -249,6 +252,7 @@ type
     MFC,   ## MFCn/CFCn - RD is (COP) source, RT is target
     MTC,   ## MTCn/CFCn - RT is source, RD is (COP) target
     Whole, ## Only opcode used, rest is user-settable (SYSCALL and BREAK)
+    COP,   ## Coprocessor instruction, lowest 25 bits are opcode
     None   ## No arguments (RFE)
 
 const opcodeType: array[Opcode, OpcodeType] =
@@ -261,7 +265,8 @@ const opcodeType: array[Opcode, OpcodeType] =
    LBU: Mem, LH: Mem, LHU: Mem, LWL: Mem, LWR: Mem, SW: Mem, SB: Mem, SH: Mem,
    SWL: Mem, SWR: Mem, BEQ: Imm, BNE: Imm, BGEZ: ImmS, BGEZAL: ImmS, BGTZ: ImmS,
    BLEZ: ImmS, BLTZ: ImmS, BLTZAL: ImmS, J: Jump, JR: RegS, JAL: Jump,
-   JALR: RegDS, SYSCALL: Whole, BREAK: Whole, MFC0: MFC, MTC0: MTC, RFE: None]
+   JALR: RegDS, SYSCALL: Whole, BREAK: Whole, MFC0: MFC, MTC0: MTC, RFE: None,
+   COP2: COP, MFC2: MFC, MTC2: MTC, CFC2: MFC, CTC2: MTC]
 
 const
   # The different parts of a machine instruction.
@@ -374,6 +379,16 @@ proc decode(instr: word): Opcode {.inline.} =
       guard instr[copimm] == 16
       instr.ret RFE
     else: raise MachineError(error: ReservedInstruction)
+  of 18:
+    if int(instr[rs]).testBit(5):
+      instr.ret COP2
+    else:
+      case int(instr[rs])
+      of 0: instr.ret MFC2
+      of 2: instr.ret CFC2
+      of 4: instr.ret MTC2
+      of 6: instr.ret CFC2
+      else: raise MachineError(error: ReservedInstruction)
   else: raise MachineError(error: ReservedInstruction)
 
 proc format*(instr: word): string =
@@ -413,6 +428,7 @@ proc format*(instr: word): string =
   of MFC: args(rt, CoRegister(rd))
   of MTC: args(CoRegister(rd), rt)
   of Whole: args(fmt"$0x{whole}")
+  of COP: args(fmt"$0x{copimm}")
   of None: $op
 
 proc `$`*(cpu: CPU): string =
@@ -494,6 +510,7 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
     shamt = instr[shamt]
     imm = instr[imm]
     target = instr[target]
+    copimm = instr[copimm]
 
   template branchIf(x: bool) =
     if x:
@@ -634,6 +651,11 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
   of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
   of RFE: leaveKernel(cpu.cop0)
+  of COP2: cpu.gte.execute(copimm.int)
+  of MFC2: cpu[rt] = cpu.gte[rd.int.dataReg]
+  of MTC2: cpu.gte[rd.int.dataReg] = cpu[rt]
+  of CFC2: cpu[rt] = cpu.gte[rd.int.controlReg]
+  of CTC2: cpu.gte[rd.int.controlReg] = cpu[rt]
 
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC

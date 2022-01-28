@@ -515,3 +515,12 @@ proc draw*(settings: Settings, tri: Triangle) =
         let colour = shader.interpolate p
         let coord = textureMapper.interpolate p
         putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y).mix(colour), settings)
+
+proc fill*(settings: Settings; x, y, w, h: int; c: Colour) =
+  ## Fill a rectangle with a solid colour.
+
+  debug fmt"fill ({x},{y}) size ({w},{h}) colour {c}"
+
+  for j in y..<y+h:
+    for i in x..<x+h:
+      putPixel(i, j, c, settings)

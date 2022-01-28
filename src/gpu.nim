@@ -307,7 +307,7 @@ proc displayArea: Rect =
   result.x2 = result.x1 + screenWidth()
   result.y2 = result.y1 + screenHeight()
 
-proc rasteriserSettings(transparent: bool, dither: bool, crop: bool): rasteriser.Settings =
+proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: bool): rasteriser.Settings =
   if crop:
     result.drawingArea =
       (x1: drawing.drawingAreaTopLeft.x,
@@ -315,13 +315,15 @@ proc rasteriserSettings(transparent: bool, dither: bool, crop: bool): rasteriser
        x2: drawing.drawingAreaBottomRight.x+1,
        y2: drawing.drawingAreaBottomRight.y+1)
 
+  else:
+      result.drawingArea = (x1: 0, y1: 0, x2: vramWidth, y2: vramHeight)
+
+  if interlace:
     if screen.verticalRes == ResDouble and
       screen.verticalInterlace and
       not drawing.drawToDisplayArea:
       # During vblank, GPU considers itself to be rendering even lines
       result.skipLines = some(screen.frameNumber.testBit(0) and not screen.vblank)
-  else:
-      result.drawingArea = (x1: 0, y1: 0, x2: vramWidth, y2: vramHeight)
 
   result.transparency =
     if transparent: drawing.transparency
@@ -400,6 +402,22 @@ let processCommand = consumer(word):
     case cmd
     of 0x00: discard # NOP
     of 0x01: discard # Clear cache
+    of 0x02:
+      # Fill rectangle
+      let colour = Colour(value[rest]).unpack
+      var
+        coord = take.ScreenCoord
+        size = take.ScreenCoord
+      var settings = rasteriserSettings(transparent = false,
+                                        dither = false, crop = false, interlace = true)
+      # Rounding from Nocash PSX
+      let x = coord.x and 0x3f0
+      let y = coord.y and 0x1ff
+      let w = ((size.x and 0x3ff) + 0xf) and not 0xf
+      let h = size.y and 0x1ff
+
+      settings.fill x, y, w, h, colour
+
     of 0x1f:
       # Interrupt requested
       control.interruptRequested = true
@@ -472,7 +490,7 @@ let processCommand = consumer(word):
             else: Colours
 
         let settings = rasteriserSettings(transparent = transparent,
-                                          dither = true, crop = true)
+                                          dither = true, crop = true, interlace = true)
         settings.draw Triangle(vertices: vs, shadingMode: shadingMode,
                                colours: cs, texture: texture)
 
@@ -513,7 +531,7 @@ let processCommand = consumer(word):
         coord = take.ScreenCoord
         size = take.ScreenCoord
       var settings = rasteriserSettings(transparent = false,
-                                        dither = false, crop = false)
+                                        dither = false, crop = false, interlace = false)
 
       var
         arg: word = 0
