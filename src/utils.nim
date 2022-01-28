@@ -13,7 +13,7 @@ type
 
 const
   minLevels: array[Component, Level] =
-    [logCPU: lvlInfo, logMemory: lvlInfo, logEventQueue: lvlInfo,
+    [logCPU: lvlDebug, logMemory: lvlInfo, logEventQueue: lvlInfo,
      logGPU: lvlInfo, logRasteriser: lvlInfo,
      logDMA: lvlInfo, logIRQ: lvlInfo, logTimer: lvlInfo, logCDROM: lvlInfo]
 
@@ -21,9 +21,10 @@ var
   loggers: array[Component, Logger]
 
 for component in Component.low..Component.high:
+  let name = ($component)["log".len..^1]
   loggers[component] =
     newConsoleLogger(levelThreshold = minLevels[component],
-                     fmtStr = defaultFmtStr & $component & ": ",
+                     fmtStr = defaultFmtStr & name & ": ",
                      useStderr = true)
 
 template minLevel*(component: Component): Level =
@@ -32,9 +33,11 @@ template minLevel*(component: Component): Level =
 template level*(component: Component): Level =
   loggers[component].levelThreshold
 
-template `level=`*(component: var Component, level: Level) =
+template `level=`*(component: Component, level: Level) =
   assert level >= minLevels[component]
   loggers[component].levelThreshold = level
+
+logCPU.level = lvlInfo
 
 template log*(component: Component, lev: Level, args: varargs[string, `$`]) =
   when lev >= minLevels[component]:

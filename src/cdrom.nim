@@ -2,6 +2,7 @@
 
 import basics, utils, irq, eventqueue
 import std/[bitops, strformat, deques, options]
+import machine
 
 const loggerComponent = logCDROM
 
@@ -83,12 +84,13 @@ proc command*(value: uint8) =
     of 0x20:
       respond 3, [0x97, 0x08, 0x14, 0xc2]
     else:
-      debug fmt"Unknown test command {param:02x}"
+      warn fmt"Unknown test command {param:02x}"
       respond 5, []
   of 0x1a:
     # GetID
     respond 5, [0x11, 0x80]
     #respond 5, [0x08, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] # No disc
+    logCPU.level = lvlDebug
   else:
     warn fmt"Unknown command {value:02x}"
     queueInterrupt 5

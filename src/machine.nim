@@ -155,3 +155,8 @@ proc runSystem*(clocks: int64) =
   while events.now < stop:
     cpu.cpu.step
     events.fastForward(cpuClock)
+
+proc dumpRAM*(filename: string) =
+  ## Dump the contents of RAM to a file.
+
+  writeFile(filename, ram)

@@ -43,6 +43,9 @@ discard window.setGammaRamp(addr ramp[0], addr ramp[0], addr ramp[0])
 #   echo fmt"{(clocks.ticks-prevClocks.ticks).float/1000000000}s to simulate one second"
 #   prevClocks = clocks
 
+events.every(proc: int64 = clockRate, "dump ram") do():
+  dumpRAM("ram")
+
 while runGame:
   while pollEvent(evt):
     if evt.kind == QuitEvent:

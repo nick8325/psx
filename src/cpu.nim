@@ -508,6 +508,12 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   template absJump() =
     newPC = target.absTarget(cpu.nextPC)
 
+  template logCall() =
+    debug fmt"call from {cpu.pc:x} to {newPC:x}"
+
+  template logReturn() =
+    debug fmt"return from {cpu.pc:x} to {newPC:x}"
+
   case op
   of ADD: cpu[rd] = signedAdd(cpu[rs], cpu[rt])
   of ADDI: cpu[rt] = signedAdd(cpu[rs], imm.signExt)
@@ -618,9 +624,11 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of BLTZ: branchIf(cpu[rs].signed < 0)
   of BLTZAL: branchIf(cpu[rs].signed < 0); link()
   of J: absJump()
-  of JR: newPC = cpu[rs]
-  of JAL: absJump; link()
-  of JALR: newPC = cpu[rs]; link(rd)
+  of JR:
+    newPC = cpu[rs]
+    if rs.int == 31: logReturn()
+  of JAL: absJump; link(); logCall()
+  of JALR: newPC = cpu[rs]; link(rd); logCall()
   of SYSCALL: raise MachineError(error: SystemCall)
   of BREAK: raise MachineError(error: Breakpoint)
   of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
@@ -695,7 +703,7 @@ proc step*(cpu: var CPU) {.inline.} =
       instr = cpu.fetch
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(instr)
-    debug fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
+    trace fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
   except MachineError as error:
     cpu.handleException(error)
 
