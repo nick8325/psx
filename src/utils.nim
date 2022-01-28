@@ -15,7 +15,7 @@ const
   minLevels: array[Component, Level] =
     [logCPU: lvlDebug, logMemory: lvlInfo, logEventQueue: lvlInfo,
      logGPU: lvlInfo, logRasteriser: lvlInfo,
-     logDMA: lvlInfo, logIRQ: lvlInfo, logTimer: lvlInfo, logCDROM: lvlInfo]
+     logDMA: lvlInfo, logIRQ: lvlInfo, logTimer: lvlInfo, logCDROM: lvlTrace]
 
 var
   loggers: array[Component, Logger]

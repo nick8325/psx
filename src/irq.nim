@@ -1,7 +1,9 @@
 ## The IRQ chip.
 
-import basics, memory, cpu
+import basics, memory, cpu, utils
 import std/[bitops, setutils, strformat]
+
+const loggerComponent = logIRQ
 
 type
   IRQs* = tuple
@@ -22,7 +24,7 @@ proc set*(irqs: var IRQs, irq: range[0..10], val: bool) =
 
   # IRQs are edge-triggered
   if val and not (irq in irqs.source):
-    echo fmt"Trigger IRQ {irq}, {cpu.cpu}"
+    debug fmt"Trigger IRQ {irq}, {cpu.cpu}"
     irqs.stat.setBit int(irq)
 
   irqs.source[irq] = val

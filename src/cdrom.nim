@@ -90,7 +90,6 @@ proc command*(value: uint8) =
     # GetID
     respond 5, [0x11, 0x80]
     #respond 5, [0x08, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] # No disc
-    logCPU.level = lvlDebug
   else:
     warn fmt"Unknown command {value:02x}"
     queueInterrupt 5

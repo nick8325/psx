@@ -1,6 +1,6 @@
 ## Hooking up the PSX itself.
 
-import basics, memory, eventqueue, irq, dma, gpu, cpu, timer
+import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, utils
 from cdrom import nil
 
 var
@@ -13,7 +13,7 @@ var
 
 # Initialise expansion to -1, and read in BIOS
 for x in expansion.mitems: x = 0xff
-bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../SCPH1002.bin"), 0, 0x7ffff)
+bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../SCPH1001.bin"), 0, 0x7ffff)
 
 # Map in all the memory
 #                      region        address        writable  io
@@ -21,10 +21,10 @@ addressSpace.mapRegion(ram,          0x00000000u32, true,     false)
 addressSpace.mapRegion(ram,          0x00200000u32, true,     false)
 addressSpace.mapRegion(ram,          0x00400000u32, true,     false)
 addressSpace.mapRegion(ram,          0x00600000u32, true,     false)
-addressSpace.mapRegion(expansion,    0x1f000000u32, false,    false)
+addressSpace.mapRegion(expansion,    0x1f000000u32, false,    true)
 addressSpace.mapRegion(scratchpad,   0x1f800000u32, true,     false)
 addressSpace.mapRegion(ioPorts,      0x1f801000u32, true,     true)
-addressSpace.mapRegion(expansion,    0x1f802000u32, false,    false)
+addressSpace.mapRegion(expansion,    0x1f802000u32, false,    true)
 addressSpace.mapRegion(bios,         0x1fc00000u32, false,    false)
 # TODO: allow enabling/disabling scratchpad
 addressSpace.mapRegion(cacheControl, 0xfffe0000u32, true,     false)
@@ -128,11 +128,13 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     handleDMAInterrupt value, kind
     return true
   of 0x1f801810u32:
+    # GPU
     case kind
     of Read: value = gpuread()
     of Write: gp0(value)
     return true
   of 0x1f801814u32:
+    # GPU
     case kind
     of Read: value = gpustat()
     of Write: gp1(value)

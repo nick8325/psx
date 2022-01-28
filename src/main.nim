@@ -51,6 +51,9 @@ while runGame:
     if evt.kind == QuitEvent:
       runGame = false
       break
+    elif evt.kind == KeyDown:
+      for irq in 0..10:
+        irqs.signal(irq)
 
   # TO DO: capture 'surface' some amount of time after emu VSYNC
   # Figure out what rate to run main loop at
