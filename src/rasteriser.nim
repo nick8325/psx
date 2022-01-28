@@ -212,7 +212,7 @@ proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
   ## * Transparency
   ## * Cropping to the drawing area
   ## * Skipping the display area
-  ## Does not handle dithering yet.
+  ## * Fake dithering
 
   # TODO: speed up drawing
 
