@@ -1,6 +1,6 @@
 import sdl2, sdl2/gfx
 import machine, rasteriser, basics, eventqueue, irq, gpu
-import std/segfaults
+import std/[strformat, monotimes]
 
 discard sdl2.init(INIT_EVERYTHING)
 
@@ -37,6 +37,12 @@ var ramp: array[256, uint16]
 for i in 0..<256: ramp[i] = rampVal(i).uint16
 discard window.setGammaRamp(addr ramp[0], addr ramp[0], addr ramp[0])
 
+# var prevClocks: MonoTime = getMonoTime()
+# events.every(proc: int64 = clockRate, "rate") do():
+#   let clocks: MonoTime = getMonoTime()
+#   echo fmt"{(clocks.ticks-prevClocks.ticks).float/1000000000}s to simulate one second"
+#   prevClocks = clocks
+
 while runGame:
   while pollEvent(evt):
     if evt.kind == QuitEvent:
@@ -46,7 +52,7 @@ while runGame:
   # TO DO: capture 'surface' some amount of time after emu VSYNC
   # Figure out what rate to run main loop at
   # (maybe better with polled keyboard inputs to match hardware?)
-  runSystem(frameTime())
+  runSystem(clocksPerFrame())
   surface.blitSurface nil, window.getSurface, nil
   discard window.updateSurface()
   if fps.getFramerate != refreshRate[region].cint:

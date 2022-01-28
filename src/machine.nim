@@ -78,7 +78,8 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     return true
   of 0x1f801100..0x1f801128:
     # Timers
-    let n = (address div 16) mod 16
+    let n = ((address div 16) mod 16).int
+    if n < timers.low or n > timers.high: return false
     case address mod 16
     of 0:
       case kind
@@ -150,7 +151,7 @@ dma.channels[2].write = gpuWriteDMA
 proc runSystem*(clocks: int64) =
   ## Run the system.
 
-  let stop = events.time + clocks
-  while events.time < stop:
+  let stop = events.now + clocks
+  while events.now < stop:
     cpu.cpu.step
     events.fastForward(cpuClock)

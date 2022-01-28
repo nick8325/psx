@@ -37,7 +37,7 @@ type
 
 type
   Region* {.pure.} = enum
-    ## These numbers match GPUSTAT.20.
+    ## These numbers must match GPUSTAT.20.
     NTSC = 0,
     PAL = 1
 

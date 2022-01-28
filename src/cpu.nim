@@ -683,6 +683,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
   cpu.pc = if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32
   cpu.nextPC = cpu.pc + 4
 
+# TODO: this violates aliasing rules - irq.nim modifies the global CPU.
 proc step*(cpu: var CPU) {.inline.} =
   try:
     # Check for IRQs first.

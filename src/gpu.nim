@@ -6,15 +6,15 @@ import std/[bitops, strformat, deques, options]
 const loggerComponent = logGPU
 
 type
-  HorizontalRes {.pure.} = enum
-    Res256 = 0,
-    Res320 = 1,
-    Res512 = 2,
-    Res640 = 3,
-    Res368 = 4
+  DotclockMultiplier {.pure.} = enum
+    Dot10 = 0,
+    Dot8 = 1,
+    Dot5 = 2,
+    Dot4 = 3,
+    Dot7 = 4
   VerticalRes {.pure.} = enum
-    Res240 = 0,
-    Res480 = 1
+    ResNormal = 0,
+    ResDouble = 1
   ColourDepth {.pure.} = enum
     Depth15 = 0,
     Depth24 = 1
@@ -34,19 +34,6 @@ type
   PackedSignedCoord = distinct word
   Palette = distinct uint16
   TexCoord = distinct uint16
-
-func width(res: HorizontalRes): int =
-  case res
-  of Res256: 256
-  of Res320: 320
-  of Res512: 512
-  of Res640: 640
-  of Res368: 368
-
-func height(res: VerticalRes): int =
-  case res
-  of Res240: 240
-  of Res480: 480
 
 Vertex.bitfield x, int, 0, 11, signed=true
 Vertex.bitfield y, int, 16, 11, signed=true
@@ -155,15 +142,16 @@ type
   ScreenSettings = object
     displayAreaStart: PackedScreenCoord # GP1(05h)
     displayAreaDepth: ColourDepth    # GPUSTAT 21
-    horizontalRes: HorizontalRes   # GPUSTAT 16-18
+    dotclockMultiplier: DotclockMultiplier   # GPUSTAT 16-18
     verticalRes: VerticalRes       # GPUSTAT 19
     verticalInterlace: bool        # GPUSTAT 22
     enabled: bool                  # GPUSTAT 23
-    # TODO see p129 of LIBOVR46
-    oddLine: bool                  # GPUSTAT 31
-    # In GPU clocks, not in pixels!
+    frameNumber: int               # Number of frames drawn since boot
+    # (in interlaced mode, both even and odd frames count as 1)
+    vblank: bool                   # Currently in vblank interval?
+    # In GPU clocks
     horizontalRange: tuple[start: int, stop: int]
-    # Scanline numbers relative to VSYNC
+    # In scanlines - need to double in interlaced mode
     verticalRange: tuple[start: int, stop: int]
 
   ControlSettings = object
@@ -174,19 +162,150 @@ type
 var
   textures = TextureSettings(enabled: true)
   drawing = DrawingSettings()
-  screen = ScreenSettings()
+  screen = ScreenSettings(vblank: true)
   control = ControlSettings()
+
+# Screen settings, including dot-clocks and other such analogue stuff
+
+const
+  scanlinesPerFrame: array[Region, int64] =
+    [NTSC: 263i64, PAL: 314]
+  gpuClocksPerScanline: array[Region, int64] =
+    [NTSC: 3413i64, PAL: 3406]
+  gpuClocksPerDotClock: array[DotclockMultiplier, int64] =
+    [Dot10: 10i64, Dot8: 8, Dot5: 5, Dot4: 4, Dot7: 7]
+
+var
+  lastVBlankStart: int64 = 0
+
+proc clocksPerPixel*: int64 {.inline.} =
+  ## Clock cycles per pixel drawn.
+
+  gpuClock * gpuClocksPerDotClock[screen.dotclockMultiplier]
+  # TODO: support 480p mode?
+  # (PSX hardware supports it if connected to VGA monitor)
+
+proc clocksPerScanline*: int64 {.inline.} =
+  ## Clock cycles per scanline.
+
+  gpuClock * gpuClocksPerScanline[region]
+
+proc clocksPerFrame*: int64 {.inline.} =
+  ## Clock cycles per screen refresh.
+
+  clocksPerScanline() * scanlinesPerFrame[region]
+
+proc maxScreenWidth: int64 =
+  ## Maximum permissible screen width.
+
+  gpuClocksPerScanline[region] div gpuClocksPerDotClock[screen.dotClockMultiplier]
+
+proc screenWidth*: int =
+  ## Width of screen in pixels.
+
+  # Info comes from Nocash PSX
+  let clocks = screen.horizontalRange.stop - screen.horizontalRange.start
+  result = clocks div gpuClocksPerDotClock[screen.dotClockMultiplier].int
+  result = (result + 2) and not 3
+  result = clamp(result, 0, maxScreenWidth().int)
+
+proc visibleScanlines*: int =
+  ## Number of scanlines drawn per frame.
+  ## In interlaced mode, this is half the screen height.
+
+  clamp(screen.verticalRange.stop - screen.verticalRange.start + 1,
+        0, scanlinesPerFrame[region].int)
+
+proc screenHeight*: int =
+  ## Height of screen in pixels.
+
+  visibleScanlines() * (if screen.verticalInterlace: 2 else: 1)
+
+# TODO: measure HBLANK/VBLANK timings on a real console
+
+proc hblankClocks*: int64 {.inline.} =
+  ## Clock cycles taken by one hblank.
+
+  clocksPerPixel() * (maxScreenWidth() - screenWidth())
+
+proc vblankClocks*: int64 {.inline.} =
+  ## Clock cycles taken by one vblank.
+
+  clocksPerScanline() * (scanlinesPerFrame[region] - visibleScanlines())
+
+proc lastVBlankDelta*(): int64 {.inline.} =
+  ## Number of clock cycles since the last VBLANK started.
+
+  result = events.now() - lastVBlankStart
+  assert result >= 0 and result < clocksPerFrame()
+
+proc nextVBlankDelta*(): int64 {.inline.} =
+  ## Number of clock cycles until the next VBLANK starts.
+
+  result = clocksPerFrame() - lastVBlankDelta()
+  assert result > 0 and result <= clocksPerFrame()
+
+proc lastHBlankDelta*(): int64 {.inline.} =
+  ## Number of clock cycles since the last HBLANK started.
+
+  # "The hblank signal is generated even during vertical blanking/retrace."
+  result = lastVBlankDelta() mod clocksPerScanline()
+  assert result >= 0 and result < clocksPerScanline()
+
+proc nextHBlankDelta*(): int64 {.inline.} =
+  ## Number of clock cycles until the next HBLANK starts.
+
+  result = clocksPerScanline() - lastHBlankDelta()
+  assert result > 0 and result <= clocksPerScanline()
+
+proc currentScanline*(): int64 {.inline.} =
+  ## The current scanline number being drawn.
+
+  result = lastVBlankDelta() div clocksPerScanline()
+  assert result >= 0 and result < scanlinesPerFrame[region]
+
+proc screenSettings*(): string =
+  ## Dump the screen settings.
+
+  result = fmt"{screenWidth()}x{screenHeight()}"
+  if screen.verticalInterlace: result &= " interlaced"
+  result &= fmt", hblank time {hblankClocks()}"
+  result &= fmt", vblank time {vblankClocks()}"
+  result &= fmt", current scanline {currentScanline()}"
+
+proc onHBlank*(name: string, p: proc()) =
+  events.every(proc(): int64 = nextHBlankDelta(), name, p)
+
+proc afterHBlank*(name: string, p: proc()) =
+  events.every(proc(): int64 = nextHBlankDelta() + hblankClocks(), name, p)
+
+proc onVBlank*(name: string, p: proc()) =
+  events.every(proc(): int64 = nextVBlankDelta(), name, p)
+
+proc afterVBlank*(name: string, p: proc()) =
+  events.every(proc(): int64 = nextVBlankDelta() + vblankClocks(), name, p)
+
+# VBLANK IRQ
+onVBlank("gpu vblank") do ():
+  debug "VBLANK"
+  lastVBlankStart = events.now()
+  screen.frameNumber += 1
+  screen.vblank = true
+  irqs.signal 0
+
+  # PSX supports 480p if hooked up to a VGA monitor, but we don't
+  if screen.verticalRes == ResDouble and not screen.verticalInterlace:
+    warn "480p mode not supported"
+
+afterVBlank("gpu end vblank") do ():
+  debug "END VBLANK"
+  screen.vblank = false
 
 proc displayArea: Rect =
   result.x1 = screen.displayAreaStart.x
   result.x2 = screen.displayAreaStart.y
-  let
-    # TODO: calculate width/height using horizontalRange/verticalRange?
-    # horizontalRes and verticalRes supposedly encode dotclock speed
-    width = screen.horizontalRes.width
-    height = screen.verticalRes.height
-  result.x2 = result.x1 + width
-  result.y2 = result.y1 + height
+  result.x2 = result.x1 + screenWidth()
+  result.y2 = result.y1 + screenHeight()
 
 proc rasteriserSettings(transparent: bool, dither: bool, crop: bool): rasteriser.Settings =
   if crop:
@@ -196,10 +315,11 @@ proc rasteriserSettings(transparent: bool, dither: bool, crop: bool): rasteriser
        x2: drawing.drawingAreaBottomRight.x+1,
        y2: drawing.drawingAreaBottomRight.y+1)
 
-    if screen.verticalRes == Res480 and
+    if screen.verticalRes == ResDouble and
       screen.verticalInterlace and
       not drawing.drawToDisplayArea:
-      result.skipLines = some(screen.oddLine)
+      # During vblank, GPU considers itself to be rendering even lines
+      result.skipLines = some(screen.frameNumber.testBit(0) and not screen.vblank)
   else:
       result.drawingArea = (x1: 0, y1: 0, x2: vramWidth, y2: vramHeight)
 
@@ -210,6 +330,8 @@ proc rasteriserSettings(transparent: bool, dither: bool, crop: bool): rasteriser
   result.dither = dither and drawing.dither
   result.setMaskBit = drawing.setMaskBit
   result.skipMaskedPixels = drawing.skipMaskedPixels
+
+# I/O interface
 
 var
   resultQueue = initDeque[word]()
@@ -232,12 +354,17 @@ let
   word1 = BitSlice[int, word](pos: 16, width: 16)
   word2 = BitSlice[int, word](pos: 0, width: 16)
 
+# TODO: Measure on a real console how GPUSTAT changes throughout the frame
+
 proc gpustat*: word =
   let bit25 =
     case control.dmaDirection
     of DMADirection.Write: readyToReceiveDMA()
     of DMADirection.Read: readyToSendVRAM()
     else: false
+  let bit31 =
+    if screen.verticalInterlace: currentScanline().testBit(0)
+    else: not screen.vblank and screen.frameNumber.testBit(0)
   result =
     word(textures.base.x64) or
     word(textures.base.y256) shl 4 or
@@ -247,11 +374,11 @@ proc gpustat*: word =
     word(drawing.drawToDisplayArea) shl 10 or
     word(drawing.setMaskBit) shl 11 or
     word(drawing.skipMaskedPixels) shl 12 or
-    word(not screen.verticalInterlace) shl 13 or # TODO: is this right?
+    word(not screen.verticalInterlace or not screen.frameNumber.testBit(0)) shl 13 or
     # Don't bother with GPUSTAT 14 (reverseflag)
     word(not textures.enabled) shl 15 or
-    word(screen.horizontalRes == Res368) shl 16 or
-    (if screen.horizontalRes == Res368: 0u32 else: word(screen.horizontalRes)) shl 17 or
+    word(screen.dotclockMultiplier == Dot7) shl 16 or
+    (if screen.dotclockMultiplier == Dot7: 0u32 else: word(screen.dotclockMultiplier)) shl 17 or
     word(screen.verticalRes) shl 19 or
     word(region) shl 20 or
     word(screen.displayAreaDepth) shl 21 or
@@ -263,7 +390,7 @@ proc gpustat*: word =
     word(readyToSendVRAM()) shl 27 or
     word(readyToReceiveDMA()) shl 28 or
     word(control.dmaDirection) shl 29 or
-    word(screen.oddLine) shl 31
+    word(bit31) shl 31
   trace fmt"GPUSTAT returned {result:08x}"
 
 let processCommand = consumer(word):
@@ -433,6 +560,7 @@ proc gp1*(value: word) =
   case value[command] and 0x3f
   of 0x00:
     # Reset
+    iter = processCommand.start
     let cmds = [0x01_000000u32, 0x02_000000u32, 0x03_000001u32, 0x04_000000u32,
                 0x05_000000u32, 0x06_c00_200u32, 0x07_100_010u32, 0x08000001u32]
     for cmd in cmds:
@@ -457,14 +585,14 @@ proc gp1*(value: word) =
     screen.displayAreaStart = value[rest].PackedScreenCoord
   of 0x06:
     # Horizontal display range
-    screen.horizontalRange = (start: value[half1], stop: value[half2])
+    screen.horizontalRange = (start: value[half2], stop: value[half1])
   of 0x07:
     # Vertical display range
-    screen.verticalRange = (start: value[half1], stop: value[half2])
+    screen.verticalRange = (start: value.PackedCoord.x, stop: value.PackedCoord.y)
   of 0x08:
     # Display mode
-    screen.horizontalRes =
-      if value.testBit 6: Res368 else: HorizontalRes(value and 3)
+    screen.dotclockMultiplier =
+      if value.testBit 6: Dot7 else: DotclockMultiplier(value and 3)
     screen.verticalRes = VerticalRes(value.testBit 2)
     region = Region(value.testBit 3)
     screen.displayAreaDepth = ColourDepth(value.testBit 4)
@@ -505,57 +633,3 @@ proc gpuReadDMA*: word =
   of DMADirection.Read: result = gpuread()
   else: warn "GPU DMA read while direction is {control.dmaDirection}"
 
-# Dot-clock/HBLANK/VBLANK
-
-const
-  scanlinesPerFrame*: array[Region, int64] =
-    [NTSC: 263i64, PAL: 314]
-  gpuClocksPerScanline*: array[Region, int64] =
-    [NTSC: 3413i64, PAL: 3406]
-  gpuClocksPerDotClock*: array[HorizontalRes, int64] =
-    [Res256: 10i64, Res320: 8, Res512: 5, Res640: 4, Res368: 7]
-
-proc dotClockTime*: int64 =
-  gpuClock * gpuClocksPerDotClock[screen.horizontalRes]
-
-proc scanlineTime*: int64 =
-  gpuClock * gpuClocksPerScanline[region]
-
-proc frameTime*: int64 =
-  scanlineTime() * scanlinesPerFrame[region]
-
-proc hblankTime*: int64 =
-  scanlineTime() - dotClockTime() * screen.horizontalRes.width.int64
-
-proc vblankTime*: int64 =
-  frameTime() - scanlineTime() * screen.verticalRes.height.int64
-
-var onHBlankHandlers, afterHBlankHandlers, onVBlankHandlers, afterVBlankHandlers: seq[proc()]
-
-proc onHBlank*(p: proc()) = onHBlankHandlers.add p
-proc afterHBlank*(p: proc()) = afterHBlankHandlers.add p
-proc onVBlank*(p: proc()) = onVBlankHandlers.add p
-proc afterVBlank*(p: proc()) = afterVBlankHandlers.add p
-
-proc hblankTask =
-  events.after(scanlineTime()) do ():
-    for handler in onHBlankHandlers: handler()
-    events.after(hblankTime()) do ():
-      for handler in afterHBlankHandlers: handler()
-    hblankTask()
-
-proc vblankTask =
-  events.after(frameTime()) do ():
-    for handler in onVBlankHandlers: handler()
-    events.after(vblankTime()) do ():
-      for handler in afterVBlankHandlers: handler()
-    vblankTask()
-
-hblankTask()
-vblankTask()
-
-# VBLANK IRQ
-onVBlank do ():
-  debug "VBLANK"
-  screen.oddLine = not screen.oddLine
-  irqs.signal 0

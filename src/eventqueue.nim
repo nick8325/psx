@@ -1,24 +1,29 @@
 ## A queue of events to be run according to a schedule.
 
-import std/heapqueue
+import std/[heapqueue, strformat]
+import utils
+
+const loggerComponent = logEventQueue
 
 type
-  Event = tuple[time: int64, repeat: int64, action: proc ()]
-  EventQueue* {.requiresInit.} = ref object
+  Event = tuple[name: string, time: int64, id: int64, repeat: proc(): int64, action: proc ()]
+  EventQueueObj {.requiresInit.} = object
     ## A queue of events.
     now: int64
+    id: int64
     minDelta: int64
     heap: HeapQueue[Event]
+  EventQueue* = ref EventQueueObj
 
 func `<`(x, y: Event): bool =
-  x.time < y.time
+  cmp((x.time, x.id), (y.time, y.id)) < 0
 
 func initEventQueue*: EventQueue =
   ## Return an empty event queue.
 
-  EventQueue(now: 0, minDelta: int64.high, heap: initHeapQueue[Event]())
+  EventQueue(now: 0, id: 0, minDelta: int64.high, heap: initHeapQueue[Event]())
 
-func time*(queue: EventQueue): int64 {.inline.} =
+func now*(queue: EventQueue): int64 {.inline.} =
   ## How many timesteps have passed until now?
 
   queue.now
@@ -36,27 +41,40 @@ proc updateMinDelta(queue: var EventQueue) =
   else:
     queue.minDelta = int64.high
 
-proc at*(queue: var EventQueue, time: int64, action: proc ()) =
+proc at*(queue: var EventQueue, time: int64, name: string, action: proc ()) =
   ## Execute an event at a given time.
   ## The time can be in the past in which case the event happens now.
 
-  if time < 0:
+  if time < queue.now:
+    warn fmt"event '{name}' scheduled in past (delta={time-queue.now})"
+
+  if time <= 0:
     action()
   else:
-    queue.heap.push((time: time, repeat: int64.high, action: action))
+    let id = queue.id
+    queue.id += 1
+    queue.heap.push((name: name, time: time, id: id, repeat: nil, action: action))
     queue.updateMinDelta
 
-proc after*(queue: var EventQueue, delta: int64, action: proc ()) =
+proc after*(queue: var EventQueue, delta: int64, name: string, action: proc ()) =
   ## Execute an event 'delta' timesteps in the future.
   ## 'delta' can be negative in which case the event happens now.
 
-  queue.at(queue.now + delta, action)
+  queue.at(queue.now + delta, name, action)
 
-proc every*(queue: var EventQueue, delta: int64, action: proc ()) =
+proc get(delta: proc(): int64, name: string): int64 {.inline.} =
+  result = delta()
+  if result <= 0:
+    warn fmt"repeating event '{name}' scheduled in past or now (delta={result})"
+    result = 1
+
+proc every*(queue: var EventQueue, delta: proc(): int64, name: string, action: proc ()) =
   ## Execute an event every 'delta' timesteps from now on.
 
-  assert delta >= 0
-  queue.heap.push((time: queue.now + delta, repeat: delta, action: action))
+  let id = queue.id
+  queue.id += 1
+  let nowdelta = delta.get(name)
+  queue.heap.push((name: name, time: queue.now + nowdelta, id: id, repeat: delta, action: action))
   queue.updateMinDelta
 
 proc runNext(queue: var EventQueue) =
@@ -66,8 +84,9 @@ proc runNext(queue: var EventQueue) =
     var event = queue.heap.pop()
     queue.updateMinDelta
     event.action()
-    if event.repeat != int64.high:
-      event.time += event.repeat
+    if event.repeat != nil:
+      let delta = event.repeat.get(event.name)
+      event.time += delta
       queue.heap.push event
       queue.updateMinDelta
 
@@ -75,11 +94,16 @@ proc fastForward*(queue: var EventQueue, delta: int64) {.inline.} =
   ## Skip forward 'delta' timesteps.
   ## Run any events that happen in the meantime.
 
-  queue.now += delta
-  queue.minDelta -= delta
+  var remaining = delta
 
-  while queue.minDelta < 0:
+  while unlikely(queue.minDelta <= remaining):
+    queue.now += queue.minDelta
+    remaining -= queue.minDelta
+    queue.minDelta = 0
     queue.runNext()
+
+  queue.now += remaining
+  queue.minDelta -= remaining
 
 var
   events*: EventQueue = initEventQueue() ## The queue of events to happen.

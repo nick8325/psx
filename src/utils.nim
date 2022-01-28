@@ -8,11 +8,13 @@ const
 
 type
   Component* = enum
-    logCPU, logMemory, logGPU, logRasteriser, logDMA, logIRQ, logTimer, logCDROM
+    logCPU, logMemory, logEventQueue, logGPU, logRasteriser,
+    logDMA, logIRQ, logTimer, logCDROM
 
 const
   minLevels: array[Component, Level] =
-    [logCPU: lvlInfo, logMemory: lvlInfo, logGPU: lvlInfo, logRasteriser: lvlInfo,
+    [logCPU: lvlInfo, logMemory: lvlInfo, logEventQueue: lvlInfo,
+     logGPU: lvlInfo, logRasteriser: lvlInfo,
      logDMA: lvlInfo, logIRQ: lvlInfo, logTimer: lvlInfo, logCDROM: lvlInfo]
 
 var
@@ -116,9 +118,6 @@ func unsign[T, U](slice: SignedBitSlice[T, U]): BitSlice[T, U] {.inline.} =
 func `[]`*[T, U](value: U, slice: SignedBitSlice[T, U]): T {.inline.} =
   value[slice.unsign].signExtendFrom(slice.width)
 
-func `.`*[T, U](value: U, slice: SignedBitSlice[T, U]): T {.inline.} =
-  value[slice]
-
 func toSlice*[T, U](slice: SignedBitSlice[T, U]): Slice[int] {.inline.} =
   slice.unsign.toSlice
 
@@ -127,9 +126,6 @@ func toMask*[T, U](slice: SignedBitSlice[T, U]): U {.inline.} =
 
 proc `[]=`*[T, U](value: var U, slice: SignedBitSlice[T, U], part: T) {.inline.} =
   value[slice.unsign] = part
-
-proc `.=`*[T, U](value: var U, slice: SignedBitSlice[T, U], part: T) {.inline.} =
-  value[slice] = part
 
 type
   ## A pattern that matches a given part of a word against a given value
@@ -225,3 +221,6 @@ func signum*[T](x: T): T =
   if x > 0: return 1
   elif x < 0: return -1
   else: return 0
+
+func divRoundUp*[T](x, y: T): T =
+  if x == 0: 0 else: (x-1) div y + 1
