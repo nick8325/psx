@@ -39,7 +39,7 @@ proc interruptPending: bool =
   return false
 
 proc checkInterrupts =
-  echo fmt"{interrupts} {commandStart} {enabledInterrupts:08x} {smen}"
+  debug fmt"{interrupts} {commandStart} {enabledInterrupts:08x} {smen}"
   irqs.set(2, interruptPending())
 
 proc queueInterrupt(interrupt: range[0..5]) =
@@ -102,7 +102,7 @@ proc readStatus*: uint8 =
     (uint8(response.len != 0) shl 5) or
     (uint8(data.len != 0) shl 6)
     # TODO: need to set busy bit?
-  echo fmt "read status {result:08x}"
+  debug fmt "read status {result:08x}"
 
 proc writeStatus*(value: uint8) =
   index = value and 3
@@ -111,7 +111,7 @@ proc readRegister*(address: 1..3): uint8 =
   case address
   of 1:
     # Response FIFO
-    echo fmt"read response {response}"
+    debug fmt"read response {response}"
     discard readFIFO(response, result)
   of 2:
     # Data FIFO
