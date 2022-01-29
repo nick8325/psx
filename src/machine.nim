@@ -67,6 +67,21 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
       return true
     else:
       return false
+  of 0x1f802080:
+    # PCSX-Redux MIPS API
+    if kind == Write:
+      stdout.write(value.char)
+      stdout.flushFile
+      return true
+    else:
+      return false
+  of 0x1f802081:
+    # PCSX-Redux MIPS API
+    if kind == Write:
+      warn "Debug break"
+      return true
+    else:
+      return false
   else:
     return false
 
@@ -75,6 +90,10 @@ proc handleIO16(address: word, value: var uint16, kind: IOKind): bool =
     # CD-ROM DATA FIFO
     value = cdrom.readData16()
     return true
+  elif address == 0x1f802082 and kind == Write:
+    # PCSX-Redux MIPS API
+    fatal fmt"Exit requested with code {value}"
+    quit 1
 
   return false
 
@@ -149,6 +168,26 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     of Read: value = gpustat()
     of Write: gp1(value)
     return true
+  of 0x1f802080:
+    # PCSX-Redux MIPS API
+    if kind == Read:
+      value = 0x58534350
+      return true
+    else:
+      return false
+  of 0x1f802084:
+    # PCSX-Redux MIPS API
+    if kind == Write:
+      var msg: string
+      var address = value
+      var c: uint8 = addressSpace.rawRead[:uint8](address)
+      while c != 0:
+        msg &= c.char
+        address += 1
+        c = addressSpace.rawRead[:uint8](address)
+      return true
+    else:
+      return false
   else:
     return false
 
