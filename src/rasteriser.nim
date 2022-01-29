@@ -71,8 +71,8 @@ type
 
   Line* = object
     ## A straight line.
-    start*: tuple[x: int, y: int, colour: Colour]
-    stop*: tuple[x: int, y: int, colour: Colour]
+    start*: tuple[point: Point, colour: Colour]
+    stop*: tuple[point: Point, colour: Colour]
 
   Settings* = object
     ## Drawing settings common to all primitives.
@@ -524,3 +524,8 @@ proc fill*(settings: Settings; x, y, w, h: int; c: Colour) =
   for j in y..<y+h:
     for i in x..<x+h:
       putPixel(i, j, c, settings)
+
+proc draw*(settings: Settings, line: Line) =
+  ## Draw a line.
+
+  debug fmt"draw {line}"

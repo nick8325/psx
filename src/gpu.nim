@@ -494,6 +494,61 @@ let processCommand = consumer(word):
         settings.draw Triangle(vertices: vs, shadingMode: shadingMode,
                                colours: cs, texture: texture)
 
+    of 0x40..0x5f:
+      # A straight line or polyline.
+      # The bits of the command word have the following meaning:
+      # * bit 1: enable transparency (using global transparency settings)
+      # * bit 3: if 0, draw a line; if 1, draw a polyline
+      # * bit 4: polygon is shaded
+      #
+      # The parameters come in the following order, where (0) is the command word:
+      # (0) command+colour (1) vertex (2) optional colour (3) vertex etc.
+      # Polylines end in a 0x5xxx5xxx (TODO: check)
+
+      let
+        transparent = cmd.testBit 1
+        polyline = cmd.testBit 3
+        shaded = cmd.testBit 4
+
+      var
+        vertices: seq[Point]
+        colours: seq[rasteriser.Colour]
+
+      template addColour(arg: word) =
+        colours.add Colour(arg).unpack
+      template addVertex(arg: word) =
+        vertices.add(Vertex(arg).unpack + drawing.drawingAreaOffset.unpack)
+
+      addColour value[rest].word
+      addVertex take()
+
+      if polyline:
+        while true:
+          let arg = take()
+          if (arg and 0x50005000u32) == 0x50005000u32: break
+          if shaded:
+            addColour(arg)
+            addVertex(take())
+          else:
+            colours.add colours[0]
+            addVertex(arg)
+
+      else:
+        if shaded:
+          addColour(take())
+        else:
+          colours.add colours[0]
+        addVertex(take())
+
+      let settings = rasteriserSettings(transparent = transparent,
+                                        dither = true, crop = true, interlace = true)
+
+      for i in 0..vertices.len-2:
+        # Draw a line from vertices[i] to vertices[i+1]
+        let line = Line(start: (point: vertices[i], colour: colours[i]),
+                        stop: (point: vertices[i+1], colour: colours[i+1]))
+        settings.draw line
+
     of 0xe1:
       # Texpage
       let page = value[rest].TexPage
