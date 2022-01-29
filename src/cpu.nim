@@ -683,7 +683,10 @@ func exceptionCode(error: MachineError): int =
 proc handleException(cpu: var CPU, error: MachineError) =
   ## Handle an exception, by jumping to the exception vector etc.
 
-  info fmt"{error.error} interrupt: {cpu}"
+  if error.error.isError:
+    info fmt"{error.error} interrupt: {cpu}"
+  else:
+    debug fmt"{error.error} interrupt: {cpu}"
 
   var branchDelay: bool = false
 
