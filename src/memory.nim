@@ -153,13 +153,22 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
   template auto32(address: word): bool =
     nativeOrSplit32(address)
 
+  # Calculate KUSEG form of address
+  let physicalAddress =
+    if address >= 0xa0000000u32 and address < 0xc0000000u32:
+      address - 0xa0000000u32
+    elif address >= 0x80000000u32 and address < 0xa0000000u32:
+      address - 0x80000000u32
+    else:
+      address
+
   # Handle a native-sized or "too small" I/O, splitting it up as needed
   let handled =
     case T.sizeof
     # Try the native size first, then try splitting, then try a bigger size
-    of 1: auto8(address)
-    of 2: auto16(address)
-    of 4: auto32(address)
+    of 1: auto8(physicalAddress)
+    of 2: auto16(physicalAddress)
+    of 4: auto32(physicalAddress)
     else: raise new AssertionDefect
 
   if not handled:
