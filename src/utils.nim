@@ -9,7 +9,7 @@ const
 type
   Component* = enum
     logCPU, logMemory, logEventQueue, logGPU, logRasteriser,
-    logDMA, logIRQ, logTimer, logCDROM
+    logDMA, logIRQ, logTimer, logCDROM, logMachine
 
 func initialLevel(component: Component): Level {.inline.} =
   case component

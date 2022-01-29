@@ -2,6 +2,9 @@
 
 import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, utils
 from cdrom import nil
+import std/strformat
+
+const loggerComponent = logMachine
 
 var
   bios {.align: 4096.}: array[0x80000, byte]
@@ -21,10 +24,10 @@ addressSpace.mapRegion(ram,          0x00000000u32, true,     false)
 addressSpace.mapRegion(ram,          0x00200000u32, true,     false)
 addressSpace.mapRegion(ram,          0x00400000u32, true,     false)
 addressSpace.mapRegion(ram,          0x00600000u32, true,     false)
-addressSpace.mapRegion(expansion,    0x1f000000u32, false,    true)
+addressSpace.mapRegion(expansion,    0x1f000000u32, true,     true)
 addressSpace.mapRegion(scratchpad,   0x1f800000u32, true,     false)
 addressSpace.mapRegion(ioPorts,      0x1f801000u32, true,     true)
-addressSpace.mapRegion(expansion,    0x1f802000u32, false,    true)
+addressSpace.mapRegion(expansion,    0x1f802000u32, true,     true)
 addressSpace.mapRegion(bios,         0x1fc00000u32, false,    false)
 # TODO: allow enabling/disabling scratchpad
 addressSpace.mapRegion(cacheControl, 0xfffe0000u32, true,     false)
@@ -57,6 +60,13 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
     of Read: value = cdrom.readRegister(address mod 4)
     of Write: cdrom.writeRegister(address mod 4, value)
     return true
+  of 0x1f802041:
+    # 7-segment display
+    if kind == Write:
+      debug fmt "POST {value}"
+      return true
+    else:
+      return false
   else:
     return false
 
