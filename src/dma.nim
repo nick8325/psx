@@ -35,9 +35,9 @@ type
 
 proc initChannel(n: ChannelNumber): Channel =
   result.read = proc(): word =
-    warn "Read from unknown DMA channel {n}"
+    warn fmt"Read from unknown DMA channel {n}"
   result.write = proc(value: word) =
-    warn "Write {value:x} to unknown DMA channel {n}"
+    warn fmt"Write {value:x} to unknown DMA channel {n}"
 
 var
   channels*: array[ChannelNumber, Channel]

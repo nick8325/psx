@@ -432,10 +432,13 @@ proc format*(instr: word): string =
   of None: $op
 
 proc `$`*(cpu: CPU): string =
+  let instruction =
+    try: fmt"{cpu.fetch:x}"
+    except MachineError: "(invalid PC)"
   let instructionStr =
     try: cpu.fetch.format
-    except MachineError: "(invalid PC)"
-  result = fmt "{instructionStr}: PC={cpu.pc:x} "
+    except MachineError: "(unknown opcode)"
+  result = fmt "{instruction} {instructionStr}: PC={cpu.pc:x} "
   for i, x in cpu.registers:
     result &= fmt "{i}={x:x} "
   result &= fmt "COP0.SR={cpu.cop0.sr:x}"

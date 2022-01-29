@@ -490,7 +490,7 @@ let processCommand = consumer(word):
             else: Colours
 
         let settings = rasteriserSettings(transparent = transparent,
-                                          dither = true, crop = true, interlace = true)
+                                          dither = shaded, crop = true, interlace = true)
         settings.draw Triangle(vertices: vs, shadingMode: shadingMode,
                                colours: cs, texture: texture)
 
