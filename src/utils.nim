@@ -11,11 +11,17 @@ type
     logCPU, logMemory, logEventQueue, logGPU, logRasteriser,
     logDMA, logIRQ, logTimer, logCDROM
 
-const
-  minLevels: array[Component, Level] =
-    [logCPU: lvlDebug, logMemory: lvlInfo, logEventQueue: lvlInfo,
-     logGPU: lvlInfo, logRasteriser: lvlInfo,
-     logDMA: lvlInfo, logIRQ: lvlInfo, logTimer: lvlInfo, logCDROM: lvlTrace]
+func initialLevel(component: Component): Level {.inline.} =
+  case component
+  of logMachine: lvlDebug
+  else: lvlInfo
+
+func minLevel*(component: Component): Level {.inline.} =
+  result =
+    case component
+    of logCPU: lvlDebug
+    else: lvlInfo
+  result = result.min(component.initialLevel)
 
 var
   loggers: array[Component, Logger]
@@ -23,24 +29,19 @@ var
 for component in Component.low..Component.high:
   let name = ($component)["log".len..^1]
   loggers[component] =
-    newConsoleLogger(levelThreshold = minLevels[component],
+    newConsoleLogger(levelThreshold = component.initialLevel,
                      fmtStr = defaultFmtStr & name & ": ",
                      useStderr = true)
-
-template minLevel*(component: Component): Level =
-  minLevels[component]
 
 template level*(component: Component): Level =
   loggers[component].levelThreshold
 
 template `level=`*(component: Component, level: Level) =
-  assert level >= minLevels[component]
+  assert level >= component.minLevel
   loggers[component].levelThreshold = level
 
-logCPU.level = lvlInfo
-
 template log*(component: Component, lev: Level, args: varargs[string, `$`]) =
-  when lev >= minLevels[component]:
+  when lev >= component.minLevel:
     if lev >= component.level:
       loggers[component].log(lev, args)
 template trace* (args: varargs[string, `$`]) =
