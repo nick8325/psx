@@ -53,7 +53,7 @@ TimerMode.bitfield irqAtMax, bool, 5, 1
 TimerMode.bitfield repeat, bool, 6, 1
 TimerMode.bitfield toggleIRQ, bool, 7, 1
 TimerMode.bitfield clockSourceBits, int, 8, 2
-TimerMode.bitfield noIRQ, bool, 10, 1
+TimerMode.bitfield irq, bool, 10, 1
 TimerMode.bitfield reachedTarget, bool, 11, 1
 TimerMode.bitfield reachedMax, bool, 12, 1
 
@@ -62,7 +62,7 @@ var
 
 for i in TimerId.low..TimerId.high:
   timers[i].id = i
-  timers[i].mode.noIRQ = true
+  timers[i].mode.irq = true
 timers[1].mode.clockSourceBits = 1
 
 type
@@ -253,21 +253,25 @@ proc nextTime(id: TimerId): int64 =
   timer.advance(events.now() + nextVBlankDelta())
   timer.time
 
+proc setIRQ(id: TimerID, irq: bool) =
+  ## Set the IRQ field for the given timer.
+
+  timers[id].mode.irq = irq
+  irqs.set(id + 4, irq)
+
 proc triggerIRQ(id: TimerId) =
   ## Trigger an IRQ for the given timer.
 
-  debug fmt"trigger IRQ timer {id}"
+  debug fmt"Trigger IRQ timer {id}"
 
   timers[id].irqTriggered = true
   timers[id].irqTriggeredNow = true
 
   if timers[id].mode.toggleIRQ:
-    irqs.set(id + 4, false)
-    irqs.set(id + 4, true)
-    timers[id].mode.noIRQ = true
+    setIRQ(id, false)
+    setIRQ(id, true)
   else:
-    timers[id].mode.noIRQ = not timers[id].mode.noIRQ
-    irqs.set(id + 4, timers[id].mode.noIRQ)
+    setIRQ(id, not timers[id].mode.irq)
 
 proc catchUp(id: TimerId) =
   ## Update the timer state to what it should be now.
@@ -298,7 +302,7 @@ proc schedule(id: TimerId) =
 proc setMode*(id: TimerId, mode: word) =
   catchUp(id)
   word(timers[id].mode) = mode and 0x1fff
-  timers[id].mode.noIRQ = true
+  timers[id].mode.irq = true
   timers[id].irqTriggered = false
   timers[id].counter = 0
   schedule(id)
@@ -308,6 +312,9 @@ proc mode*(id: TimerId): word =
   result = timers[id].mode.word
   timers[id].mode.reachedTarget = false
   timers[id].mode.reachedMax = false
+  setIRQ(id, true)
+
+  debug fmt"Timer {id} counter is {result}"
 
 proc setCounter*(id: TimerId, counter: word) =
   catchUp(id)
@@ -316,7 +323,8 @@ proc setCounter*(id: TimerId, counter: word) =
 
 proc counter*(id: TimerId): word =
   catchUp(id)
-  timers[id].counter.word
+  result = timers[id].counter.word
+  debug fmt"Timer {id} counter is {result}"
 
 proc setTarget*(id: TimerId, target: word) =
   catchUp(id)
