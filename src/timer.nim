@@ -259,6 +259,9 @@ proc setIRQ(id: TimerID, irq: bool) =
   timers[id].mode.irq = irq
   irqs.set(id + 4, irq)
 
+for id in TimerId.low..TimerId.high:
+  id.setIRQ(true)
+
 proc triggerIRQ(id: TimerId) =
   ## Trigger an IRQ for the given timer.
 
