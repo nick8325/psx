@@ -188,6 +188,16 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
       return true
     else:
       return false
+  of 0x1F801040:
+    # JOY_RX_DATA
+    if kind == Read:
+      value = 0xffffffffu32
+      return true
+  of 0x1F801044:
+    # JOY_STAT
+    if kind == Read:
+      value = 3
+      return true
   else:
     return false
 
