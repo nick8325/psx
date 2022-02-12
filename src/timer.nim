@@ -105,6 +105,12 @@ proc currentSyncInput(timer: Timer): RepeatingSignal =
     result.on = 0
     result.length = clocksPerFrame()
 
+proc updateSyncInputs =
+  for i in TimerId.low..TimerId.high:
+    timers[i].syncInput = timers[i].currentSyncInput()
+updateSyncInputs()
+onVBlank("update timer sync inputs", updateSyncInputs)
+
 func irqsEnabled(timer: Timer): bool =
   ## Are IRQs enabled? (Only one-shot mode disables them.)
 
@@ -131,12 +137,16 @@ proc advance(timer: var Timer, target: int64) =
   let rate = timer.clockSource.clockRate()
 
   template pause(finish: int64): void =
+    trace (fmt"t={timer.time}: pause until " & $finish)
+
     # Only pause if the time is not in the past
     if timer.time <= finish: timer.time = min(finish, target)
     # Stop if we are past the target time
     if finish > target: return
 
   template reset(at: int64): void =
+    trace (fmt"t={timer.time}: reset at " & $at)
+
     if timer.time == at:
       timer.counter = 0
 
@@ -149,6 +159,8 @@ proc advance(timer: var Timer, target: int64) =
         return
 
   template count(start_in, finish_in: int64): void =
+    trace (fmt"t={timer.time}: count from " & $start_in & " to " & $finish_in)
+
     var start = start_in
     var finish = finish_in
 
@@ -189,6 +201,7 @@ proc advance(timer: var Timer, target: int64) =
             wrap = 0x10000
 
         timer.counter = uint16((timer.counter.int64 + incs) mod wrap)
+        timer.time = finish
 
       if stopHere: return
 
@@ -243,22 +256,26 @@ proc nextTime(id: TimerId): int64 =
 proc triggerIRQ(id: TimerId) =
   ## Trigger an IRQ for the given timer.
 
+  debug fmt"trigger IRQ timer {id}"
+
   timers[id].irqTriggered = true
   timers[id].irqTriggeredNow = true
 
   if timers[id].mode.toggleIRQ:
     irqs.set(id + 4, false)
     irqs.set(id + 4, true)
-    timers[id].mode.noIRQ = false
+    timers[id].mode.noIRQ = true
   else:
     timers[id].mode.noIRQ = not timers[id].mode.noIRQ
-    irqs.set(id + 4, not timers[id].mode.noIRQ)
+    irqs.set(id + 4, timers[id].mode.noIRQ)
 
 proc catchUp(id: TimerId) =
   ## Update the timer state to what it should be now.
   ## Trigger any IRQs and similar.
 
   timers[id].advance(events.now())
+  trace fmt"caught up timer {id} to {timers[id].time} at {events.now()}"
+  assert timers[id].time == events.now()
   if timers[id].irqsEnabled:
     if timers[id].mode.irqAtTarget and timers[id].counter == timers[id].target:
       triggerIRQ(id)
@@ -270,13 +287,12 @@ proc schedule(id: TimerId) =
 
   catchUp(id)
   let next = nextTime(id)
-  assert next != 0
+  assert next != events.now()
   if next != int64.high:
     timers[id].generation += 1
     let generation = timers[id].generation
-    events.after(next, "timer update") do():
+    events.at(next, "timer update") do():
       if generation == timers[id].generation:
-        catchUp(id)
         schedule(id)
 
 proc setMode*(id: TimerId, mode: word) =
@@ -310,7 +326,3 @@ proc setTarget*(id: TimerId, target: word) =
 proc target*(id: TimerId): word =
   catchUp(id)
   timers[id].target.word
-
-onVBlank("update timer gates") do ():
-  for i in TimerId.low..TimerId.high:
-    timers[i].syncInput = timers[i].currentSyncInput()
