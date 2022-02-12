@@ -217,6 +217,8 @@ proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
   # TODO: speed up drawing
 
   # Check pixel against drawing/display areas
+  if x < 0 or x >= vramWidth or y < 0 or y >= vramHeight:
+    trace fmt"skip write to {x},{y} since out of VRAM"
   if x < settings.drawingArea.x1 or x >= settings.drawingArea.x2 or
      y < settings.drawingArea.y1 or y >= settings.drawingArea.y2:
     trace fmt"skip write to {x},{y} since out of drawing area {settings.drawingArea}"
@@ -458,8 +460,8 @@ proc draw*(settings: Settings, tri: Triangle) =
   if kinds[1] == Horizontal: ybot -= 1
 
   # Clamp to drawing area
-  ytop = max(ytop, settings.drawingArea.y1)
-  ybot = min(ybot, settings.drawingArea.y2)
+  ytop = max(ytop, settings.drawingArea.y1).max(0)
+  ybot = min(ybot, settings.drawingArea.y2).min(vramHeight-1)
 
   # Use a global variable to avoid an allocation for each triangle
   var mins, maxs {.global.}: array[vramHeight, int]
@@ -523,8 +525,12 @@ proc draw*(settings: Settings, rect: Rectangle) =
 
   for y in rect.rect.y1..<rect.rect.y2:
     for x in rect.rect.x1..<rect.rect.x2:
-      let tx = rect.texture.coords[0].x + x - rect.rect.x1
-      let ty = rect.texture.coords[0].y + y - rect.rect.y1
+      let tx =
+        if rect.flipX: rect.texture.coords[0].x - x + rect.rect.x1
+        else: rect.texture.coords[0].x + x - rect.rect.x1
+      let ty =
+        if rect.flipY: rect.texture.coords[0].y - y + rect.rect.y1
+        else: rect.texture.coords[0].y + y - rect.rect.y1
 
       case rect.shadingMode
       of Colours:
