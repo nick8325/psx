@@ -13,7 +13,7 @@ type
 
 func initialLevel(component: Component): Level {.inline.} =
   case component
-  of logMachine, logTimer: lvlDebug
+  of logMachine, logCDROM, logIRQ: lvlDebug
   else: lvlInfo
 
 func minLevel*(component: Component): Level {.inline.} =

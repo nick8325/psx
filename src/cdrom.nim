@@ -75,7 +75,7 @@ proc command*(value: uint8) =
   case value
   of 0x1:
     # Stat
-    respond 3, [0x10]
+    respond 3, [0x08]
   of 0x19:
     # Test
     var param: uint8
@@ -89,6 +89,7 @@ proc command*(value: uint8) =
   of 0x1a:
     # GetID
     respond 5, [0x11, 0x80]
+    #respond 3, [0x08]
     #respond 5, [0x08, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] # No disc
   else:
     warn fmt"Unknown command {value:02x}"

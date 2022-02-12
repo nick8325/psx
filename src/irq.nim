@@ -46,7 +46,11 @@ proc handleStatus*(irqs: var IRQs, value: var word, kind: IOKind) =
   of Read: value = irqs.stat
   of Write: irqs.stat = irqs.stat and value
 
+  trace fmt"IRQ status {irqs.stat:x}"
+
 proc handleMask*(irqs: var IRQs, value: var word, kind: IOKind) =
   case kind
   of Read: value = irqs.mask
   of Write: irqs.mask = value and 0x7ff
+
+  trace fmt"IRQ mask {irqs.mask:x}"
