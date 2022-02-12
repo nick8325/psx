@@ -540,7 +540,7 @@ proc fill*(settings: Settings; x, y, w, h: int; c: Colour) =
   debug fmt"fill ({x},{y}) size ({w},{h}) colour {c}"
 
   for j in y..<y+h:
-    for i in x..<x+h:
+    for i in x..<x+w:
       putPixel(i, j, c, settings)
 
 proc draw*(settings: Settings, line: Line) =
