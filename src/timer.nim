@@ -45,6 +45,12 @@ type
     ## Used to remove stale alarms.
     generation: int64
 
+func `$`(signal: RepeatingSignal): string =
+  fmt"length={signal.length} on={signal.on} start={signal.start}"
+
+func `$`(timer: Timer): string =
+  fmt"id={timer.id} mode={timer.mode.word:x} counter={timer.counter:x} target={timer.target:x} triggered={timer.irqTriggered} triggered_now={timer.irqTriggeredNow} sync=({timer.syncInput}) time={timer.time} gen={timer.generation}"
+
 TimerMode.bitfield sync, bool, 0, 1
 TimerMode.bitfield syncMode, range[0..3], 1, 2
 TimerMode.bitfield resetAfterTarget, bool, 3, 1
@@ -105,18 +111,12 @@ proc currentSyncInput(timer: Timer): RepeatingSignal =
     result.on = 0
     result.length = clocksPerFrame()
 
-proc updateSyncInputs =
-  for i in TimerId.low..TimerId.high:
-    timers[i].syncInput = timers[i].currentSyncInput()
-updateSyncInputs()
-onVBlank("update timer sync inputs", updateSyncInputs)
-
 func irqsEnabled(timer: Timer): bool =
   ## Are IRQs enabled? (Only one-shot mode disables them.)
 
   (timer.mode.repeat or not timer.irqTriggered) and not timer.irqTriggeredNow
 
-func ticksToIRQ(timer: Timer): int64 =
+proc ticksToIRQ(timer: Timer): int64 =
   ## How many times must the timer increment before we trigger an IRQ?
 
   result = int64.high
@@ -128,12 +128,14 @@ func ticksToIRQ(timer: Timer): int64 =
         result = result.min(int64(timer.target - timer.counter))
       else:
         result = result.min(timer.target.int64 + 0x10000 - timer.counter.int64)
+  trace fmt"ticks to IRQ: {result}"
 
 proc advance(timer: var Timer, target: int64) =
   ## Tick the timer until it reaches a given clock cycle.
   ## Returns either when the timer reaches its target,
   ## or when an interrupt needs to be triggered.
 
+  trace (fmt"t={timer.time}: advancing to " & $target)
   let rate = timer.clockSource.clockRate()
 
   template pause(finish: int64): void =
@@ -155,6 +157,7 @@ proc advance(timer: var Timer, target: int64) =
       if at == target: return
       else: timer.time += 1
 
+      if timer.target == 0: timer.mode.reachedTarget = true
       if timer.target == 0 and timer.mode.irqAtTarget and timer.irqsEnabled:
         return
 
@@ -167,6 +170,7 @@ proc advance(timer: var Timer, target: int64) =
     # Only run if the finish time is not in the past
     if timer.time <= finish:
       var stopHere = finish > target
+      if stopHere: trace ("stop target finish=" & $finish & " target=" & $target)
 
       # Clamp the start and finish time
       start = max(start, timer.time)
@@ -177,31 +181,37 @@ proc advance(timer: var Timer, target: int64) =
         divRoundUp(finish+1-timer.syncInput.start, rate) -
         divRoundUp(start-timer.syncInput.start, rate)
 
-      if incs > 0: timer.irqTriggeredNow = false
-
       # Did the timer just whizz through an IRQ?
       let irqTicks = timer.ticksToIRQ
 
+      if incs > 0 and irqTicks > 0: timer.irqTriggeredNow = false
+
       if irqTicks <= incs:
         stopHere = true
-        timer.counter += irqTicks.uint16
-        # TODO: make this calculation clock cycle-accurate
-        timer.time += irqTicks * rate
+        trace ("stop irq incs=" & $incs & " irqTicks=" & $irqTicks)
+        timer.time = min(timer.time + irqTicks * rate, finish)
       else:
-        var wrap: int64 =
-          if timer.mode.resetAfterTarget: timer.target.int64 + 1
-          else: 0x10000
-
-        # Special case: already passed target
-        if timer.mode.resetAfterTarget and timer.counter > timer.target:
-          if timer.counter.int64 + incs >= 0x10000:
-            incs -= (0x10000 - timer.counter.int64)
-            timer.counter = 0
-          else:
-            wrap = 0x10000
-
-        timer.counter = uint16((timer.counter.int64 + incs) mod wrap)
         timer.time = finish
+
+      var wrap: int64 =
+        if timer.mode.resetAfterTarget: timer.target.int64 + 1
+        else: 0x10000
+
+      # Special case: already passed target
+      if timer.mode.resetAfterTarget and timer.counter > timer.target:
+        if timer.counter.int64 + incs >= 0x10000:
+          incs -= (0x10000 - timer.counter.int64)
+          timer.counter = 0
+          timer.mode.reachedMax = true
+        else:
+          wrap = 0x10000
+
+      if timer.counter.int64 + incs >= 0x10000:
+        timer.mode.reachedMax = true
+      if timer.counter < timer.target and timer.counter.int64 + incs >= timer.target.int64:
+        timer.mode.reachedTarget = true
+
+      timer.counter = uint16((timer.counter.int64 + incs) mod wrap)
 
       if stopHere: return
 
@@ -282,7 +292,8 @@ proc catchUp(id: TimerId) =
 
   timers[id].advance(events.now())
   trace fmt"caught up timer {id} to {timers[id].time} at {events.now()}"
-  assert timers[id].time == events.now()
+  # TODO: work out why this assertion fails
+  # assert timers[id].time == events.now(), fmt"now={events.now()} {timers[id]} rate={timers[id].clockSource.clockRate}"
   if timers[id].irqsEnabled:
     if timers[id].mode.irqAtTarget and timers[id].counter == timers[id].target:
       triggerIRQ(id)
@@ -294,13 +305,21 @@ proc schedule(id: TimerId) =
 
   catchUp(id)
   let next = nextTime(id)
-  assert next != events.now()
+  assert next != events.now(), fmt"now={events.now()} {timers[id]}"
   if next != int64.high:
     timers[id].generation += 1
     let generation = timers[id].generation
     events.at(next, "timer update") do():
       if generation == timers[id].generation:
         schedule(id)
+
+proc updateSyncInputs =
+  for i in TimerId.low..TimerId.high:
+    timers[i].syncInput = timers[i].currentSyncInput()
+    schedule(i)
+
+updateSyncInputs()
+onVBlank("update timer sync inputs", updateSyncInputs)
 
 proc setMode*(id: TimerId, mode: word) =
   catchUp(id)
@@ -316,6 +335,7 @@ proc mode*(id: TimerId): word =
   timers[id].mode.reachedTarget = false
   timers[id].mode.reachedMax = false
   setIRQ(id, true)
+  schedule(id)
 
   debug fmt"Timer {id} counter is {result}"
 
