@@ -265,7 +265,7 @@ for id in TimerId.low..TimerId.high:
 proc triggerIRQ(id: TimerId) =
   ## Trigger an IRQ for the given timer.
 
-  debug fmt"Trigger IRQ timer {id}"
+  debug fmt"Trigger IRQ timer {id}, mode {timers[id].mode.word:x}, counter {timers[id].counter:x}, target {timers[id].target:x}"
 
   timers[id].irqTriggered = true
   timers[id].irqTriggeredNow = true

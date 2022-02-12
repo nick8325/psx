@@ -690,8 +690,6 @@ proc handleException(cpu: var CPU, error: MachineError) =
 
   if error.error.isError:
     info fmt"{error.error} interrupt: {cpu}"
-  elif error.error == Interrupt:
-    debug fmt"Interrupt: {cpu.cop0.sr[im] and cpu.cop0.cause[ip]:x}"
   else:
     debug fmt"{error.error} exception: {cpu}"
 
