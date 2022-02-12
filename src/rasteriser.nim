@@ -516,6 +516,24 @@ proc draw*(settings: Settings, tri: Triangle) =
         let coord = textureMapper.interpolate p
         putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y).mix(colour), settings)
 
+proc draw*(settings: Settings, rect: Rectangle) =
+  ## Draw a rectangle.
+
+  debug fmt"draw {rect}"
+
+  for y in rect.rect.y1..<rect.rect.y2:
+    for x in rect.rect.x1..<rect.rect.x2:
+      let tx = rect.texture.coords[0].x + x - rect.rect.x1
+      let ty = rect.texture.coords[0].y + y - rect.rect.y1
+
+      case rect.shadingMode
+      of Colours:
+        putPixel(x, y, rect.colour, settings)
+      of Textures:
+        putTexturePixel(x, y, getPixel(rect.texture, tx, ty), settings)
+      of Both:
+        putTexturePixel(x, y, getPixel(rect.texture, tx, ty).mix(rect.colour), settings)
+
 proc fill*(settings: Settings; x, y, w, h: int; c: Colour) =
   ## Fill a rectangle with a solid colour.
 

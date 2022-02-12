@@ -108,12 +108,15 @@ Palette.bitfield y, int, 6, 9
 func unpack(p: Palette): Point =
   (x: p.x16 * 16, y: p.y)
 
-func colourMode(page: TexPage, palette: Point): TextureColourMode =
-  # depth=3 apparently is treated as 15-bit
-  case page.colours.clampedConvert[:TextureColourDepth]
+func colourMode(depth: TextureColourDepth, palette: Point): TextureColourMode =
+  case depth
   of FourBit: TextureColourMode(depth: FourBit, palette: palette)
   of EightBit: TextureColourMode(depth: EightBit, palette: palette)
   of FifteenBit: TextureColourMode(depth: FifteenBit)
+
+func colourMode(page: TexPage, palette: Point): TextureColourMode =
+  # depth=3 apparently is treated as 15-bit
+  page.colours.clampedConvert[:TextureColourDepth].colourMode(palette)
 
 type
   # Texture settings
@@ -570,6 +573,73 @@ let processCommand = consumer(word):
         let line = Line(start: (point: vertices[i], colour: colours[i]),
                         stop: (point: vertices[i+1], colour: colours[i+1]))
         settings.draw line
+
+    of 0x60..0x7f:
+      # A rectangle.
+      # The bits of the command word have the following meaning:
+      # * bit 0: if 1 then texture blending is disabled
+      # * bit 1: enable transparency (using global transparency settings)
+      # * bit 2: polygon is textured
+      # * bit 3-4: if 0, variable size; if 1, 1x1; if 2, 8x8; if 3, 16x16
+      #
+      # The parameters come in the following order, where (0) is the command word:
+      # (0) command+colour (1) vertex (2) (optional) texcoord+palette
+      # (3) (optional) width+height
+
+      let
+        rawTextures = cmd.testBit 0
+        transparent = cmd.testBit 1
+        textured = cmd.testBit 2
+
+      var
+        texcoord: Point
+        palette: Point
+        width, height: int
+
+      let
+        colour = Colour(value[rest]).unpack
+        pos = Vertex(take()).unpack + drawing.drawingAreaOffset.unpack
+
+      if textured:
+        let arg = take()
+        palette = Palette(arg[word1]).unpack
+        texcoord = TexCoord(arg[word2]).unpack
+
+      if cmd.testBit 4:
+        if cmd.testBit 3:
+          width = 16
+          height = 16
+        else:
+          width = 8
+          height = 8
+      else:
+        if cmd.testBit 3:
+          width = 1
+          height = 1
+        else:
+          let arg = take()
+          width = ScreenCoord(arg).unpack.x
+          height = ScreenCoord(arg).unpack.y
+
+      let
+        rect = (x1: pos.x, y1: pos.y, x2: pos.x + width, y2: pos.y + height)
+        texture = Texture[1](
+          page: (x: textures.base.x64 * 64, y: textures.base.y256 * 256),
+          windowMask: textures.window.mask.unpack,
+          windowOffset: textures.window.offset.unpack,
+          coords: [texcoord],
+          colourMode: textures.colourDepth.colourMode(palette))
+
+        shadingMode =
+          if textured and textures.enabled:
+            if rawTextures: Textures else: Both
+          else: Colours
+
+        settings = rasteriserSettings(transparent = transparent,
+                                      dither = false, crop = true, interlace = true)
+      settings.draw Rectangle(rect: rect, shadingMode: shadingMode,
+                              colour: colour, texture: texture,
+                              flipX: textures.flip.x, flipY: textures.flip.y)
 
     of 0xe1:
       # Texpage
