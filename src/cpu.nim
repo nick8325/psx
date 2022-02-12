@@ -71,10 +71,10 @@ const
     block:
       var result: word = 0
       # Note: CM is not user-settable (and not set at all currently).
-      # Only the first two bits of IM are user-settable.
       result = result or cu.toMask
-      for x in @[bev, swc, isc, im.bit 0, im.bit 1] & @ie & @ku:
+      for x in @[bev, swc, isc] & @ie & @ku:
         result = result or x.toMask
+      result = result or im.toMask
       result
 
   # Read-only SR bits (writes to them are ignored)
@@ -116,7 +116,9 @@ proc `[]=`(cop0: var COP0, reg: CoRegister, val: word) =
     if conflicting != 0:
       warn fmt"Ignoring writes to forbidden SR bits: {conflicting:x}"
     cop0.sr = (cop0.sr and fixedSRBits) or (val and writableSRBits)
-  of CoRegister(13): discard
+  of CoRegister(13):
+    cop0.cause[ip.bit 0] = val[ip.bit 0]
+    cop0.cause[ip.bit 1] = val[ip.bit 1]
   of CoRegister(14): discard
   else:
     warn fmt"Ignoring write to unknown COP register {reg}"
