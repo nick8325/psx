@@ -30,7 +30,7 @@ proc set*(irqs: var IRQs, irq: range[0..10], val: bool) =
   irqs.source[irq] = val
   irqs.setCPUIRQ()
 
-proc set*(irqs: var IRQs, irq: range[0..10]) =
+proc toggle*(irqs: var IRQs, irq: range[0..10]) =
   ## Toggle the value of an input IRQ pin.
 
   irqs.set(irq, not (irq in irqs.source))
@@ -45,6 +45,7 @@ proc handleStatus*(irqs: var IRQs, value: var word, kind: IOKind) =
   case kind
   of Read: value = irqs.stat
   of Write: irqs.stat = irqs.stat and value
+
 proc handleMask*(irqs: var IRQs, value: var word, kind: IOKind) =
   case kind
   of Read: value = irqs.mask

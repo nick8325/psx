@@ -245,6 +245,17 @@ proc nextVBlankDelta*(): int64 {.inline.} =
   result = clocksPerFrame() - lastVBlankDelta()
   assert result > 0 and result <= clocksPerFrame()
 
+proc inVBlank*(): bool {.inline.} =
+  ## Are we currently in the VBLANK interval?
+
+  lastVBlankDelta() < vblankClocks()
+
+proc remainingVBlankClocks*(): int64 {.inline.} =
+  ## How many clock cycles remain of the current VBLANK interval?
+  ## Returns 0 if not in VBLANK.
+
+  return max(vblankClocks() - lastVBlankDelta(), 0)
+
 proc lastHBlankDelta*(): int64 {.inline.} =
   ## Number of clock cycles since the last HBLANK started.
 
@@ -257,6 +268,17 @@ proc nextHBlankDelta*(): int64 {.inline.} =
 
   result = clocksPerScanline() - lastHBlankDelta()
   assert result > 0 and result <= clocksPerScanline()
+
+proc inHBlank*(): bool {.inline.} =
+  ## Are we currently in the HBLANK interval?
+
+  lastHBlankDelta() < hblankClocks()
+
+proc remainingHBlankClocks*(): int64 {.inline.} =
+  ## How many clock cycles remain of the current HBLANK interval?
+  ## Returns 0 if not in HBLANK.
+
+  return max(hblankClocks() - lastHBlankDelta(), 0)
 
 proc currentScanline*(): int64 {.inline.} =
   ## The current scanline number being drawn.

@@ -227,4 +227,4 @@ func signum*[T](x: T): T =
   else: return 0
 
 func divRoundUp*[T](x, y: T): T =
-  if x == 0: 0 else: (x-1) div y + 1
+  if x == 0: T(0) else: (x-1) div y + 1

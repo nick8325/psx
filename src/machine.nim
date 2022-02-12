@@ -112,16 +112,16 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     case address mod 16
     of 0:
       case kind
-      of Read: value = timers[n].value
-      of Write: timers[n].value = value
+      of Read: value = counter(n)
+      of Write: setCounter(n, value)
     of 4:
       case kind
-      of Read: value = timers[n].mode
-      of Write: timers[n].mode = value
+      of Read: value = mode(n)
+      of Write: setMode(n, value)
     of 8:
       case kind
-      of Read: value = timers[n].target
-      of Write: timers[n].target = value
+      of Read: value = target(n)
+      of Write: setTarget(n, value)
     else:
       return false
 
