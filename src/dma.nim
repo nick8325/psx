@@ -87,9 +87,9 @@ const
     [FromRAM, ToRAM, FromRAM, ToRAM, ToRAM, ToRAM, ToRAM]
 
 # Initialise channels
-for i in ChannelNumber.low..ChannelNumber.high:
-  channels[i] = initChannel(i)
-  channels[i].channelControl[direction] = initialDirections[i]
+for i, channel in channels.mpairs:
+  channel = initChannel(i)
+  channel.channelControl[direction] = initialDirections[i]
 channels[6].channelControl[step] = Backwards
 
 proc checkInterrupt =

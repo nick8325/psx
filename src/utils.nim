@@ -26,9 +26,9 @@ func minLevel*(component: Component): Level {.inline.} =
 var
   loggers: array[Component, Logger]
 
-for component in Component.low..Component.high:
+for component, logger in loggers.mpairs:
   let name = ($component)["log".len..^1]
-  loggers[component] =
+  logger =
     newConsoleLogger(levelThreshold = component.initialLevel,
                      fmtStr = defaultFmtStr & name & ": ",
                      useStderr = true)

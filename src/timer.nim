@@ -1,7 +1,7 @@
 ## Timers.
 
 import basics, utils, irq, eventqueue, gpu
-import std/[bitops, strformat, options]
+import std/[bitops, strformat, options, math]
 
 const loggerComponent = logTimer
 
@@ -66,9 +66,10 @@ TimerMode.bitfield reachedMax, bool, 12, 1
 var
   timers*: array[TimerId, Timer]
 
-for i in TimerId.low..TimerId.high:
-  timers[i].id = i
-  timers[i].mode.irq = true
+for i, timer in timers.mpairs:
+  timer.id = i
+  timer.time = -1
+  timer.mode.irq = true
 timers[1].mode.clockSourceBits = 1
 
 type
@@ -211,9 +212,12 @@ proc advance(timer: var Timer, target: int64) =
       if timer.counter < timer.target and timer.counter.int64 + incs >= timer.target.int64:
         timer.mode.reachedTarget = true
 
-      timer.counter = uint16((timer.counter.int64 + incs) mod wrap)
+      timer.counter = euclMod(timer.counter.int64 + incs, wrap).uint16
 
       if stopHere: return
+
+  # Everything up to and including clock 'timer.time' has already been handled
+  pause (timer.time+1)
 
   while timer.time < target:
     let syncStart = timer.syncInput.start
@@ -256,104 +260,111 @@ proc advance(timer: var Timer, target: int64) =
 
     timer.syncInput.start += timer.syncInput.length
 
-proc nextTime(id: TimerId): int64 =
+proc nextTime(timerIn: Timer, limit: int64 = nextVBlankDelta() - 1): int64 =
   ## When does the timer next need to be updated?
 
-  var timer = timers[id] # make a copy
-  timer.advance(events.now() + nextVBlankDelta())
+  var timer = timerIn # make a copy - we don't want to change the global timer
+
+  # Stop at the end of the current frame (by default)
+  timer.advance(events.now() + limit)
   timer.time
 
-proc setIRQ(id: TimerID, irq: bool) =
+proc setIRQ(timer: var Timer, irq: bool) =
   ## Set the IRQ field for the given timer.
 
-  timers[id].mode.irq = irq
-  irqs.set(id + 4, irq)
+  timer.mode.irq = irq
+  irqs.set(timer.id + 4, irq)
 
-for id in TimerId.low..TimerId.high:
-  id.setIRQ(true)
+for timer in timers.mitems:
+  timer.setIRQ(true)
 
-proc triggerIRQ(id: TimerId) =
+proc triggerIRQ(timer: var Timer) =
   ## Trigger an IRQ for the given timer.
 
-  debug fmt"Trigger IRQ timer {id}, mode {timers[id].mode.word:x}, counter {timers[id].counter:x}, target {timers[id].target:x}"
+  debug fmt"Trigger IRQ timer {timer.id}, mode {timer.mode.word:x}, counter {timer.counter:x}, target {timer.target:x}"
 
-  timers[id].irqTriggered = true
-  timers[id].irqTriggeredNow = true
+  timer.irqTriggered = true
+  timer.irqTriggeredNow = true
 
-  if timers[id].mode.toggleIRQ:
-    setIRQ(id, false)
-    setIRQ(id, true)
+  if timer.mode.toggleIRQ:
+    setIRQ(timer, false)
+    setIRQ(timer, true)
   else:
-    setIRQ(id, not timers[id].mode.irq)
+    setIRQ(timer, not timer.mode.irq)
 
-proc catchUp(id: TimerId) =
+proc catchUp(timer: var Timer) =
   ## Update the timer state to what it should be now.
   ## Trigger any IRQs and similar.
 
-  timers[id].advance(events.now())
-  trace fmt"caught up timer {id} to {timers[id].time} at {events.now()}"
+  timer.advance(events.now())
+  trace fmt"caught up timer {timer.id} to {timer.time} at {events.now()}"
   # TODO: work out why this assertion fails
-  # assert timers[id].time == events.now(), fmt"now={events.now()} {timers[id]} rate={timers[id].clockSource.clockRate}"
-  if timers[id].irqsEnabled:
-    if timers[id].mode.irqAtTarget and timers[id].counter == timers[id].target:
-      triggerIRQ(id)
-    elif timers[id].mode.irqAtMax and timers[id].counter == 0xffff:
-      triggerIRQ(id)
+  assert timer.time == events.now(), fmt"now={events.now()} {timer} rate={timer.clockSource.clockRate}"
+  if timer.irqsEnabled:
+    if timer.mode.irqAtTarget and timer.counter == timer.target:
+      triggerIRQ(timer)
+    elif timer.mode.irqAtMax and timer.counter == 0xffff:
+      triggerIRQ(timer)
 
-proc schedule(id: TimerId) =
+proc schedule(timer: var Timer) =
   ## Set an alarm for the timer to wake up when next needed.
 
-  catchUp(id)
-  let next = nextTime(id)
-  assert next != events.now(), fmt"now={events.now()} {timers[id]}"
-  if next != int64.high:
-    timers[id].generation += 1
-    let generation = timers[id].generation
-    events.at(next, "timer update") do():
-      if generation == timers[id].generation:
-        schedule(id)
+  catchUp(timer)
 
-proc updateSyncInputs =
-  for i in TimerId.low..TimerId.high:
-    timers[i].syncInput = timers[i].currentSyncInput()
-    schedule(i)
+  var next: int64
+  if nextVBlankDelta() == 1:
+    # Are we at the end of the current frame?
+    # If so, reload timing information and advance to the next frame
+    timer.syncInput = timer.currentSyncInput()
+    next = nextTime(timer, clocksPerFrame())
+  else:
+    next = nextTime(timer)
 
-updateSyncInputs()
-onVBlank("update timer sync inputs", updateSyncInputs)
+  assert next != events.now(), fmt"now={events.now()} {timer}"
+  timer.generation += 1
+  let generation = timer.generation
+  let id = timer.id
+  events.at(next, "timer update") do():
+    if generation == timers[id].generation:
+      schedule(timers[id])
 
-proc setMode*(id: TimerId, mode: word) =
-  catchUp(id)
-  word(timers[id].mode) = mode and 0x1fff
-  timers[id].mode.irq = true
-  timers[id].irqTriggered = false
-  timers[id].counter = 0
-  schedule(id)
+for timer in timers.mitems:
+  timer.syncInput = timer.currentSyncInput()
+  schedule(timer)
 
-proc mode*(id: TimerId): word =
-  catchUp(id)
-  result = timers[id].mode.word
-  timers[id].mode.reachedTarget = false
-  timers[id].mode.reachedMax = false
-  setIRQ(id, true)
-  schedule(id)
+proc setMode*(timer: var Timer, mode: word) =
+  catchUp(timer)
+  word(timer.mode) = mode and 0x1fff
+  timer.mode.irq = true
+  timer.irqTriggered = false
+  timer.counter = 0
+  schedule(timer)
 
-  debug fmt"Timer {id} counter is {result}"
+proc mode*(timer: var Timer): word =
+  catchUp(timer)
+  result = timer.mode.word
+  timer.mode.reachedTarget = false
+  timer.mode.reachedMax = false
+  setIRQ(timer, true)
+  schedule(timer)
 
-proc setCounter*(id: TimerId, counter: word) =
-  catchUp(id)
-  timers[id].counter = uint16(counter and 0xffff)
-  schedule(id)
+  debug fmt"Timer {timer.id} counter is {result}"
 
-proc counter*(id: TimerId): word =
-  catchUp(id)
-  result = timers[id].counter.word
-  debug fmt"Timer {id} counter is {result}"
+proc setCounter*(timer: var Timer, counter: word) =
+  catchUp(timer)
+  timer.counter = uint16(counter and 0xffff)
+  schedule(timer)
 
-proc setTarget*(id: TimerId, target: word) =
-  catchUp(id)
-  timers[id].target = uint16(target and 0xffff)
-  schedule(id)
+proc counter*(timer: var Timer): word =
+  catchUp(timer)
+  result = timer.counter.word
+  debug fmt"Timer {timer.id} counter is {result}"
 
-proc target*(id: TimerId): word =
-  catchUp(id)
-  timers[id].target.word
+proc setTarget*(timer: var Timer, target: word) =
+  catchUp(timer)
+  timer.target = uint16(target and 0xffff)
+  schedule(timer)
+
+proc target*(timer: var Timer): word =
+  catchUp(timer)
+  timer.target.word

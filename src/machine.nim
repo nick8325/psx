@@ -16,7 +16,7 @@ var
 
 # Initialise expansion to -1, and read in BIOS
 for x in expansion.mitems: x = 0xff
-bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../roms/scph1002.bin"), 0, 0x7ffff)
+bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../roms/scph1001.bin"), 0, 0x7ffff)
 
 # Map in all the memory
 #                      region        address        writable  io
@@ -112,16 +112,16 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     case address mod 16
     of 0:
       case kind
-      of Read: value = counter(n)
-      of Write: setCounter(n, value)
+      of Read: value = timers[n].counter()
+      of Write: timers[n].setCounter(value)
     of 4:
       case kind
-      of Read: value = mode(n)
-      of Write: setMode(n, value)
+      of Read: value = timers[n].mode()
+      of Write: timers[n].setMode(value)
     of 8:
       case kind
-      of Read: value = target(n)
-      of Write: setTarget(n, value)
+      of Read: value = timers[n].target()
+      of Write: timers[n].setTarget(value)
     else:
       return false
 

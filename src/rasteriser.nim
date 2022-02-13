@@ -526,10 +526,10 @@ proc draw*(settings: Settings, rect: Rectangle) =
   for y in rect.rect.y1..<rect.rect.y2:
     for x in rect.rect.x1..<rect.rect.x2:
       let tx =
-        if rect.flipX: rect.texture.coords[0].x - x + rect.rect.x1
+        if rect.flipX or true: rect.texture.coords[0].x - x + rect.rect.x1
         else: rect.texture.coords[0].x + x - rect.rect.x1
       let ty =
-        if rect.flipY: rect.texture.coords[0].y - y + rect.rect.y1
+        if rect.flipY or true: rect.texture.coords[0].y - y + rect.rect.y1
         else: rect.texture.coords[0].y + y - rect.rect.y1
 
       case rect.shadingMode
@@ -540,6 +540,21 @@ proc draw*(settings: Settings, rect: Rectangle) =
       of Both:
         putTexturePixel(x, y, getPixel(rect.texture, tx, ty).mix(rect.colour), settings)
 
+proc draw*(settings: Settings, line: Line) =
+  ## Draw a line.
+
+  debug fmt"draw {line}"
+  if line.start.point.x == line.stop.point.x and line.start.colour == line.stop.colour:
+    for y in min(line.start.point.y, line.stop.point.y)..max(line.start.point.y, line.stop.point.y):
+      putPixel(line.start.point.x, y, line.start.colour, settings)
+  elif line.start.point.y == line.stop.point.y and line.start.colour == line.stop.colour:
+    for x in min(line.start.point.x, line.stop.point.x)..max(line.start.point.x, line.stop.point.x):
+      putPixel(x, line.start.point.y, line.start.colour, settings)
+  else:
+    warn fmt"draw {line}"
+
+
+
 proc fill*(settings: Settings; x, y, w, h: int; c: Colour) =
   ## Fill a rectangle with a solid colour.
 
@@ -548,8 +563,3 @@ proc fill*(settings: Settings; x, y, w, h: int; c: Colour) =
   for j in y..<y+h:
     for i in x..<x+w:
       putPixel(i, j, c, settings)
-
-proc draw*(settings: Settings, line: Line) =
-  ## Draw a line.
-
-  debug fmt"draw {line}"
