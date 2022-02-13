@@ -117,7 +117,7 @@ func irqsEnabled(timer: Timer): bool =
 
   (timer.mode.repeat or not timer.irqTriggered) and not timer.irqTriggeredNow
 
-proc ticksToIRQ(timer: Timer): int64 =
+proc incsToIRQ(timer: Timer): int64 =
   ## How many times must the timer increment before we trigger an IRQ?
 
   result = int64.high
@@ -129,68 +129,67 @@ proc ticksToIRQ(timer: Timer): int64 =
         result = result.min(int64(timer.target - timer.counter))
       else:
         result = result.min(timer.target.int64 + 0x10000 - timer.counter.int64)
-  trace fmt"ticks to IRQ: {result}"
 
 proc advance(timer: var Timer, target: int64) =
   ## Tick the timer until it reaches a given clock cycle.
   ## Returns either when the timer reaches its target,
   ## or when an interrupt needs to be triggered.
 
-  trace (fmt"t={timer.time}: advancing to " & $target)
   let rate = timer.clockSource.clockRate()
 
   template pause(finish: int64): void =
-    trace (fmt"t={timer.time}: pause until " & $finish)
-
     # Only pause if the time is not in the past
-    if timer.time <= finish: timer.time = min(finish, target)
+    if timer.time < finish: timer.time = min(finish, target)
     # Stop if we are past the target time
-    if finish > target: return
+    if finish >= target: return
 
   template reset(at: int64): void =
-    trace (fmt"t={timer.time}: reset at " & $at)
+    # Stop if we are past the target time
+    if at >= target: return
 
-    if timer.time == at:
+    if timer.time < at:
+      timer.time = at
       timer.counter = 0
-
-      # Move forward one clock cycle, to prevent "count" from ticking the
-      # timer until the next cycle. But stop if we reached the target time.
-      if at == target: return
-      else: timer.time += 1
 
       if timer.target == 0: timer.mode.reachedTarget = true
       if timer.target == 0 and timer.mode.irqAtTarget and timer.irqsEnabled:
         return
 
-  template count(start_in, finish_in: int64): void =
-    trace (fmt"t={timer.time}: count from " & $start_in & " to " & $finish_in)
+  template count(startIn, finishIn: int64): void =
+    # Clamp the start and finish time
+    let start = startIn.max(timer.time+1)
+    let finish = finishIn.min(target)
+    var stopHere = finish >= target
 
-    var start = start_in
-    var finish = finish_in
-
-    # Only run if the finish time is not in the past
-    if timer.time <= finish:
-      var stopHere = finish > target
-      if stopHere: trace ("stop target finish=" & $finish & " target=" & $target)
-
-      # Clamp the start and finish time
-      start = max(start, timer.time)
-      finish = min(finish, target)
+    # Only run if the time interval is non-empty after clamping
+    if start <= finish:
+      template incsUntil(t: int64): int64 =
+        # How many increments from syncInput.start until a given clock?
+        divRoundUp(t - timer.syncInput.start + 1, rate)
+      template clocksUntil(incs: int64): int64 =
+        # At what clock after syncInput.start is a given number of increments reached?
+        let result = rate * (incs-1)
+        assert incsUntil(timer.syncInput.start + result) == incs
+        result
 
       # How much should the timer be incremented by?
-      var incs =
-        divRoundUp(finish+1-timer.syncInput.start, rate) -
-        divRoundUp(start-timer.syncInput.start, rate)
+      var incs = incsUntil(finish) - incsUntil(start-1)
 
       # Did the timer just whizz through an IRQ?
-      let irqTicks = timer.ticksToIRQ
+      var irqIncs = timer.incsToIRQ
 
-      if incs > 0 and irqTicks > 0: timer.irqTriggeredNow = false
+      if incs > 0 and irqIncs > 0 and timer.irqTriggeredNow:
+        # Reschedule to recompute incsToIRQ (which always returns int64.high
+        # when irqTriggeredNow is true)
+        irqIncs = 1
+        timer.irqTriggeredNow = false
 
-      if irqTicks <= incs:
+      if irqIncs <= incs:
         stopHere = true
-        trace ("stop irq incs=" & $incs & " irqTicks=" & $irqTicks)
-        timer.time = min(timer.time + irqTicks * rate, finish)
+        let newTime = timer.syncInput.start + clocksUntil(irqIncs + incsUntil(timer.time))
+
+        assert newTime >= timer.time and newTime <= finish
+        timer.time = newTime
       else:
         timer.time = finish
 
@@ -214,10 +213,7 @@ proc advance(timer: var Timer, target: int64) =
 
       timer.counter = euclMod(timer.counter.int64 + incs, wrap).uint16
 
-      if stopHere: return
-
-  # Everything up to and including clock 'timer.time' has already been handled
-  pause (timer.time+1)
+    if stopHere: return
 
   while timer.time < target:
     let syncStart = timer.syncInput.start
@@ -241,15 +237,15 @@ proc advance(timer: var Timer, target: int64) =
         of 1:
           # Reset at gate, then count
           reset syncStart
-          count syncStart, syncEnd-1
+          count syncStart+1, syncEnd-1
         of 2:
           # Reset at gate, pause outside gate
           reset syncStart
-          count syncStart, syncMid-1
+          count syncStart+1, syncMid-1
           pause syncEnd-1
         of 3:
           # Pause until gate then free run
-          if timer.time == syncStart:
+          if timer.time == syncStart-1:
             timer.mode.sync = false
             count syncStart, syncEnd-1
           else:
@@ -296,15 +292,17 @@ proc catchUp(timer: var Timer) =
   ## Update the timer state to what it should be now.
   ## Trigger any IRQs and similar.
 
+  trace fmt"catchUp t={events.now()} {timer} rate={timer.clockSource.clockRate()}"
+
   timer.advance(events.now())
-  trace fmt"caught up timer {timer.id} to {timer.time} at {events.now()}"
-  # TODO: work out why this assertion fails
-  assert timer.time == events.now(), fmt"now={events.now()} {timer} rate={timer.clockSource.clockRate}"
+  assert timer.time == events.now(), fmt"t={events.now()} {timer} rate={timer.clockSource.clockRate()}"
   if timer.irqsEnabled:
     if timer.mode.irqAtTarget and timer.counter == timer.target:
       triggerIRQ(timer)
     elif timer.mode.irqAtMax and timer.counter == 0xffff:
       triggerIRQ(timer)
+
+  trace fmt"end catchUp t={events.now()} {timer} rate={timer.clockSource.clockRate()}"
 
 proc schedule(timer: var Timer) =
   ## Set an alarm for the timer to wake up when next needed.
@@ -320,7 +318,8 @@ proc schedule(timer: var Timer) =
   else:
     next = nextTime(timer)
 
-  assert next != events.now(), fmt"now={events.now()} {timer}"
+  trace fmt"scheduling timer {timer.id} at t={next}"
+  assert next != events.now()
   timer.generation += 1
   let generation = timer.generation
   let id = timer.id
