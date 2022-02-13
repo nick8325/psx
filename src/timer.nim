@@ -337,6 +337,7 @@ proc setMode*(timer: var Timer, mode: word) =
   timer.mode.irq = true
   timer.irqTriggered = false
   timer.counter = 0
+  debug fmt"Timer {timer.id} mode changed to {timer.mode.word:x}"
   schedule(timer)
 
 proc mode*(timer: var Timer): word =
@@ -346,24 +347,26 @@ proc mode*(timer: var Timer): word =
   timer.mode.reachedMax = false
   setIRQ(timer, true)
   schedule(timer)
-
-  debug fmt"Timer {timer.id} counter is {result}"
+  debug fmt"Timer {timer.id} mode read as {timer.mode.word:x}"
 
 proc setCounter*(timer: var Timer, counter: word) =
   catchUp(timer)
   timer.counter = uint16(counter and 0xffff)
   schedule(timer)
+  debug fmt"Timer {timer.id} counter set to {counter:x}"
 
 proc counter*(timer: var Timer): word =
   catchUp(timer)
+  debug fmt"Timer {timer.id} counter read as {timer.counter:x}"
   result = timer.counter.word
-  debug fmt"Timer {timer.id} counter is {result}"
 
 proc setTarget*(timer: var Timer, target: word) =
   catchUp(timer)
   timer.target = uint16(target and 0xffff)
   schedule(timer)
+  debug fmt"Timer {timer.id} target set to {timer.target:x}"
 
 proc target*(timer: var Timer): word =
   catchUp(timer)
+  debug fmt"Timer {timer.id} target read as {timer.target:x}"
   timer.target.word
