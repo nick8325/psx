@@ -86,21 +86,21 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
       return true
     else:
       return false
-  of 0x1f802021:
-    # UART status
-    if kind == Read:
+  of 0x1f802020..0x1f80202f:
+    if address == 0x1f802021 and kind == Read:
+      # UART status
       value = 4
       return true
-    else:
-      return false
-  of 0x1f802023:
-    # UART TX
-    if kind == Write:
+    elif address == 0x1f802023 and kind == Write:
+      # UART TX
       stdout.write(value.char)
       stdout.flushFile
       return true
-    else:
-      return false
+    elif kind == Write:
+      # Unknown UART control - ignore
+      return true
+    # Unknown reads might be important
+    return false
   else:
     return false
 
