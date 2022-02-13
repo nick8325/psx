@@ -122,6 +122,13 @@ proc rawWrite*[T](memory: Memory, address: word, value: T): void {.inline.} =
   if resolved.writable:
     resolved.pointer[] = value
 
+proc forcedRawWrite*[T](memory: Memory, address: word, value: T): void {.inline.} =
+  ## Write data to memory, without invoking any I/O handlers, even if the
+  ## memory is read-only. Raises a MachineError if the address is invalid.
+
+  let resolved = memory.resolve[:T](address, Store)
+  resolved.pointer[] = value
+
 proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
   ## Execute I/O handlers for a write (which must be to I/O space).
 

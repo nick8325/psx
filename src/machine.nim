@@ -45,6 +45,10 @@ addressSpace.rawWrite[:word](0x1f801020u32, 0x00031125u32)
 addressSpace.rawWrite[:word](0x1f801060u32, 0x00000b88u32)
 addressSpace.rawWrite[:word](0xfffe0130u32, 0x0001e988u32)
 
+# Patch the BIOS to enable TTY output (taken from DuckStation).
+addressSpace.forcedRawWrite[:word](0x1FC06F0Cu32, 0x24010001u32)
+addressSpace.forcedRawWrite[:word](0x1FC06F14u32, 0xAF81A9C0u32)
+
 # I/O handlers
 proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
   case address
@@ -79,6 +83,21 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
     # PCSX-Redux MIPS API
     if kind == Write:
       warn "Debug break"
+      return true
+    else:
+      return false
+  of 0x1f802021:
+    # UART status
+    if kind == Read:
+      value = 4
+      return true
+    else:
+      return false
+  of 0x1f802023:
+    # UART TX
+    if kind == Write:
+      stdout.write(value.char)
+      stdout.flushFile
       return true
     else:
       return false
