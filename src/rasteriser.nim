@@ -179,7 +179,7 @@ var
 proc getPixel*(x, y: int): Pixel {.inline.} =
   ## Read a pixel from the VRAM.
 
-  vram[y mod vramHeight][x mod vramWidth]
+  vram[y and (vramHeight-1)][x and (vramWidth-1)]
 
 proc getHalfword*(x, y: int): int {.inline.} =
   ## Read halfword data from the VRAM.
@@ -190,7 +190,7 @@ proc getByte*(x, y: int): int {.inline.} =
   ## Read byte data from the VRAM.
 
   let val = getHalfword(x div 2, y)
-  if x mod 2 == 0:
+  if (x and 1) == 0:
     return val and 0xff
   else:
     return val shr 8
@@ -199,7 +199,7 @@ proc getNybble*(x, y: int): int {.inline.} =
   ## Read nybble data from the VRAM.
 
   let val = getHalfword(x div 4, y)
-  case x mod 4
+  case x and 3
   of 0: return val and 0xf
   of 1: return (val shr 4) and 0xf
   of 2: return (val shr 8) and 0xf
@@ -258,7 +258,7 @@ proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
   # We interpret "dither" as "draw in full 24-bit colour"
   if not settings.dither: finalPixel = finalPixel.toPixel16.toPixel
 
-  vram[y mod vramHeight][x mod vramWidth] = finalPixel
+  vram[y and (vramHeight-1)][x and (vramWidth-1)] = finalPixel
 
 proc putPixel*(x, y: int, c: Colour, settings: Settings) {.inline.} =
   ## Put a pixel to the VRAM.
@@ -323,8 +323,8 @@ proc getPixel[N: static int](texture: Texture[N]; x, y: int): Pixel =
   let mask = texture.windowMask
   let offset = texture.windowOffset
 
-  let xt = ((x mod 256) and not (mask.x * 8)) or ((offset.x and mask.x)*8)
-  let yt = ((y mod 256) and not (mask.y * 8)) or ((offset.y and mask.y)*8)
+  let xt = ((x and 0xff) and not (mask.x * 8)) or ((offset.x and mask.x)*8)
+  let yt = ((y and 0xff) and not (mask.y * 8)) or ((offset.y and mask.y)*8)
 
   case texture.colourMode.depth:
   of FifteenBit: getPixel(texture.page.x + xt, texture.page.y + yt)
