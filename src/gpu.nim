@@ -397,8 +397,8 @@ proc gpustat*: word =
     of DMADirection.Read: readyToSendVRAM()
     else: false
   let bit31 =
-    if screen.verticalInterlace: currentScanline().testBit(0)
-    else: not screen.vblank and screen.frameNumber.testBit(0)
+    if screen.verticalInterlace: not screen.vblank and screen.frameNumber.testBit(0)
+    else: currentScanline().testBit(0)
   result =
     word(textures.base.x64) or
     word(textures.base.y256) shl 4 or
