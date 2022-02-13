@@ -55,10 +55,9 @@ while runGame:
       for irq in 0..10:
         irqs.signal(irq)
 
-  # TO DO: capture 'surface' some amount of time after emu VSYNC
-  # Figure out what rate to run main loop at
-  # (maybe better with polled keyboard inputs to match hardware?)
-  runSystem(clocksPerFrame())
+  runSystem(nextVBlankDelta())
+  runSystem(vblankClocks())
+
   surface.blitSurface nil, window.getSurface, nil
   discard window.updateSurface()
   if fps.getFramerate != refreshRate[region].cint:
