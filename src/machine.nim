@@ -101,6 +101,11 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
       return true
     # Unknown reads might be important
     return false
+  of 0x1f802066:
+    if kind == Read:
+      # Nocash halt until interrupt
+      return true
+    return false
   else:
     return false
 
