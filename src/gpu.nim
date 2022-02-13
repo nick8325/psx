@@ -307,13 +307,15 @@ proc onHBlank*(name: string, p: proc()) =
   events.every(proc(): int64 = nextHBlankDelta(), name, p)
 
 proc afterHBlank*(name: string, p: proc()) =
-  events.every(proc(): int64 = nextHBlankDelta() + hblankClocks(), name, p)
+  onHBlank(name) do ():
+     events.after(hblankClocks(), name, p)
 
 proc onVBlank*(name: string, p: proc()) =
   events.every(proc(): int64 = nextVBlankDelta(), name, p)
 
 proc afterVBlank*(name: string, p: proc()) =
-  events.every(proc(): int64 = nextVBlankDelta() + vblankClocks(), name, p)
+  onVBlank(name) do ():
+     events.after(vblankClocks(), name, p)
 
 # VBLANK IRQ
 onVBlank("gpu vblank") do ():
