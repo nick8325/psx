@@ -79,12 +79,14 @@ type
 proc clockSource(timer: Timer): ClockSource =
   ## What is the clock source of a timer?
 
-  if timer.mode.clockSourceBits.testBit(0):
-    case timer.id
-    of 0: DotClock
-    of 1: HBlank
-    of 2: SystemClockDiv8
-  else: SystemClock
+  result = SystemClock
+  case timer.id
+  of 0:
+    if timer.mode.clockSourceBits.testBit(0): result = DotClock
+  of 1:
+    if timer.mode.clockSourceBits.testBit(0): result = HBlank
+  of 2:
+    if timer.mode.clockSourceBits.testBit(1): result = SystemClockDiv8
 
 proc clockRate(source: ClockSource): int64 =
   ## How often does a clock source tick?
