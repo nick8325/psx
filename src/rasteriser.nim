@@ -117,7 +117,7 @@ func `$`*(tri: Triangle): string =
 
 func `$`*(rect: Rectangle): string =
   result = "rectangle, "
-  result &= fmt"({rect.rect.x1}, {rect.rect.x2})--({rect.rect.y1},{rect.rect.y2})"
+  result &= fmt"({rect.rect.x1}, {rect.rect.y1})--({rect.rect.x2},{rect.rect.y2})"
   if rect.shadingMode != Textures:
     result &= fmt", colour {rect.colour}"
   if rect.shadingMode != Colours:
@@ -526,10 +526,10 @@ proc draw*(settings: Settings, rect: Rectangle) =
   for y in rect.rect.y1..<rect.rect.y2:
     for x in rect.rect.x1..<rect.rect.x2:
       let tx =
-        if rect.flipX or true: rect.texture.coords[0].x - x + rect.rect.x1
+        if rect.flipX: rect.texture.coords[0].x - x + rect.rect.x1
         else: rect.texture.coords[0].x + x - rect.rect.x1
       let ty =
-        if rect.flipY or true: rect.texture.coords[0].y - y + rect.rect.y1
+        if rect.flipY: rect.texture.coords[0].y - y + rect.rect.y1
         else: rect.texture.coords[0].y + y - rect.rect.y1
 
       case rect.shadingMode
