@@ -210,14 +210,14 @@ proc screenWidth*: int =
   let clocks = screen.horizontalRange.stop - screen.horizontalRange.start
   result = clocks div gpuClocksPerDotClock[screen.dotClockMultiplier].int
   result = (result + 2) and not 3
-  result = clamp(result, 0, maxScreenWidth().int)
+  result = clamp(result, 1, maxScreenWidth().int-1)
 
 proc visibleScanlines*: int =
   ## Number of scanlines drawn per frame.
   ## In interlaced mode, this is half the screen height.
 
   clamp(screen.verticalRange.stop - screen.verticalRange.start + 1,
-        0, scanlinesPerFrame[region].int)
+        1, scanlinesPerFrame[region].int-1)
 
 proc screenHeight*: int =
   ## Height of screen in pixels.
