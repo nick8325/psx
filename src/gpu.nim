@@ -774,7 +774,7 @@ proc gp1*(value: word) =
     textures.allowDisable = value.testBit 0
   of 0x10..0x1f:
     # Get GPU info
-    case value and 0x10
+    case value and 0xf
     of 2: control.result = word(textures.window)
     of 3: control.result = word(drawing.drawingAreaTopLeft)
     of 4: control.result = word(drawing.drawingAreaBottomRight)
