@@ -283,6 +283,11 @@ proc remainingHBlankClocks*(): int64 {.inline.} =
 
   return max(hblankClocks() - lastHBlankDelta(), 0)
 
+proc currentFrame*(): int64 {.inline.} =
+  ## The current frame being drawn.
+
+  screen.frameNumber
+
 proc currentScanline*(): int64 {.inline.} =
   ## The current scanline number being drawn.
 
