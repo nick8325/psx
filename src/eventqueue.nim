@@ -94,6 +94,7 @@ proc fastForward*(queue: var EventQueue, delta: int64) {.inline.} =
   ## Skip forward 'delta' timesteps.
   ## Run any events that happen in the meantime.
 
+  assert delta >= 0
   var remaining = delta
 
   while unlikely(queue.minDelta <= remaining):

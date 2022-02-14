@@ -71,9 +71,9 @@ type
     # Returns true if the I/O was handled.
     # For each address, only one of ioHandler8/16/32 needs to handle it -
     # the main I/O handler takes care of splitting up requests.
-    ioHandler8*: proc(address: word, value: var uint8, kind: IOKind): bool
-    ioHandler16*: proc(address: word, value: var uint16, kind: IOKind): bool
-    ioHandler32*: proc(address: word, value: var uint32, kind: IOKind): bool
+    ioHandler8*: proc(address: word, value: var uint8, kind: IOKind, region: var MemoryRegion): bool
+    ioHandler16*: proc(address: word, value: var uint16, kind: IOKind, region: var MemoryRegion): bool
+    ioHandler32*: proc(address: word, value: var uint32, kind: IOKind, region: var MemoryRegion): bool
 
 type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool, region: MemoryRegion] ## \
@@ -146,19 +146,19 @@ proc forcedRawWrite*[T](memory: Memory, address: word, value: T): void {.inline.
   let resolved = memory.resolve[:T](address, Store)
   resolved.pointer[] = value
 
-proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
+proc handleIO[T](memory: Memory, address: word, kind: IOKind, region: var MemoryRegion) =
   ## Execute I/O handlers for a write (which must be to I/O space).
 
   # Call the I/O handler at a given size, with the pointer already resolved
   template native8(address: word): bool =
     let pointer = memory.resolve[:uint8](address, Fetch).pointer
-    memory.ioHandler8 != nil and memory.ioHandler8(address, pointer[], kind)
+    memory.ioHandler8 != nil and memory.ioHandler8(address, pointer[], kind, region)
   template native16(address: word): bool =
     let pointer = memory.resolve[:uint16](address, Fetch).pointer
-    memory.ioHandler16 != nil and memory.ioHandler16(address, pointer[], kind)
+    memory.ioHandler16 != nil and memory.ioHandler16(address, pointer[], kind, region)
   template native32(address: word): bool =
     let pointer = memory.resolve[:uint32](address, Fetch).pointer
-    memory.ioHandler32 != nil and memory.ioHandler32(address, pointer[], kind)
+    memory.ioHandler32 != nil and memory.ioHandler32(address, pointer[], kind, region)
 
   # Handle an I/O at either native size or split into smaller I/Os
   template nativeOrSplit16(address: word): bool =
@@ -200,13 +200,22 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
     let kindStr = toLowerAscii $kind
     warn fmt"Unknown I/O, address {address:08x}, value {value:08x} ({T.sizeof}-byte {kindStr})"
 
-proc read*[T](memory: Memory, address: word, region: var MemoryRegion): T {.inline.} =
+proc read*[T](memory: Memory, address: word, time: var int64): T {.inline.} =
   ## Read data from memory.
   ## Raises a MachineError if the address is invalid.
 
   let resolved = memory.resolve[:T](address, Load)
-  if resolved.io: memory.handleIO[:T](address, Read)
-  region = resolved.region
+  var region = resolved.region
+  if resolved.io: memory.handleIO[:T](address, Read, region)
+
+  let delay =
+    case T.sizeOf
+    of 1: memoryDelay8[region]
+    of 2: memoryDelay16[region]
+    of 4: memoryDelay32[region]
+    else: raise new AssertionDefect
+
+  time += delay
   resolved.pointer[]
 
 proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
@@ -216,7 +225,8 @@ proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
   let resolved = memory.resolve[:T](address, Store)
   if resolved.writable:
     resolved.pointer[] = value
-    if resolved.io: memory.handleIO[:T](address, Write)
+    var region = resolved.region
+    if resolved.io: memory.handleIO[:T](address, Write, region)
 
 var
   addressSpace*: Memory ## The PSX address space.

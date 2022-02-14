@@ -90,22 +90,25 @@ proc updateDelays =
     memoryDelay32[region] = delay(regionDelay, commonDelay, 4)
 
 # I/O handlers
-proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
+proc handleIO8(address: word, value: var uint8, kind: IOKind, region: var MemoryRegion): bool =
   case address
   of 0x1f801800:
     # CD-ROM
+    region = CDROM
     case kind
     of Read: value = cdrom.readStatus()
     of Write: cdrom.writeStatus(value)
     return true
   of 0x1f801801..0x1f801803:
     # CD-ROM
+    region = CDROM
     case kind
     of Read: value = cdrom.readRegister(address mod 4)
     of Write: cdrom.writeRegister(address mod 4, value)
     return true
   of 0x1f802041:
     # 7-segment display
+    region = Expansion2
     if kind == Write:
       debug fmt "POST {value}"
       return true
@@ -113,6 +116,7 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
       return false
   of 0x1f802080:
     # PCSX-Redux MIPS API
+    region = BuiltIn
     if kind == Write:
       stdout.write(value.char)
       stdout.flushFile
@@ -121,12 +125,14 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
       return false
   of 0x1f802081:
     # PCSX-Redux MIPS API
+    region = BuiltIn
     if kind == Write:
       warn "Debug break"
       return true
     else:
       return false
   of 0x1f802020..0x1f80202f:
+    region = Serial
     if address == 0x1f802021 and kind == Read:
       # UART status
       value = 4
@@ -142,6 +148,7 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
     # Unknown reads might be important
     return false
   of 0x1f802066:
+    region = BuiltIn
     if kind == Read:
       # Nocash halt until interrupt
       return true
@@ -149,30 +156,35 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
   else:
     return false
 
-proc handleIO16(address: word, value: var uint16, kind: IOKind): bool =
+proc handleIO16(address: word, value: var uint16, kind: IOKind, region: var MemoryRegion): bool =
   if address == 0x1f801802 and kind == Read:
     # CD-ROM DATA FIFO
+    region = CDROM
     value = cdrom.readData16()
     return true
   elif address == 0x1f802082 and kind == Write:
     # PCSX-Redux MIPS API
+    region = BuiltIn
     fatal fmt"Exit requested with code {value}"
     quit 1
 
   return false
 
-proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
+proc handleIO32(address: word, value: var uint32, kind: IOKind, region: var MemoryRegion): bool =
   case address
   of 0x1f801000u32..0x1f801004u32:
     # Expansion base address
+    region = BuiltIn
     case kind
     of Read: return true
     of Write: return false
   of 0x1f801060u32:
     # RAM Size
+    region = BuiltIn
     return true
   of 0x1f801008u32..0x1f80101cu32:
     # Memory region delay
+    region = BuiltIn
     let i = (address - 0x1f801008) div 4
     case kind
     of Read: value = regionDelays[i].word
@@ -182,6 +194,7 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     return true
   of 0x1f801020u32:
     # Common delay
+    region = BuiltIn
     case kind
     of Read: value = commonDelay.word
     of Write:
@@ -189,9 +202,11 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
       updateDelays()
   of 0x1f801c00u32 .. 0x1f801ffcu32:
     # SPU (TODO)
+    region = SPU
     return true
   of 0x1f801100..0x1f801128:
     # Timers
+    region = BuiltIn
     let n = ((address div 16) mod 16).int
     if n < timers.low or n > timers.high: return false
     case address mod 16
@@ -213,14 +228,17 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     return true
   of 0x1f801070u32:
     # Interrupt status
+    region = BuiltIn
     irqs.handleStatus value, kind
     return true
   of 0x1f801074u32:
     # Interrupt mask
+    region = BuiltIn
     irqs.handleMask value, kind
     return true
   of 0x1f801080u32..0x1f8010e8u32:
     # DMA channel
+    region = BuiltIn
     let channel = (address-0x1f801080u32) div 16
     case address mod 16
     of 0:
@@ -235,26 +253,31 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
     else: return false
   of 0x1f8010f0u32:
     # DMA control register
+    region = BuiltIn
     handleDMAControl value, kind
     return true
   of 0x1f8010f4u32:
     # DMA interrupt register
+    region = BuiltIn
     handleDMAInterrupt value, kind
     return true
   of 0x1f801810u32:
     # GPU
+    region = GPU
     case kind
     of Read: value = gpuread()
     of Write: gp0(value)
     return true
   of 0x1f801814u32:
     # GPU
+    region = GPU
     case kind
     of Read: value = gpustat()
     of Write: gp1(value)
     return true
   of 0x1f802080:
     # PCSX-Redux MIPS API
+    region = BuiltIn
     if kind == Read:
       value = 0x58534350
       return true
@@ -262,6 +285,7 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
       return false
   of 0x1f802084:
     # PCSX-Redux MIPS API
+    region = BuiltIn
     if kind == Write:
       var msg: string
       var address = value
@@ -275,11 +299,13 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
       return false
   of 0x1F801040:
     # JOY_RX_DATA
+    region = Serial
     if kind == Read:
       value = 0xffffffffu32
       return true
   of 0x1F801044:
     # JOY_STAT
+    region = Serial
     if kind == Read:
       value = 3
       return true
@@ -299,8 +325,10 @@ proc runSystem*(clocks: int64) =
 
   let stop = events.now + clocks
   while events.now < stop:
-    let delay = cpu.cpu.step
-    events.fastForward(cpuClock + delay)
+    let now = events.now
+    var time = now
+    cpu.cpu.step(time)
+    events.fastForward(time - now)
 
 proc dumpRAM*(filename: string) =
   ## Dump the contents of RAM to a file.

@@ -66,13 +66,14 @@ var
 type
   MemoryRegion* {.pure.} = enum
     ## Which device a memory region belongs to.
-    Scratchpad, RAM, GPU, MDEC, Serial,
+    Scratchpad, RAM, BuiltIn, GPU, MDEC, Serial,
     BIOS, SPU, CDROM, Expansion1, Expansion2, Expansion3
 
 var
   ## Number of clock cycles' delay for reads to each region.
   memoryDelay8*: array[MemoryRegion, int] =
-    [Scratchpad: 0, RAM: cpuClock*5, GPU: cpuClock*3, MDEC: cpuClock*3, Serial: cpuClock*3,
+    [Scratchpad: 0, RAM: cpuClock*5, BuiltIn: 0, GPU: cpuClock*3,
+     MDEC: cpuClock*3, Serial: cpuClock*3,
      # These ones are set by the BIOS.
      BIOS: 0, SPU: 0, CDROM: 0, Expansion1: 0, Expansion2: 0, Expansion3: 0]
   memoryDelay16*: array[MemoryRegion, int] = memoryDelay8

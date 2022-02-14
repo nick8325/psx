@@ -1,9 +1,3 @@
 Implement controller/memory card bus, see if it fixes interlacing bug (timing)
-Clean up memory delay code - have memory reads advance events.now()
-- However, event callbacks should always see the "correct" time, even
-  if we fast-forwarded past it
-- Does this make sense? Maybe this means we shouldn't advance the
-  global time, but only the processor's view of time
-Allow different I/O devices to have different memory delays
 Clean up I/O processing so that you can register callbacks
 Allow devices to add their own local delays
