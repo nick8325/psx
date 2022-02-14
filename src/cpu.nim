@@ -38,13 +38,6 @@ type
     dcic: word
     bdam: word
     bpcm: word
-    # TODO: do we need to handle load delay slots? If so we could
-    # do it like this:
-    # loadRegister: Register
-    # loadValue: word
-    # and do:
-    # cpu[loadRegister] = loadValue; loadRegister = r0; loadValue = 0
-    # after each instruction
 
 const initCOP0: COP0 =
   # Initial value of COP0. BEV=1, everything else 0.
@@ -143,6 +136,7 @@ type
     nextPC: word ## Next PC. Used to implement branch delay slot.
     registers: array[Register, word] ## Registers.
     lo, hi: word ## LO/HI registers.
+    delayedUpdate: tuple[reg: Register, val: word] ## Load delay slot
     cop0: COP0 ## COP0 registers.
     gte: GTE ## GTE registers.
 
@@ -150,10 +144,18 @@ let initCPU*: CPU = block:
   # The initial state of the CPU after reset.
   const pc = 0xbfc00000u32
   var registers: array[Register, word]
-  CPU(pc: pc, nextPC: pc+4, registers: registers, lo: 0, hi: 0, cop0: initCOP0, gte: initGTE)
+  CPU(pc: pc,
+      nextPC: pc+4,
+      registers: registers,
+      lo: 0,
+      hi: 0,
+      delayedUpdate: (reg: r0, val: 0u32),
+      cop0: initCOP0,
+      gte: initGTE)
 
 func `[]`*(cpu: CPU, reg: Register): word =
   ## Access registers by number.
+  assert cpu.registers[r0] == 0
   cpu.registers[reg]
 
 func `[]=`*(cpu: var CPU, reg: Register, val: word) =
@@ -507,6 +509,12 @@ static:
 proc execute(cpu: var CPU, instr: word) {.inline.} =
   ## Decode and execute an instruction.
   var newPC = cpu.nextPC + 4
+
+  # Load delay slot: a register write to be done *next* instruction.
+  var newDelayedUpdate = (reg: r0, val: 0u32)
+  # A register write to be done this instruction.
+  var update = (reg: r0, val: 0u32)
+
   let
     op = decode(instr)
     rd = instr[rd]
@@ -522,7 +530,7 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
       newPC = cpu.nextPC + imm.signExt shl 2
 
   template link(r: Register) =
-    cpu[r] = cpu.nextPC + 4
+    r.set(cpu.nextPC + 4)
 
   template link() =
     link(Register(31))
@@ -536,13 +544,19 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   template logReturn() =
     debug fmt"return from {cpu.pc:x} to {newPC:x}"
 
+  template delayedSet(r: Register, v: word) =
+    newDelayedUpdate = (reg: r, val: v)
+
+  template set(r: Register, v: word) =
+    update = (reg: r, val: v)
+
   case op
-  of ADD: cpu[rd] = signedAdd(cpu[rs], cpu[rt])
-  of ADDI: cpu[rt] = signedAdd(cpu[rs], imm.signExt)
-  of ADDU: cpu[rd] = cpu[rs] + cpu[rt]
-  of ADDIU: cpu[rt] = cpu[rs] + imm.signExt
-  of SUB: cpu[rd] = signedSub(cpu[rs], cpu[rt])
-  of SUBU: cpu[rd] = cpu[rs] - cpu[rt]
+  of ADD: rd.set(signedAdd(cpu[rs], cpu[rt]))
+  of ADDI: rt.set(signedAdd(cpu[rs], imm.signExt))
+  of ADDU: rd.set(cpu[rs] + cpu[rt])
+  of ADDIU: rt.set(cpu[rs] + imm.signExt)
+  of SUB: rd.set(signedSub(cpu[rs], cpu[rt]))
+  of SUBU: rd.set(cpu[rs] - cpu[rt])
   of DIV:
     let
       x = cpu[rs].signed
@@ -585,43 +599,44 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
       z = uint64(x)*uint64(y)
     cpu.lo = cast[word](z)
     cpu.hi = cast[word](z shr 32)
-  of MFLO: cpu[rd] = cpu.lo
+  of MFLO: rd.set(cpu.lo)
   of MTLO: cpu.lo = cpu[rs]
-  of MFHI: cpu[rd] = cpu.hi
+  of MFHI: rd.set(cpu.hi)
   of MTHI: cpu.hi = cpu[rs]
-  of SLT: cpu[rd] = word(cpu[rs].signed < cpu[rt].signed)
-  of SLTI: cpu[rt] = word(cpu[rs].signed < imm.signExt.signed)
-  of SLTU: cpu[rd] = word(cpu[rs] < cpu[rt])
-  of SLTIU: cpu[rt] = word(cpu[rs] < imm.signExt)
-  of LUI: cpu[rt] = imm.zeroExt shl 16
-  of AND: cpu[rd] = cpu[rs] and cpu[rt]
-  of ANDI: cpu[rt] = cpu[rs] and imm.zeroExt
-  of OR: cpu[rd] = cpu[rs] or cpu[rt]
-  of ORI: cpu[rt] = cpu[rs] or imm.zeroExt
-  of XOR: cpu[rd] = cpu[rs] xor cpu[rt]
-  of XORI: cpu[rt] = cpu[rs] xor imm.zeroExt
-  of NOR: cpu[rd] = not (cpu[rs] or cpu[rt])
-  of SLL: cpu[rd] = cpu[rt] shl shamt
-  of SLLV: cpu[rd] = cpu[rt] shl (cpu[rs] and 0x1f)
-  of SRA: cpu[rd] = (cpu[rt].signed shr shamt).unsigned
-  of SRAV: cpu[rd] = (cpu[rt].signed shr (cpu[rs] and 0x1f)).unsigned
-  of SRL: cpu[rd] = cpu[rt] shr shamt
-  of SRLV: cpu[rd] = cpu[rt] shr (cpu[rs] and 0x1f)
-  of LW: cpu[rt] = cpu.read[:word](cpu[rs] + imm.signExt)
-  of LB: cpu[rt] = iword(cpu.read[:int8](cpu[rs] + imm.signExt)).unsigned
-  of LBU: cpu[rt] = cpu.read[:uint8](cpu[rs] + imm.signExt)
-  of LH: cpu[rt] = iword(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned
-  of LHU: cpu[rt] = cpu.read[:uint16](cpu[rs] + imm.signExt)
+  of SLT: rd.set(word(cpu[rs].signed < cpu[rt].signed))
+  of SLTI: rt.set(word(cpu[rs].signed < imm.signExt.signed))
+  of SLTU: rd.set(word(cpu[rs] < cpu[rt]))
+  of SLTIU: rt.set(word(cpu[rs] < imm.signExt))
+  of LUI: rt.set(imm.zeroExt shl 16)
+  of AND: rd.set(cpu[rs] and cpu[rt])
+  of ANDI: rt.set(cpu[rs] and imm.zeroExt)
+  of OR: rd.set(cpu[rs] or cpu[rt])
+  of ORI: rt.set(cpu[rs] or imm.zeroExt)
+  of XOR: rd.set(cpu[rs] xor cpu[rt])
+  of XORI: rt.set(cpu[rs] xor imm.zeroExt)
+  of NOR: rd.set(not (cpu[rs] or cpu[rt]))
+  of SLL: rd.set(cpu[rt] shl shamt)
+  of SLLV: rd.set(cpu[rt] shl (cpu[rs] and 0x1f))
+  of SRA: rd.set((cpu[rt].signed shr shamt).unsigned)
+  of SRAV: rd.set((cpu[rt].signed shr (cpu[rs] and 0x1f)).unsigned)
+  of SRL: rd.set(cpu[rt] shr shamt)
+  of SRLV: rd.set(cpu[rt] shr (cpu[rs] and 0x1f))
+  of LW: rt.delayedSet(cpu.read[:word](cpu[rs] + imm.signExt))
+  of LB: rt.delayedSet(iword(cpu.read[:int8](cpu[rs] + imm.signExt)).unsigned)
+  of LBU: rt.delayedSet(word(cpu.read[:uint8](cpu[rs] + imm.signExt)))
+  of LH: rt.delayedSet(iword(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned)
+  of LHU: rt.delayedSet(word(cpu.read[:uint16](cpu[rs] + imm.signExt)))
   of LWL:
+    # Skip the load delay slot for LWL/LWR
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32)
-    cpu[rt] = cpu[rt].replaceLeft(value, address and 3)
+    rt.set(cpu[rt].replaceLeft(value, address and 3))
   of LWR:
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32)
-    cpu[rt] = cpu[rt].replaceRight(value, address and 3)
+    rt.set(cpu[rt].replaceRight(value, address and 3))
   of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt])
   of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
   of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
@@ -653,17 +668,26 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of JALR: newPC = cpu[rs]; link(rd); logCall()
   of SYSCALL: raise MachineError(error: SystemCall)
   of BREAK: raise MachineError(error: Breakpoint)
-  of MFC0: cpu[rt] = cpu.cop0[CoRegister(rd)]
+  of MFC0: rt.set(cpu.cop0[CoRegister(rd)])
   of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
   of RFE: leaveKernel(cpu.cop0)
   of COP2: cpu.gte.execute(copimm.int)
-  of MFC2: cpu[rt] = cpu.gte[rd.int.dataReg]
+  of MFC2: rt.delayedSet(cpu.gte[rd.int.dataReg])
   of MTC2: cpu.gte[rd.int.dataReg] = cpu[rt]
-  of CFC2: cpu[rt] = cpu.gte[rd.int.controlReg]
+  of CFC2: rt.delayedSet(cpu.gte[rd.int.controlReg])
   of CTC2: cpu.gte[rd.int.controlReg] = cpu[rt]
 
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
+
+  # The PSX bios has the following instruction sequence:
+  #   LW r9, $0x64(r29)
+  #   ADDIU r9, r0, $0x1
+  # where (apparently) the final value of r9 should be taken from the ADDIU.
+  # Hence we process the delayed update before the normal update.
+  cpu[cpu.delayedUpdate.reg] = cpu.delayedUpdate.val
+  cpu[update.reg] = update.val
+  cpu.delayedUpdate = newDelayedUpdate
 
 # Exception handling
 
