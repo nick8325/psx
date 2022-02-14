@@ -31,6 +31,9 @@ var
   # Interrupt enable register
   enabledInterrupts: uint8
 
+  # "Setmode" mode register
+  mode: uint8
+
 proc interruptPending: bool =
   if interrupts.len > 0 and (enabledInterrupts and 7) != 0:
     return true
@@ -39,7 +42,7 @@ proc interruptPending: bool =
   return false
 
 proc checkInterrupts =
-  debug fmt"{interrupts} {commandStart} {enabledInterrupts:08x} {smen}"
+  trace fmt"{interrupts} {commandStart} {enabledInterrupts:08x} {smen}"
   irqs.set(2, interruptPending())
 
 proc queueInterrupt(interrupt: range[0..5]) =
@@ -65,6 +68,7 @@ proc readData16*: uint16 =
     warn "empty FIFO"
 
 proc respond*(interrupt: 0..5, values: openarray[int]) =
+  parameters.clear
   for x in values: response.addLast x.uint8
   queueInterrupt interrupt
 
@@ -72,10 +76,11 @@ proc command*(value: uint8) =
   # TODO: start of command interrupt
 
   debug fmt"Command {value:02x}"
+  if smen: commandStart = true
   case value
   of 0x1:
     # Stat
-    respond 3, [0x08]
+    respond 3, [2]
   of 0x19:
     # Test
     var param: uint8
@@ -88,9 +93,35 @@ proc command*(value: uint8) =
       respond 5, []
   of 0x1a:
     # GetID
-    respond 5, [0x11, 0x80]
-    #respond 3, [0x08]
-    #respond 5, [0x08, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] # No disc
+    respond 3, [2]
+    respond 5, [0x02, 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x41] # SCEA
+  of 0x13:
+    # GetTN
+    respond 3, [2, 1, 1]
+  of 0x14:
+    # GetTD
+    var param: uint8
+    if not parameters.readFIFO(param): return
+    case param
+    of 0: respond 3, [2, 1, 0]
+    of 1: respond 3, [2, 0, 0]
+    else:
+      warn fmt "Unknown track number {param}"
+      respond 5, [0x10]
+  of 0xe:
+    # Setmode
+    if not parameters.readFIFO(mode): return
+    debug fmt"Mode is {mode:x}"
+    respond 3, [2]
+  of 0x9:
+    # Pause
+    respond 3, [2]
+    respond 2, [2]
+  of 0xa:
+    # Init
+    mode = 0
+    data.clear
+    respond 3, [2]
   else:
     warn fmt"Unknown command {value:02x}"
     queueInterrupt 5
@@ -103,7 +134,7 @@ proc readStatus*: uint8 =
     (uint8(response.len != 0) shl 5) or
     (uint8(data.len != 0) shl 6)
     # TODO: need to set busy bit?
-  debug fmt "read status {result:08x}"
+  trace fmt "read status {result:08x}"
 
 proc writeStatus*(value: uint8) =
   index = value and 3
@@ -112,11 +143,14 @@ proc readRegister*(address: 1..3): uint8 =
   case address
   of 1:
     # Response FIFO
-    debug fmt"read response {response}"
+    trace fmt"read response {response}"
     discard readFIFO(response, result)
   of 2:
     # Data FIFO
-    discard readFIFO(data, result)
+    if bfrd:
+      discard readFIFO(data, result)
+    else:
+      warn "Reading data FIFO when BFRD=0"
   of 3:
     case index
     of 0, 2:
@@ -128,10 +162,10 @@ proc readRegister*(address: 1..3): uint8 =
         result = interrupts[0].uint8
       if commandStart:
         result = result or 0x10
-  debug fmt"Reading from index {index}, address {address} => {result:02x}"
+  trace fmt"Reading from index {index}, address {address} => {result:02x}"
 
 proc writeRegister*(address: 1..3, value: uint8) =
-  debug fmt"Writing {value:02x} to index {index}, address {address}"
+  trace fmt"Writing {value:02x} to index {index}, address {address}"
   # The CD controller has a *lot* of registers!
   case index
   of 0:
