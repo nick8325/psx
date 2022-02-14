@@ -180,6 +180,7 @@ const
 
 var
   lastVBlankStart: int64 = 0
+  lastRegion: Region = region
 
 proc clocksPerPixel*: int64 {.inline.} =
   ## Clock cycles per pixel drawn.
@@ -188,15 +189,15 @@ proc clocksPerPixel*: int64 {.inline.} =
   # TODO: support 480p mode?
   # (PSX hardware supports it if connected to VGA monitor)
 
-proc clocksPerScanline*: int64 {.inline.} =
+proc clocksPerScanline*(region: Region = region): int64 {.inline.} =
   ## Clock cycles per scanline.
 
   gpuClock * gpuClocksPerScanline[region]
 
-proc clocksPerFrame*: int64 {.inline.} =
+proc clocksPerFrame*(region: Region = region): int64 {.inline.} =
   ## Clock cycles per screen refresh.
 
-  clocksPerScanline() * scanlinesPerFrame[region]
+  clocksPerScanline(region) * scanlinesPerFrame[region]
 
 proc maxScreenWidth: int64 =
   ## Maximum permissible screen width.
@@ -240,13 +241,13 @@ proc lastVBlankDelta*(): int64 {.inline.} =
   ## Number of clock cycles since the last VBLANK started.
 
   result = events.now() - lastVBlankStart
-  assert result >= 0 and result < clocksPerFrame()
+  assert result >= 0 and result < clocksPerFrame(lastRegion)
 
 proc nextVBlankDelta*(): int64 {.inline.} =
   ## Number of clock cycles until the next VBLANK starts.
 
-  result = clocksPerFrame() - lastVBlankDelta()
-  assert result > 0 and result <= clocksPerFrame()
+  result = clocksPerFrame(lastRegion) - lastVBlankDelta()
+  assert result > 0 and result <= clocksPerFrame(lastRegion)
 
 proc inVBlank*(): bool {.inline.} =
   ## Are we currently in the VBLANK interval?
@@ -263,14 +264,14 @@ proc lastHBlankDelta*(): int64 {.inline.} =
   ## Number of clock cycles since the last HBLANK started.
 
   # "The hblank signal is generated even during vertical blanking/retrace."
-  result = lastVBlankDelta() mod clocksPerScanline()
-  assert result >= 0 and result < clocksPerScanline()
+  result = lastVBlankDelta() mod clocksPerScanline(lastRegion)
+  assert result >= 0 and result < clocksPerScanline(lastRegion)
 
 proc nextHBlankDelta*(): int64 {.inline.} =
   ## Number of clock cycles until the next HBLANK starts.
 
-  result = clocksPerScanline() - lastHBlankDelta()
-  assert result > 0 and result <= clocksPerScanline()
+  result = clocksPerScanline(lastRegion) - lastHBlankDelta()
+  assert result > 0 and result <= clocksPerScanline(lastRegion)
 
 proc inHBlank*(): bool {.inline.} =
   ## Are we currently in the HBLANK interval?
@@ -291,8 +292,8 @@ proc currentFrame*(): int64 {.inline.} =
 proc currentScanline*(): int64 {.inline.} =
   ## The current scanline number being drawn.
 
-  result = lastVBlankDelta() div clocksPerScanline()
-  assert result >= 0 and result < scanlinesPerFrame[region]
+  result = lastVBlankDelta() div clocksPerScanline(lastRegion)
+  assert result >= 0 and result < scanlinesPerFrame[lastRegion]
 
 proc screenSettings*(): string =
   ## Dump the screen settings.
@@ -321,6 +322,7 @@ proc afterVBlank*(name: string, p: proc()) =
 onVBlank("gpu vblank") do ():
   debug "VBLANK"
   lastVBlankStart = events.now()
+  lastRegion = region
   screen.frameNumber += 1
   screen.vblank = true
   irqs.signal 0
