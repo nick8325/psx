@@ -19,35 +19,75 @@ for x in expansion.mitems: x = 0xff
 bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../roms/scph5502.bin"), 0, 0x7ffff)
 
 # Map in all the memory
-#                      region        address        writable  io
-addressSpace.mapRegion(ram,          0x00000000u32, true,     false)
-addressSpace.mapRegion(ram,          0x00200000u32, true,     false)
-addressSpace.mapRegion(ram,          0x00400000u32, true,     false)
-addressSpace.mapRegion(ram,          0x00600000u32, true,     false)
-addressSpace.mapRegion(expansion,    0x1f000000u32, true,     true)
-addressSpace.mapRegion(scratchpad,   0x1f800000u32, true,     false)
-addressSpace.mapRegion(ioPorts,      0x1f801000u32, true,     true)
-addressSpace.mapRegion(expansion,    0x1f802000u32, true,     true)
-addressSpace.mapRegion(bios,         0x1fc00000u32, false,    false)
+#                      region        address        writable  io     region
+addressSpace.mapRegion(ram,          0x00000000u32, true,     false, RAM)
+addressSpace.mapRegion(ram,          0x00200000u32, true,     false, RAM)
+addressSpace.mapRegion(ram,          0x00400000u32, true,     false, RAM)
+addressSpace.mapRegion(ram,          0x00600000u32, true,     false, RAM)
+addressSpace.mapRegion(expansion,    0x1f000000u32, true,     true,  Expansion1)
+addressSpace.mapRegion(scratchpad,   0x1f800000u32, true,     false, Scratchpad)
+addressSpace.mapRegion(ioPorts,      0x1f801000u32, true,     true,  GPU) # WRONG!
+addressSpace.mapRegion(expansion,    0x1f802000u32, true,     true,  Expansion2)
+addressSpace.mapRegion(bios,         0x1fc00000u32, false,    false, BIOS)
 # TODO: allow enabling/disabling scratchpad
-addressSpace.mapRegion(cacheControl, 0xfffe0000u32, true,     false)
+addressSpace.mapRegion(cacheControl, 0xfffe0000u32, true,     false, ScratchPad)
 
-# Set up I/O space
+# Expansion 1/2 base address
 addressSpace.rawWrite[:word](0x1f801000u32, 0x1f000000u32)
 addressSpace.rawWrite[:word](0x1f801004u32, 0x1f802000u32)
-addressSpace.rawWrite[:word](0x1f801008u32, 0x0013243fu32)
-addressSpace.rawWrite[:word](0x1f80100cu32, 0x00003022u32)
-addressSpace.rawWrite[:word](0x1f801010u32, 0x0013243fu32)
-addressSpace.rawWrite[:word](0x1f801014u32, 0x200931e1u32)
-addressSpace.rawWrite[:word](0x1f801018u32, 0x00020843u32)
-addressSpace.rawWrite[:word](0x1f80101cu32, 0x00070777u32)
-addressSpace.rawWrite[:word](0x1f801020u32, 0x00031125u32)
-addressSpace.rawWrite[:word](0x1f801060u32, 0x00000b88u32)
-addressSpace.rawWrite[:word](0xfffe0130u32, 0x0001e988u32)
 
 # Patch the BIOS to enable TTY output (taken from DuckStation).
 addressSpace.forcedRawWrite[:word](0x1FC06F0Cu32, 0x24010001u32)
 addressSpace.forcedRawWrite[:word](0x1FC06F14u32, 0xAF81A9C0u32)
+
+# RAM timings
+type
+  RegionDelay = distinct word
+  CommonDelay = distinct word
+
+RegionDelay.bitfield accessTime, int, 4, 4
+RegionDelay.bitfield useCOM0, bool, 8, 1
+RegionDelay.bitfield useCOM1, bool, 9, 1
+RegionDelay.bitfield useCOM2, bool, 10, 1
+RegionDelay.bitfield useCOM3, bool, 11, 1
+RegionDelay.bitfield sixteenBits, bool, 12, 1
+RegionDelay.bitfield windowSize, int, 16, 5
+
+CommonDelay.bitfield com0, int, 0, 4
+CommonDelay.bitfield com1, int, 4, 4
+CommonDelay.bitfield com2, int, 8, 4
+CommonDelay.bitfield com3, int, 12, 4
+
+proc delay(region: RegionDelay, common: CommonDelay, size: int): int =
+  ## Calculate how many clock cycles it takes to read a given region.
+
+  # Taken from Nocash PSX, "Memory control".
+  let
+    com0 = if region.useCOM0: common.com0 - 1 else: 0
+    com2 = if region.useCOM2: common.com2 else: 0
+    min = if region.useCOM3: common.com3 else: 0
+
+    shared = com0 + com2 + region.accessTime + 2
+    first = max(min+6, shared + int(com0 + com2 < 6))
+    seq = max(min+2, shared)
+
+    accesses = divRoundUp(size, if region.sixteenBits: 2 else: 1)
+
+  cpuClock * (first + (accesses-1) * seq)
+
+var
+  regionDelays: array[6, RegionDelay]
+  regions: array[6, MemoryRegion] =
+    [Expansion1, Expansion3, BIOS, SPU, CDROM, Expansion2]
+  commonDelay: CommonDelay
+
+proc updateDelays =
+  ## Update the memory delay information.
+  for i, regionDelay in regionDelays:
+    let region = regions[i]
+    memoryDelay8[region] = delay(regionDelay, commonDelay, 1)
+    memoryDelay16[region] = delay(regionDelay, commonDelay, 2)
+    memoryDelay32[region] = delay(regionDelay, commonDelay, 4)
 
 # I/O handlers
 proc handleIO8(address: word, value: var uint8, kind: IOKind): bool =
@@ -123,9 +163,30 @@ proc handleIO16(address: word, value: var uint16, kind: IOKind): bool =
 
 proc handleIO32(address: word, value: var uint32, kind: IOKind): bool =
   case address
-  of 0x1f801000u32 .. 0x1f801024u32, 0x1f801060:
-    # Memory control (TODO)
+  of 0x1f801000u32..0x1f801004u32:
+    # Expansion base address
+    case kind
+    of Read: return true
+    of Write: return false
+  of 0x1f801060u32:
+    # RAM Size
     return true
+  of 0x1f801008u32..0x1f80101cu32:
+    # Memory region delay
+    let i = (address - 0x1f801008) div 4
+    case kind
+    of Read: value = regionDelays[i].word
+    of Write:
+      word(regionDelays[i]) = value
+      updateDelays()
+    return true
+  of 0x1f801020u32:
+    # Common delay
+    case kind
+    of Read: value = commonDelay.word
+    of Write:
+      word(commonDelay) = value
+      updateDelays()
   of 0x1f801c00u32 .. 0x1f801ffcu32:
     # SPU (TODO)
     return true
@@ -238,8 +299,8 @@ proc runSystem*(clocks: int64) =
 
   let stop = events.now + clocks
   while events.now < stop:
-    cpu.cpu.step
-    events.fastForward(cpuClock)
+    let delay = cpu.cpu.step
+    events.fastForward(cpuClock + delay)
 
 proc dumpRAM*(filename: string) =
   ## Dump the contents of RAM to a file.

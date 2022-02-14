@@ -187,9 +187,17 @@ proc fetch*(cpu: CPU): word =
   ## Fetch the next instruction.
   addressSpace.fetch(cpu.resolveAddress(cpu.pc, Fetch))
 
-proc read*[T](cpu: CPU, address: word): T =
+proc read*[T](cpu: CPU, address: word, delay: var int): T =
   ## Read from a given virtual address.
-  addressSpace.read[:T](cpu.resolveAddress(address, Load))
+  var region: MemoryRegion
+
+  result = addressSpace.read[:T](cpu.resolveAddress(address, Load), region)
+  delay =
+    case T.sizeOf
+    of 1: memoryDelay8[region]
+    of 2: memoryDelay16[region]
+    of 4: memoryDelay32[region]
+    else: raise new AssertionDefect
 
 proc write*[T](cpu: CPU, address: word, val: T) =
   ## Write to a given virtual address.
@@ -506,7 +514,7 @@ static:
     assert start.left(i).right(i) == read(i)
     assert start.right(i).left(i) == read(i)
 
-proc execute(cpu: var CPU, instr: word) {.inline.} =
+proc execute(cpu: var CPU, instr: word): int {.inline.} =
   ## Decode and execute an instruction.
   var newPC = cpu.nextPC + 4
 
@@ -514,6 +522,8 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   var newDelayedUpdate = (reg: r0, val: 0u32)
   # A register write to be done this instruction.
   var update = (reg: r0, val: 0u32)
+  # Extra clocks used by instruction
+  var delay = 0
 
   let
     op = decode(instr)
@@ -621,35 +631,37 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   of SRAV: rd.set((cpu[rt].signed shr (cpu[rs] and 0x1f)).unsigned)
   of SRL: rd.set(cpu[rt] shr shamt)
   of SRLV: rd.set(cpu[rt] shr (cpu[rs] and 0x1f))
-  of LW: rt.delayedSet(cpu.read[:word](cpu[rs] + imm.signExt))
-  of LB: rt.delayedSet(iword(cpu.read[:int8](cpu[rs] + imm.signExt)).unsigned)
-  of LBU: rt.delayedSet(word(cpu.read[:uint8](cpu[rs] + imm.signExt)))
-  of LH: rt.delayedSet(iword(cpu.read[:int16](cpu[rs] + imm.signExt)).unsigned)
-  of LHU: rt.delayedSet(word(cpu.read[:uint16](cpu[rs] + imm.signExt)))
+  of LW: rt.delayedSet(cpu.read[:word](cpu[rs] + imm.signExt, delay))
+  of LB: rt.delayedSet(iword(cpu.read[:int8](cpu[rs] + imm.signExt, delay)).unsigned)
+  of LBU: rt.delayedSet(word(cpu.read[:uint8](cpu[rs] + imm.signExt, delay)))
+  of LH: rt.delayedSet(iword(cpu.read[:int16](cpu[rs] + imm.signExt, delay)).unsigned)
+  of LHU: rt.delayedSet(word(cpu.read[:uint16](cpu[rs] + imm.signExt, delay)))
   of LWL:
     # Skip the load delay slot for LWL/LWR
     let
       address = cpu[rs] + imm.signExt
-      value = cpu.read[:word](address and not 3u32)
+      value = cpu.read[:word](address and not 3u32, delay)
     rt.set(cpu[rt].replaceLeft(value, address and 3))
   of LWR:
     let
       address = cpu[rs] + imm.signExt
-      value = cpu.read[:word](address and not 3u32)
+      value = cpu.read[:word](address and not 3u32, delay)
     rt.set(cpu[rt].replaceRight(value, address and 3))
   of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt])
   of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
   of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
   of SWL:
+    var dummyDelay: int # On an actual MIPS this doesn't do a load
     let
       address = cpu[rs] + imm.signExt
-      value = cpu.read[:word](address and not 3u32)
+      value = cpu.read[:word](address and not 3u32, dummyDelay)
       newValue = value.replaceLeft(cpu[rt], address and 3)
     cpu.write[:word](address and not 3u32, newValue)
   of SWR:
+    var dummyDelay: int # On an actual MIPS this doesn't do a load
     let
       address = cpu[rs] + imm.signExt
-      value = cpu.read[:word](address and not 3u32)
+      value = cpu.read[:word](address and not 3u32, dummyDelay)
       newValue = value.replaceRight(cpu[rt], address and 3)
     cpu.write[:word](address and not 3u32, newValue)
   of BEQ: branchIf(cpu[rs] == cpu[rt])
@@ -688,6 +700,7 @@ proc execute(cpu: var CPU, instr: word) {.inline.} =
   cpu[cpu.delayedUpdate.reg] = cpu.delayedUpdate.val
   cpu[update.reg] = update.val
   cpu.delayedUpdate = newDelayedUpdate
+  result = delay
 
 # Exception handling
 
@@ -746,7 +759,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
   cpu.nextPC = cpu.pc + 4
 
 # TODO: this violates aliasing rules - irq.nim modifies the global CPU.
-proc step*(cpu: var CPU) {.inline.} =
+proc step*(cpu: var CPU): int {.inline.} =
   try:
     # Check for IRQs first.
     if cpu.cop0.sr[ie0] and (cpu.cop0.sr[im] and cpu.cop0.cause[ip]) != 0:
@@ -756,7 +769,7 @@ proc step*(cpu: var CPU) {.inline.} =
       oldCPU = cpu
       instr = cpu.fetch
     # The execute function is in charge of updating pc and nextPC.
-    cpu.execute(instr)
+    result = cpu.execute(instr)
     trace fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
   except MachineError as error:
     cpu.handleException(error)

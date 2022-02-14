@@ -12,32 +12,47 @@ type
 
 const
   pageSize = 0x1000
+  flagsMask: ByteAddress = pageSize-1
+  addressMask = not flagsMask
+  writableBit: ByteAddress = 1 shl 11
+  ioBit: ByteAddress = 1 shl 10
+  regionBits: ByteAddress = min(writableBit, ioBit)-1
 
 const
   invalidPage {.used.}: Page = Page(0)
 
-func initPage(page: ptr array[pageSize, byte], writable: bool, io: bool): Page =
+static:
+  # Check everything fits in the low bits of the page descriptor
+  assert MemoryRegion.low.ByteAddress >= 0 and MemoryRegion.high.ByteAddress <= regionBits
+  assert ((writableBit or ioBit or regionBits) and addressMask) == 0
+
+func initPage(page: ptr array[pageSize, byte], writable: bool, io: bool, region: MemoryRegion): Page =
   ## Create a page descriptor from a page-aligned piece of memory.
 
   let address = cast[ByteAddress](page)
-  assert address mod pageSize == 0
-  Page(address or (if writable: 1 else: 0) or (if io: 2 else: 0))
+  assert (address and flagsMask) == 0
+  Page(address or (if writable: writableBit else: 0) or (if io: ioBit else: 0) or region.ByteAddress)
 
 func pointer(page: Page): ptr array[pageSize, byte] {.inline.} =
   ## Get the pointer from a page descriptor (or null).
 
   # This gives null if the page is invalid
-  cast[ptr array[pageSize, byte]](ByteAddress(page) and not 3)
+  cast[ptr array[pageSize, byte]](ByteAddress(page) and addressMask)
 
 func writable(page: Page): bool {.inline.} =
   ## Is a page writable?
 
-  (ByteAddress(page) and 1) != 0
+  (ByteAddress(page) and writableBit) != 0
 
-func IO(page: Page): bool {.inline.} =
+func io(page: Page): bool {.inline.} =
   ## Does a page represent memory-mapped I/O?
 
-  (ByteAddress(page) and 2) != 0
+  (ByteAddress(page) and ioBit) != 0
+
+func region(page: Page): MemoryRegion {.inline.} =
+  ## What memory region does a given page belong to?
+
+  MemoryRegion(ByteAddress(page) and regionBits)
 
 type
   IOKind* {.pure.} = enum
@@ -61,7 +76,7 @@ type
     ioHandler32*: proc(address: word, value: var uint32, kind: IOKind): bool
 
 type
-  ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool] ## \
+  ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool, region: MemoryRegion] ## \
     ## A virtual address resolved to a pointer on the host.
 
 proc resolve[T](memory: Memory, address: word, kind: AccessKind): ResolvedAddress[T] {.inline.} =
@@ -81,9 +96,10 @@ proc resolve[T](memory: Memory, address: word, kind: AccessKind): ResolvedAddres
 
   let pointer = cast[ptr T](cast[ByteAddress](entry.pointer) +% cast[ByteAddress](offset))
 
-  return (pointer: pointer, writable: entry.writable, io: entry.IO())
+  return (pointer: pointer, writable: entry.writable, io: entry.io(), region: entry.region())
 
-proc mapRegion*(memory: var Memory, arr: var openArray[byte], address: word, writable: bool, io: bool) =
+proc mapRegion*(memory: var Memory, arr: var openArray[byte], address: word,
+                writable: bool, io: bool, region: MemoryRegion) =
   ## Map a byte array into the virtual address space.
   ## The array must be page-aligned and its size must be a multiple of one page.
 
@@ -94,12 +110,13 @@ proc mapRegion*(memory: var Memory, arr: var openArray[byte], address: word, wri
   let startingPage = address div pageSize
   for i in 0 ..< arr.len div pageSize:
     let page = sliceArray[pageSize, byte](arr, i * pageSize)
-    memory.table[startingPage + cast[word](i)] = initPage(page, writable = writable, io = io)
+    memory.table[startingPage + cast[word](i)] =
+      initPage(page, writable = writable, io = io, region = region)
 
   if address + word(arr.len) <= 0x20000000u32:
     # Add the block to KSEG0 and KSEG1
-    mapRegion(memory, arr, address + 0x80000000u32, writable, io)
-    mapRegion(memory, arr, address + 0xa0000000u32, writable, io)
+    mapRegion(memory, arr, address + 0x80000000u32, writable, io, region)
+    mapRegion(memory, arr, address + 0xa0000000u32, writable, io, region)
 
 proc fetch*(memory: Memory, address: word): word {.inline.} =
   ## Fetch a word of memory as an instruction.
@@ -183,12 +200,13 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind) =
     let kindStr = toLowerAscii $kind
     warn fmt"Unknown I/O, address {address:08x}, value {value:08x} ({T.sizeof}-byte {kindStr})"
 
-proc read*[T](memory: Memory, address: word): T {.inline.} =
+proc read*[T](memory: Memory, address: word, region: var MemoryRegion): T {.inline.} =
   ## Read data from memory.
   ## Raises a MachineError if the address is invalid.
 
   let resolved = memory.resolve[:T](address, Load)
   if resolved.io: memory.handleIO[:T](address, Read)
+  region = resolved.region
   resolved.pointer[]
 
 proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
