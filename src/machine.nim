@@ -16,7 +16,7 @@ var
 
 # Initialise expansion to -1, and read in BIOS
 for x in expansion.mitems: x = 0xff
-bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../roms/scph1001.bin"), 0, 0x7ffff)
+bios[0 ..< 0x80000] = toOpenArrayByte(static (staticRead "../roms/scph5502.bin"), 0, 0x7ffff)
 
 # Map in all the memory
 #                      region        address        writable  io
