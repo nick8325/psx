@@ -10,7 +10,29 @@ type
   Joypad* = proc(val: uint8): tuple[done: bool, reply: uint8]
 
 var
+  pos: range[0..3] = 0
+
+var
   pads*: array[2, array[256, Joypad]]
+
+proc controller(val: uint8): tuple[done: bool, reply: uint8] =
+  case pos
+  of 0:
+    pos.inc
+    if val != 0x42:
+      warn fmt "Unknown command {val:x}"
+    return (done: false, reply: 0x41u8)
+  of 1:
+    pos.inc
+    return (done: false, reply: 0x5au8)
+  of 2:
+    pos.inc
+    return (done: false, reply: 0x40u8)
+  of 3:
+    pos = 0
+    return (done: true, reply: 0u8)
+
+pads[0][0x01] = controller
 
 type
   Stat = distinct word
@@ -122,7 +144,7 @@ proc joyTransmit*(val: byte) =
       ack = not result.done
 
     if not ack:
-      debug fmt "Finished with controller {selected[control.slot]:x} in slot {control.slot}"
+      debug fmt "Finished with controller {selected[control.slot]} in slot {control.slot}"
       selected[control.slot] = none(uint8)
 
   events.after(tickRate, "Joypad reply") do():
@@ -178,6 +200,9 @@ proc setJoyControl*(val: uint16) =
 
   uint16(control) = val and 0x3f7f
   if control.reset: reset()
+  if not control.txEnable:
+    selected[0] = none(uint8)
+    selected[1] = none(uint8)
   updateIRQ()
 
 proc joyBaud*: uint16 =
