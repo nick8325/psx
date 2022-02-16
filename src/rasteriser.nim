@@ -317,6 +317,53 @@ func interpolate(i: ColourInterpolator, p: Point): Colour =
 func interpolate(i: PointInterpolator, p: Point): Point =
   (x: i.x.interpolate(p).int, y: i.y.interpolate(p).int)
 
+# Similar to the above but for linear interpolation.
+type LineInterpolator = tuple[x0, y0, z0, dzdx, dzdy: float]
+
+func makeLineInterpolator[T](inputs: array[2, Point],
+                             outputs: array[2, T]): LineInterpolator =
+
+  result.x0 = inputs[0].x.float
+  result.y0 = inputs[0].y.float
+  result.z0 = outputs[0].float
+
+  if inputs[0] == inputs[1]:
+    result.dzdx = 0
+    result.dzdy = 0
+    return
+
+  let dx = float(inputs[1].x - inputs[0].x)
+  let dy = float(inputs[1].y - inputs[0].y)
+  let k = sqrt(dx*dx + dy*dy)
+  # Unit vector in direction inputs[0] -> inputs[1]
+  let ux = dx / k
+  let uy = dy / k
+  # Corresponding change in z for unit vector change
+  let uz = (outputs[1].float - outputs[0].float) / k
+
+  result.dzdx = uz * ux
+  result.dzdy = uz * uy
+
+func interpolate(interpolator: LineInterpolator, p: Point): float64 =
+  return interpolator.z0 +
+    (p.x.float - interpolator.x0) * interpolator.dzdx +
+    (p.y.float - interpolator.y0) * interpolator.dzdy
+
+type
+  ColourLineInterpolator = object
+    red, green, blue: LineInterpolator
+
+func makeLineInterpolator(inputs: array[2, Point], outputs: array[2, Colour]): ColourLineInterpolator =
+  ColourLineInterpolator(
+    red: inputs.makeLineInterpolator [outputs[0].red, outputs[1].red],
+    green: inputs.makeLineInterpolator [outputs[0].green, outputs[1].green],
+    blue: inputs.makeLineInterpolator [outputs[0].blue, outputs[1].blue])
+
+func interpolate(i: ColourLineInterpolator, p: Point): Colour =
+  (red: i.red.interpolate(p).int.clamp(0, 255),
+   green: i.green.interpolate(p).int.clamp(0, 255),
+   blue: i.blue.interpolate(p).int.clamp(0, 255))
+
 proc getPixel[N: static int](texture: Texture[N]; x, y: int): Pixel =
   ## Look up a pixel coordinate in a texture.
 
@@ -541,19 +588,40 @@ proc draw*(settings: Settings, rect: Rectangle) =
         putTexturePixel(x, y, getPixel(rect.texture, tx, ty).mix(rect.colour), settings)
 
 proc draw*(settings: Settings, line: Line) =
-  ## Draw a line.
+  ## Draw a line. The last point on the line is not drawn.
+  ## (This is important to prevent points being drawn twice in polylines!)
 
   debug fmt"draw {line}"
-  if line.start.point.x == line.stop.point.x and line.start.colour == line.stop.colour:
-    for y in min(line.start.point.y, line.stop.point.y)..max(line.start.point.y, line.stop.point.y):
-      putPixel(line.start.point.x, y, line.start.colour, settings)
-  elif line.start.point.y == line.stop.point.y and line.start.colour == line.stop.colour:
-    for x in min(line.start.point.x, line.stop.point.x)..max(line.start.point.x, line.stop.point.x):
-      putPixel(x, line.start.point.y, line.start.colour, settings)
-  else:
-    warn fmt"draw {line}"
 
+  if line.start == line.stop: return
+  let interpolator =
+    makeLineInterpolator([line.start.point, line.stop.point],
+                         [line.start.colour, line.stop.colour])
 
+  # Algorithm taken from
+  # https://en.wikipedia.org/wiki/Bresenham's_line_algorithm
+  let
+    dx = abs(line.stop.point.x - line.start.point.x)
+    sx = signum(line.stop.point.x - line.start.point.x)
+    dy = -abs(line.stop.point.y - line.start.point.y)
+    sy = signum(line.stop.point.y - line.start.point.y)
+
+  var
+    err = dx+dy
+    p = line.start.point
+
+  while p != line.stop.point:
+    trace fmt"plot ({p.x}, {p.y}), colour {interpolator.interpolate(p)}"
+    putPixel(p.x, p.y, interpolator.interpolate(p), settings)
+    if 2*err >= dy:
+      if p.x == line.stop.point.x: break
+      err += dy
+      p.x += sx
+    else:
+      assert 2*err <= dx
+      if p.y == line.stop.point.y: break
+      err += dx
+      p.y += sy
 
 proc fill*(settings: Settings; x, y, w, h: int; c: Colour) =
   ## Fill a rectangle with a solid colour.

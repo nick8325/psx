@@ -583,6 +583,10 @@ let processCommand = consumer(word):
                         stop: (point: vertices[i+1], colour: colours[i+1]))
         settings.draw line
 
+      # Fill in the endpoint of the last line, if it hasn't been drawn yet
+      if vertices[^1] notin vertices[0..^2]:
+        putPixel(vertices[^1].x, vertices[^1].y, colours[^1], settings)
+
     of 0x60..0x7f:
       # A rectangle.
       # The bits of the command word have the following meaning:
