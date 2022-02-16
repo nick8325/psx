@@ -158,20 +158,27 @@ proc joyTransmit*(val: byte) =
     updateIRQ()
 
     if ack:
-      events.after(100 * cpuClock, "Joypad ACK end") do():
-        debug fmt "Switching off ACK"
+      events.after(tickRate, "Joypad ACK end") do():
+        trace fmt "Switching off ACK"
         stat.padAck = false
         updateIRQ()
 
-proc joyReceive*: byte =
+proc joyReceive*: word =
+  var bytes = [0xffu8, 0xffu8, 0xffu8, 0xffu8]
   if rxFIFO.len > 0:
-    result = rxFIFO.popFirst()
+    bytes[0] = rxFIFO.popFirst()
+    if rxFIFO.len > 1: bytes[1] = rxFIFO[1]
+    if rxFIFO.len > 2: bytes[2] = rxFIFO[2]
+    if rxFIFO.len > 3: bytes[3] = rxFIFO[3]
   else:
-    warn "Receive on empty FIFO"
-    result = 0xff
+    trace "Receive on empty FIFO"
+
+  result = bytes[0].word + (bytes[1].word shl 8) +
+    (bytes[2].word shl 16) + (bytes[3].word shl 24)
+
   stat.rxFIFONotEmpty = (rxFIFO.len > 0)
 
-  debug fmt "Received {result:x}"
+  trace fmt "Received {result:x}"
 
   updateIRQ()
 
@@ -181,22 +188,22 @@ proc joyStat*: word =
   stat.word
 
 proc joyMode*: uint16 =
-  debug fmt"Read mode as {mode:x}"
+  trace fmt"Read mode as {mode:x}"
 
   mode
 
 proc setJoyMode*(val: uint16) =
-  debug fmt"Set mode to {mode:x}"
+  trace fmt"Set mode to {mode:x}"
 
   mode = val
 
 proc joyControl*: uint16 =
-  debug fmt"Read control as {control.uint16:x}"
+  trace fmt"Read control as {control.uint16:x}"
 
   control.uint16
 
 proc setJoyControl*(val: uint16) =
-  debug fmt"Set control to {val:x}"
+  trace fmt"Set control to {val:x}"
 
   uint16(control) = val and 0x3f7f
   if control.reset: reset()

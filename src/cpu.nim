@@ -83,6 +83,7 @@ proc `[]`(cop0: COP0, reg: CoRegister): word =
   case reg
   of CoRegister(3): cop0.bpc
   of CoRegister(5): cop0.bda
+  of CoRegister(6): 0 # JUMPDEST
   of CoRegister(7): cop0.dcic
   of CoRegister(8): cop0.badvaddr
   of CoRegister(9): cop0.bdam
@@ -567,12 +568,12 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     if y == 0:
       cpu.lo = (if x >= 0: -1 else: 1).unsigned
       cpu.hi = x.unsigned
-    elif x == -1 and y == -1:
+    elif x == int32.low and y == -1:
       cpu.lo = -1.unsigned
       cpu.hi = 0
-
-    cpu.lo = (x div y).unsigned
-    cpu.hi = (x mod y).unsigned
+    else:
+      cpu.lo = (x div y).unsigned
+      cpu.hi = (x mod y).unsigned
 
   of DIVU:
     let
@@ -582,9 +583,9 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     if y == 0:
       cpu.lo = word.high
       cpu.hi = x
-
-    cpu.lo = x div y
-    cpu.hi = x mod y
+    else:
+      cpu.lo = x div y
+      cpu.hi = x mod y
 
   of MULT:
     let
