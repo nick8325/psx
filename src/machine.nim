@@ -344,6 +344,36 @@ addressSpace.ioHandler32 = handleIO32
 dma.channels[2].read = gpuReadDMA
 dma.channels[2].write = gpuWriteDMA
 
+type EXE {.packed.} = object
+  id: array[8, char]
+  pad: array[8, char]
+  initialPC: word
+  initialGP: word
+  loadAddress: word
+  fileSize: word
+  unk0, unk1: word
+  memFillStart, memFillSize: word
+  initialSPBase, initialSPOffset: word
+
+const wantedID: array[8, char] = ['P', 'S', '-', 'X', ' ', 'E', 'X', 'E']
+var header: EXE
+
+proc loadEXE*(exe: string) =
+  if exe.len > EXE.sizeof:
+    header = (cast[ptr EXE](addr(exe[0])))[]
+
+    if header.id != wantedID:
+      error "EXE file has wrong header"
+
+    for i in header.memFillStart ..< header.memFillStart + header.memFillSize:
+      addressSpace.rawWrite[:uint8](i, 0)
+
+    for i in 0x800 ..< exe.len:
+      addressSpace.rawWrite[:uint8](header.loadAddress + i.word - 0x800, exe[i].uint8)
+
+  else:
+    error "EXE file too small"
+
 proc runSystem*(clocks: int64) =
   ## Run the system.
 
@@ -351,6 +381,16 @@ proc runSystem*(clocks: int64) =
   while events.now < stop:
     let now = events.now
     var time = now
+
+    if cpu.cpu.pc == 0xbfc06ff0u32 or cpu.cpu.pc == 0x1fc06ff0u32:
+      info "Kernel done"
+      if header.id == wantedID:
+        info "Switching to loaded EXE"
+        cpu.cpu.jump(header.initialPC)
+        cpu.cpu[Register(28)] = header.initialGP
+        cpu.cpu[Register(29)] = header.initialSPBase + header.initialSPOffset
+        cpu.cpu[Register(30)] = header.initialSPBase + header.initialSPOffset
+
     cpu.cpu.step(time)
     events.fastForward(time - now)
 

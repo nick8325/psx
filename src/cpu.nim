@@ -169,6 +169,12 @@ func setIRQ*(cpu: var CPU, irq: bool) =
 
   cpu.cop0.cause[ip.bit 2] = irq
 
+proc jump*(cpu: var CPU, pc: word) =
+  ## Jump to a particular address.
+
+  cpu.pc = pc
+  cpu.nextPC = pc+4
+
 proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word =
   ## Resolve a virtual address to a physical address,
   ## also checking access permissions.
@@ -746,8 +752,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
 
   cpu.cop0.enterKernel
 
-  cpu.pc = if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32
-  cpu.nextPC = cpu.pc + 4
+  cpu.jump(if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32)
 
 # TODO: this violates aliasing rules - irq.nim modifies the global CPU.
 proc step*(cpu: var CPU, time: var int64) {.inline.} =

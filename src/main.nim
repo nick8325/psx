@@ -1,6 +1,6 @@
 import sdl2, sdl2/gfx
 import machine, rasteriser, basics, eventqueue, irq, gpu
-import std/[strformat, monotimes]
+import std/[strformat, monotimes, os]
 
 discard sdl2.init(INIT_EVERYTHING)
 
@@ -45,6 +45,9 @@ discard window.setGammaRamp(addr ramp[0], addr ramp[0], addr ramp[0])
 
 events.every(proc: int64 = clockRate, "dump ram") do():
   dumpRAM("ram")
+
+if paramCount() >= 1:
+  loadEXE(readFile(paramStr(1)))
 
 while runGame:
   while pollEvent(evt):
