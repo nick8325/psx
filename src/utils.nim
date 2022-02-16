@@ -9,19 +9,16 @@ const
 type
   Component* = enum
     logCPU, logMemory, logEventQueue, logGPU, logRasteriser,
-    logDMA, logIRQ, logTimer, logCDROM, logMachine
+    logDMA, logIRQ, logTimer, logCDROM, logMachine, logJoy
 
 func initialLevel(component: Component): Level {.inline.} =
   case component
   of logMachine: lvlDebug
+  of logJoy, logCDROM: lvlDebug
   else: lvlInfo
 
 func minLevel*(component: Component): Level {.inline.} =
-  result =
-    case component
-    of logCPU: lvlDebug
-    else: lvlInfo
-  result = result.min(component.initialLevel)
+  lvlInfo.min(component.initialLevel)
 
 var
   loggers: array[Component, Logger]

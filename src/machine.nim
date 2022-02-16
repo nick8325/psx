@@ -1,6 +1,6 @@
 ## Hooking up the PSX itself.
 
-import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, utils
+import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, joy, utils
 from cdrom import nil
 import std/strformat
 
@@ -157,18 +157,41 @@ proc handleIO8(address: word, value: var uint8, kind: IOKind, region: var Memory
     return false
 
 proc handleIO16(address: word, value: var uint16, kind: IOKind, region: var MemoryRegion): bool =
-  if address == 0x1f801802 and kind == Read:
-    # CD-ROM DATA FIFO
-    region = CDROM
-    value = cdrom.readData16()
+  case address
+  of 0x1f801802:
+    if kind == Read:
+      # CD-ROM DATA FIFO
+      region = CDROM
+      value = cdrom.readData16()
+      return true
+  of 0x1f802082:
+    if kind == Write:
+      # PCSX-Redux MIPS API
+      region = BuiltIn
+      fatal fmt"Exit requested with code {value}"
+      quit 1
+  of 0x1f801048:
+    # JOY_MODE
+    region = Serial
+    case kind
+    of Read: value = joyMode()
+    of Write: setJoyMode(value)
     return true
-  elif address == 0x1f802082 and kind == Write:
-    # PCSX-Redux MIPS API
-    region = BuiltIn
-    fatal fmt"Exit requested with code {value}"
-    quit 1
-
-  return false
+  of 0x1f80104a:
+    # JOY_CTRL
+    region = Serial
+    case kind
+    of Read: value = joyControl()
+    of Write: setJoyControl(value)
+    return true
+  of 0x1f80104e:
+    # JOY_BAUD
+    region = Serial
+    if kind == Read:
+      value = joyBaud()
+      return true
+  else:
+    return false
 
 proc handleIO32(address: word, value: var uint32, kind: IOKind, region: var MemoryRegion): bool =
   case address
@@ -298,16 +321,17 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind, region: var Memo
     else:
       return false
   of 0x1F801040:
-    # JOY_RX_DATA
+    # JOY_DATA
     region = Serial
-    if kind == Read:
-      value = 0xffffffffu32
-      return true
+    case kind
+    of Read: value = joyReceive()
+    of Write: joyTransmit(uint8(value and 0xff))
+    return true
   of 0x1F801044:
     # JOY_STAT
     region = Serial
     if kind == Read:
-      value = 3
+      value = joyStat()
       return true
   else:
     return false
