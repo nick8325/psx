@@ -770,6 +770,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
   cpu.cop0.enterKernel
 
   cpu.jump(if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32)
+  trace fmt"{cpu}"
 
 # TODO: this violates aliasing rules - irq.nim modifies the global CPU.
 proc step*(cpu: var CPU, time: var int64) {.inline.} =
