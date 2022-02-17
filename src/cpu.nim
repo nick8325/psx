@@ -124,7 +124,7 @@ proc leaveKernel(cop0: var COP0) =
     cop0.sr[ie[i]] = cop0.sr[ie[i+1]]
 
 proc enterKernel(cop0: var COP0) =
-  for i in 0..1:
+  for i in countdown(1, 0):
     cop0.sr[ku[i+1]] = cop0.sr[ku[i]]
     cop0.sr[ie[i+1]] = cop0.sr[ie[i]]
   cop0.sr[ku[0]] = false
@@ -163,6 +163,14 @@ func `[]=`*(cpu: var CPU, reg: Register, val: word) =
   ## Access registers by number. Takes care of ignoring writes to R0.
   cpu.registers[reg] = val
   cpu.registers[r0] = 0
+
+func delayedGet(cpu: CPU, reg: Register): word =
+  ## Access registers by number, but also look in the load delay slot.
+  assert cpu.registers[r0] == 0
+  if cpu.delayedUpdate.reg == reg:
+    return cpu.delayedUpdate.val
+  else:
+    return cpu.registers[reg]
 
 func setIRQ*(cpu: var CPU, irq: bool) =
   ## Update the IRQ flag.
@@ -262,7 +270,7 @@ type
     Jump,  ## Absolute jump
     MFC,   ## MFCn/CFCn - RD is (COP) source, RT is target
     MTC,   ## MTCn/CFCn - RT is source, RD is (COP) target
-    Whole, ## Only opcode used, rest is user-settable (SYSCALL and BREAK)
+    Exc,   ## Only opcode and funct used, rest is user-settable (SYSCALL and BREAK)
     COP,   ## Coprocessor instruction, lowest 25 bits are opcode
     None   ## No arguments (RFE)
 
@@ -276,7 +284,7 @@ const opcodeType: array[Opcode, OpcodeType] =
    LBU: Mem, LH: Mem, LHU: Mem, LWL: Mem, LWR: Mem, SW: Mem, SB: Mem, SH: Mem,
    SWL: Mem, SWR: Mem, BEQ: Imm, BNE: Imm, BGEZ: ImmS, BGEZAL: ImmS, BGTZ: ImmS,
    BLEZ: ImmS, BLTZ: ImmS, BLTZAL: ImmS, J: Jump, JR: RegS, JAL: Jump,
-   JALR: RegDS, SYSCALL: Whole, BREAK: Whole, MFC0: MFC, MTC0: MTC, RFE: None,
+   JALR: RegDS, SYSCALL: Exc, BREAK: Exc, MFC0: MFC, MTC0: MTC, RFE: None,
    COP2: COP, MFC2: MFC, MTC2: MTC, CFC2: MFC, CTC2: MTC]
 
 const
@@ -290,7 +298,7 @@ const
   imm = BitSlice[Immediate, word](pos: 0, width: 16)
   target = BitSlice[Target, word](pos: 0, width: 26)
   copimm = BitSlice[word, word](pos: 0, width: 25)
-  whole = BitSlice[word, word](pos: 0, width: 26)
+  exc = BitSlice[word, word](pos: 6, width: 20)
 
 proc decode(instr: word): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
@@ -346,12 +354,15 @@ proc decode(instr: word): Opcode {.inline.} =
     of 43: instr.ret SLTU
     else: raise MachineError(error: ReservedInstruction)
   of 1:
-    case int(instr[rt])
-    of 0: instr.ret BLTZ
-    of 1: instr.ret BGEZ
-    of 16: instr.ret BLTZAL
-    of 17: instr.ret BGEZAL
-    else: raise MachineError(error: ReservedInstruction)
+    # Bit 0 false: BLTZ true: BGEZ
+    # Bits 1-5=10000: link, otherwise: don't link
+    let op = instr[rt].int
+    if op.testBit 0:
+      if op == 17: instr.ret BGEZAL
+      else: instr.ret BGEZ
+    else:
+      if op == 16: instr.ret BLTZAL
+      else: instr.ret BLTZ
   of 2: instr.ret J
   of 3: instr.ret JAL
   of 4: instr.ret BEQ
@@ -414,7 +425,7 @@ proc format*(instr: word): string =
     rt = instr[rt]
     imm = instr[imm]
     target = instr[target]
-    whole = instr[whole]
+    exc = instr[exc]
     shamt = instr[shamt]
 
   proc args(args: varargs[string, `$`]): string =
@@ -438,7 +449,7 @@ proc format*(instr: word): string =
   of Jump: args(target)
   of MFC: args(rt, CoRegister(rd))
   of MTC: args(CoRegister(rd), rt)
-  of Whole: args(fmt"$0x{whole}")
+  of Exc: args(fmt"$0x{exc:x}")
   of COP: args(fmt"$0x{copimm}")
   of None: $op
 
@@ -556,6 +567,10 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
 
   template delayedSet(r: Register, v: word) =
     newDelayedUpdate = (reg: r, val: v)
+    # According to the AmiDog tests, if you load to the same register
+    # twice in consecutive instructions, the first load never takes effect
+    if cpu.delayedUpdate.reg == r:
+      cpu.delayedUpdate = (reg: r0, val: 0u32)
 
   template set(r: Register, v: word) =
     update = (reg: r, val: v)
@@ -577,7 +592,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
       cpu.lo = (if x >= 0: -1 else: 1).unsigned
       cpu.hi = x.unsigned
     elif x == int32.low and y == -1:
-      cpu.lo = cast[word](int32.low)
+      cpu.lo = int32.low.unsigned
       cpu.hi = 0
     else:
       cpu.lo = (x div y).unsigned
@@ -641,12 +656,12 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, time)
-    rt.set(cpu[rt].replaceLeft(value, address and 3))
+    rt.delayedSet(cpu.delayedGet(rt).replaceLeft(value, address and 3))
   of LWR:
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, time)
-    rt.set(cpu[rt].replaceRight(value, address and 3))
+    rt.delayedSet(cpu.delayedGet(rt).replaceRight(value, address and 3))
   of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt])
   of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
   of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
