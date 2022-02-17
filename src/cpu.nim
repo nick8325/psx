@@ -472,9 +472,11 @@ proc signedAdd(x, y: word): word =
   return x + y
 
 proc signedSub(x, y: word): word =
-  if x.signed > 0 and y.signed < low(iword) + x.signed:
+  # x >= 0 ==> (x-y > iword.high <==> y < x-iword.high)
+  if x.signed >= 0 and y.signed < x.signed - iword.high:
     raise MachineError(error: ArithmeticOverflow)
-  if x.signed < 0 and y.signed > high(iword) + x.signed:
+  # x < 0 ==> (x-y < iword.low <==> y > x-iword.low)
+  if x.signed < 0 and y.signed > x.signed - iword.low:
     raise MachineError(error: ArithmeticOverflow)
   return x - y
 
@@ -575,7 +577,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
       cpu.lo = (if x >= 0: -1 else: 1).unsigned
       cpu.hi = x.unsigned
     elif x == int32.low and y == -1:
-      cpu.lo = -1.unsigned
+      cpu.lo = cast[word](int32.low)
       cpu.hi = 0
     else:
       cpu.lo = (x div y).unsigned
@@ -665,7 +667,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
   of BEQ: branchIf(cpu[rs] == cpu[rt])
   of BNE: branchIf(cpu[rs] != cpu[rt])
   of BGEZ: branchIf(cpu[rs].signed >= 0)
-  of BGEZAL: branchIf(cpu[rs].signed > 0); link()
+  of BGEZAL: branchIf(cpu[rs].signed >= 0); link()
   of BGTZ: branchIf(cpu[rs].signed > 0)
   of BLEZ: branchIf(cpu[rs].signed <= 0)
   of BLTZ: branchIf(cpu[rs].signed < 0)

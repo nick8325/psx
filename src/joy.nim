@@ -147,7 +147,7 @@ proc joyTransmit*(val: byte) =
       debug fmt "Finished with controller {selected[control.slot]} in slot {control.slot}"
       selected[control.slot] = none(uint8)
 
-  events.after(tickRate, "Joypad reply") do():
+  events.after(tickRate*16, "Joypad reply") do():
     debug fmt "Replying with {reply}, ACK = {ack}"
 
     stat.padAck = ack
@@ -158,7 +158,7 @@ proc joyTransmit*(val: byte) =
     updateIRQ()
 
     if ack:
-      events.after(tickRate, "Joypad ACK end") do():
+      events.after(tickRate*8, "Joypad ACK end") do():
         trace fmt "Switching off ACK"
         stat.padAck = false
         updateIRQ()

@@ -223,6 +223,7 @@ proc handleIO32(address: word, value: var uint32, kind: IOKind, region: var Memo
     of Write:
       word(commonDelay) = value
       updateDelays()
+    return true
   of 0x1f801c00u32 .. 0x1f801ffcu32:
     # SPU (TODO)
     region = SPU

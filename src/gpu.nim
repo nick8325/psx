@@ -788,7 +788,7 @@ proc gp1*(value: word) =
     of 7: control.result = 2 # GPU Type
     of 8: control.result = 0
     else:
-      warn fmt"Unrecognised GPU info query {value[command]:02x}"
+      warn fmt"Unrecognised GPU info query {value and 0xf:02x}"
     debug fmt"GPU info returned {control.result:08x}"
   else:
     warn fmt"Unrecognised GP1 command {value:08x}"
