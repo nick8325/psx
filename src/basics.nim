@@ -36,7 +36,7 @@ type
 func isError*(error: MachineErrorKind): bool =
   ## Is a CPU exception an error condition (as opposed to e.g. a syscall)?
 
-  error notin {Interrupt, SystemCall, Breakpoint}
+  error notin {Interrupt, SystemCall}
 
 # Timing information.
 
