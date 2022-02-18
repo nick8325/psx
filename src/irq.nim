@@ -38,6 +38,7 @@ proc toggle*(irqs: var IRQs, irq: range[0..10]) =
 proc signal*(irqs: var IRQs, irq: range[0..10]) =
   ## Activate an input IRQ pin for an instant.
 
+  debug fmt"Signal IRQ {irq}, {cpu.cpu}"
   irqs.stat.setBit int(irq)
   irqs.setCPUIRQ()
 

@@ -132,6 +132,7 @@ proc readStatus*: uint8 =
     index.uint8 or
     # TODO: XA-ADPCM FIFO empty
     (uint8(parameters.len == 0) shl 3) or
+    (1 shl 4) or # Parameter FIFO not full
     (uint8(response.len != 0) shl 5) or
     (uint8(data.len != 0) shl 6)
     # TODO: need to set busy bit?
@@ -163,6 +164,7 @@ proc readRegister*(address: 1..3): uint8 =
         result = interrupts[0].uint8
       if commandStart:
         result = result or 0x10
+      result = result or 0xe0
   trace fmt"Reading from index {index}, address {address} => {result:02x}"
 
 proc writeRegister*(address: 1..3, value: uint8) =

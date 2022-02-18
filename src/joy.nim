@@ -148,7 +148,7 @@ proc joyTransmit*(val: byte) =
       selected[control.slot] = none(uint8)
 
   events.after(tickRate*16, "Joypad reply") do():
-    debug fmt "Replying with {reply}, ACK = {ack}"
+    debug fmt "Replying with {reply:x}, ACK = {ack}"
 
     stat.padAck = ack
 
@@ -210,6 +210,7 @@ proc setJoyControl*(val: uint16) =
   if not control.txEnable:
     selected[0] = none(uint8)
     selected[1] = none(uint8)
+    pos = 0
   updateIRQ()
 
 proc joyBaud*: uint16 =
