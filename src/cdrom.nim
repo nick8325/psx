@@ -94,7 +94,7 @@ proc command*(value: uint8) =
   of 0x1a:
     # GetID
     respond 3, [2]
-    respond 5, [0x02, 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x41] # SCEA
+    respond 2, [0x02, 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x41] # SCEA
   of 0x13:
     # GetTN
     respond 3, [2, 1, 1]
@@ -122,6 +122,7 @@ proc command*(value: uint8) =
     mode = 0
     data.clear
     respond 3, [2]
+    respond 2, [2]
   else:
     warn fmt"Unknown command {value:02x}"
     queueInterrupt 5
