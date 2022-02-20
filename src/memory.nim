@@ -1,7 +1,7 @@
 ## The PSX virtual address space.
 
 import basics, utils
-import std/[strformat, strutils]
+import std/[strformat, strutils, tables, sugar]
 
 type
   # We represent the address space as a page table consisting of an array of
@@ -59,6 +59,11 @@ type
     ## Which memory type an I/O access is.
     Read, Write
 
+  IOHandler[T] = object
+    region: MemoryRegion
+    read: proc(): T
+    write: proc(val: T)
+
   Memory* = object
     ## The PSX address space.
 
@@ -68,12 +73,40 @@ type
     regions: seq[ref seq[byte]]
 
     # I/O handlers.
-    # Returns true if the I/O was handled.
-    # For each address, only one of ioHandler8/16/32 needs to handle it -
+    # For each address, only one of io8/16/32 needs to handle it -
     # the main I/O handler takes care of splitting up requests.
-    ioHandler8*: proc(address: word, value: var uint8, kind: IOKind, region: var MemoryRegion): bool
-    ioHandler16*: proc(address: word, value: var uint16, kind: IOKind, region: var MemoryRegion): bool
-    ioHandler32*: proc(address: word, value: var uint32, kind: IOKind, region: var MemoryRegion): bool
+    io8: Table[word, IOHandler[uint8]]
+    io16: Table[word, IOHandler[uint16]]
+    io32: Table[word, IOHandler[uint32]]
+
+proc io8*(memory: var Memory, address: word, region: MemoryRegion, read: proc(): uint8, write: proc(val: uint8)) =
+  assert(address notin memory.io8)
+  memory.io8[address] = IOHandler[uint8](region: region, read: read, write: write)
+proc io16*(memory: var Memory, address: word, region: MemoryRegion, read: proc(): uint16, write: proc(val: uint16)) =
+  assert(address notin memory.io16)
+  memory.io16[address] = IOHandler[uint16](region: region, read: read, write: write)
+proc io32*(memory: var Memory, address: word, region: MemoryRegion, read: proc(): uint32, write: proc(val: uint32)) =
+  assert(address notin memory.io32)
+  memory.io32[address] = IOHandler[uint32](region: region, read: read, write: write)
+
+proc ignore8*(memory: var Memory, address: word, region: MemoryRegion) =
+  io8(memory, address, region, () => 0, proc(val: uint8) = discard)
+proc ignore16*(memory: var Memory, address: word, region: MemoryRegion) =
+  io16(memory, address, region, () => 0, proc(val: uint16) = discard)
+proc ignore32*(memory: var Memory, address: word, region: MemoryRegion) =
+  io32(memory, address, region, () => 0, proc(val: uint32) = discard)
+proc cell8*(memory: var Memory, address: word, region: MemoryRegion) =
+  let cell = uint8.new
+  io8 memory, address, region, () => cell[],
+    proc(val: uint8) = cell[] = val
+proc cell16*(memory: var Memory, address: word, region: MemoryRegion) =
+  let cell = uint16.new
+  io16 memory, address, region, () => cell[],
+    proc(val: uint16) = cell[] = val
+proc cell32*(memory: var Memory, address: word, region: MemoryRegion) =
+  let cell = uint32.new
+  io32 memory, address, region, () => cell[],
+    proc(val: uint32) = cell[] = val
 
 type
   ResolvedAddress[T] = tuple[pointer: ptr T, writable: bool, io: bool, region: MemoryRegion] ## \
@@ -150,15 +183,27 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind, region: var Memory
   ## Execute I/O handlers for a write (which must be to I/O space).
 
   # Call the I/O handler at a given size, with the pointer already resolved
+  template native[T](io: Table[word, IOHandler[T]], address: word): bool =
+    let pointer = memory.resolve[:T](address, Fetch).pointer
+    let handler = io.getOrDefault(address)
+    case kind
+    of Read:
+      if handler.read == nil: false
+      else:
+        region = handler.region
+        pointer[] = handler.read()
+        true
+    of Write:
+      if handler.write == nil: false
+      else:
+        handler.write(pointer[])
+        true
   template native8(address: word): bool =
-    let pointer = memory.resolve[:uint8](address, Fetch).pointer
-    memory.ioHandler8 != nil and memory.ioHandler8(address, pointer[], kind, region)
+    native(memory.io8, address)
   template native16(address: word): bool =
-    let pointer = memory.resolve[:uint16](address, Fetch).pointer
-    memory.ioHandler16 != nil and memory.ioHandler16(address, pointer[], kind, region)
+    native(memory.io16, address)
   template native32(address: word): bool =
-    let pointer = memory.resolve[:uint32](address, Fetch).pointer
-    memory.ioHandler32 != nil and memory.ioHandler32(address, pointer[], kind, region)
+    native(memory.io32, address)
 
   # Handle an I/O at either native size or split into smaller I/Os
   template nativeOrSplit16(address: word): bool =

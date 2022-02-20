@@ -43,7 +43,7 @@ proc interruptPending: bool =
 
 proc checkInterrupts =
   trace fmt"{interrupts} {commandStart} {enabledInterrupts:08x} {smen}"
-  irqs.set(2, interruptPending())
+  events.after(10000, "CDROM delay") do(): irqs.set(2, interruptPending())
 
 proc queueInterrupt(interrupt: range[0..5]) =
   if not (interrupt in interrupts):
@@ -94,7 +94,7 @@ proc command*(value: uint8) =
   of 0x1a:
     # GetID
     respond 3, [2]
-    respond 2, [0x02, 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x41] # SCEA
+    events.after(2000, "CDROM delay") do(): respond 2, [0x02, 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x41] # SCEA
   of 0x13:
     # GetTN
     respond 3, [2, 1, 1]

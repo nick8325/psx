@@ -7,7 +7,7 @@ const loggerComponent = logJoy
 
 type
   ## A device connected to the bus, i.e. a joypad or memory card.
-  Joypad* = proc(val: uint8): tuple[done: bool, reply: uint8]
+  Joypad* = proc(val: uint8): tuple[done: bool, reply: seq[uint8]]
 
 var
   pos: range[0..3] = 0
@@ -15,22 +15,22 @@ var
 var
   pads*: array[2, array[256, Joypad]]
 
-proc controller(val: uint8): tuple[done: bool, reply: uint8] =
+proc controller(val: uint8): tuple[done: bool, reply: seq[uint8]] =
   case pos
   of 0:
     pos.inc
     if val != 0x42:
       warn fmt "Unknown command {val:x}"
-    return (done: false, reply: 0x41u8)
+    return (done: false, reply: @[0x41u8, 0x5au8, 0x40u8, 0u8])
   of 1:
     pos.inc
-    return (done: false, reply: 0x5au8)
+    return (done: false, reply: @[])
   of 2:
     pos.inc
-    return (done: false, reply: 0x40u8)
+    return (done: false, reply: @[])
   of 3:
     pos = 0
-    return (done: true, reply: 0u8)
+    return (done: true, reply: @[])
 
 pads[0][0x01] = controller
 
@@ -105,7 +105,8 @@ proc updateIRQ =
 
   irqs.set(7, stat.irq)
 
-proc joyTransmit*(val: byte) =
+proc joyTransmit*(val32: word) =
+  let val = cast[uint8](val32)
   debug fmt "Transmitting {val:x} on slot {control.slot}"
 
   if not control.txEnable:
@@ -124,7 +125,7 @@ proc joyTransmit*(val: byte) =
 
   control.rxForceEnable = false
 
-  var reply = 0xffu8
+  var reply = @[0xffu8]
   var ack = false
 
   if selected[control.slot].isNone():
@@ -152,7 +153,7 @@ proc joyTransmit*(val: byte) =
 
     stat.padAck = ack
 
-    rxFIFO.addLast(reply)
+    for x in reply: rxFIFO.addLast(x)
     stat.rxFIFONotEmpty = (rxFIFO.len > 0)
 
     updateIRQ()

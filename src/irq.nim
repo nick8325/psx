@@ -42,18 +42,24 @@ proc signal*(irqs: var IRQs, irq: range[0..10]) =
   irqs.stat.setBit int(irq)
   irqs.setCPUIRQ()
 
-proc handleStatus*(irqs: var IRQs, value: var word, kind: IOKind) =
-  case kind
-  of Read: value = irqs.stat
-  of Write: irqs.stat = irqs.stat and value
+proc status*(irqs: IRQs): word =
+  trace fmt"IRQ status {irqs.stat:x}"
+
+  irqs.stat
+
+proc setStatus*(irqs: var IRQs, value: word) =
+  irqs.stat = irqs.stat and value
   irqs.setCPUIRQ
 
   trace fmt"IRQ status {irqs.stat:x}"
 
-proc handleMask*(irqs: var IRQs, value: var word, kind: IOKind) =
-  case kind
-  of Read: value = irqs.mask
-  of Write: irqs.mask = value and 0x7ff
+proc mask*(irqs: IRQs): word =
+  trace fmt"IRQ mask {irqs.mask:x}"
+
+  irqs.mask
+
+proc setMask*(irqs: var IRQs, value: word) =
+  irqs.mask = value and 0x7ff
   irqs.setCPUIRQ
 
   trace fmt"IRQ mask {irqs.mask:x}"

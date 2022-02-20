@@ -2,7 +2,7 @@
 
 import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, joy, utils
 from cdrom import nil
-import std/strformat
+import std/[strformat, sugar, bitops]
 
 const loggerComponent = logMachine
 
@@ -90,256 +90,159 @@ proc updateDelays =
     memoryDelay32[region] = delay(regionDelay, commonDelay, 4)
 
 # I/O handlers
-proc handleIO8(address: word, value: var uint8, kind: IOKind, region: var MemoryRegion): bool =
-  case address
-  of 0x1f801800:
-    # CD-ROM
-    region = CDROM
-    case kind
-    of Read: value = cdrom.readStatus()
-    of Write: cdrom.writeStatus(value)
-    return true
-  of 0x1f801801..0x1f801803:
-    # CD-ROM
-    region = CDROM
-    case kind
-    of Read: value = cdrom.readRegister(address mod 4)
-    of Write: cdrom.writeRegister(address mod 4, value)
-    return true
-  of 0x1f802041:
-    # 7-segment display
-    region = Expansion2
-    if kind == Write:
-      debug fmt "POST {value}"
-      return true
-    else:
-      return false
-  of 0x1f802080:
-    # PCSX-Redux MIPS API
-    region = BuiltIn
-    if kind == Write:
-      stdout.write(value.char)
-      stdout.flushFile
-      return true
-    else:
-      return false
-  of 0x1f802081:
-    # PCSX-Redux MIPS API
-    region = BuiltIn
-    if kind == Write:
-      warn "Debug break"
-      return true
-    else:
-      return false
-  of 0x1f802020..0x1f80202f:
-    region = Serial
-    if address == 0x1f802021 and kind == Read:
-      # UART status
-      value = 4
-      return true
-    elif address == 0x1f802023 and kind == Write:
-      # UART TX
-      stdout.write(value.char)
-      stdout.flushFile
-      return true
-    elif kind == Write:
-      # Unknown UART control - ignore
-      return true
-    # Unknown reads might be important
-    return false
-  of 0x1f802066:
-    region = BuiltIn
-    if kind == Read:
-      # Nocash halt until interrupt
-      return true
-    return false
-  else:
-    return false
 
-proc handleIO16(address: word, value: var uint16, kind: IOKind, region: var MemoryRegion): bool =
-  case address
-  of 0x1f801802:
-    if kind == Read:
-      # CD-ROM DATA FIFO
-      region = CDROM
-      value = cdrom.readData16()
-      return true
-  of 0x1f802082:
-    if kind == Write:
-      # PCSX-Redux MIPS API
-      region = BuiltIn
-      fatal fmt"Exit requested with code {value}"
-      quit 1
-  of 0x1f801048:
-    # JOY_MODE
-    region = Serial
-    case kind
-    of Read: value = joyMode()
-    of Write: setJoyMode(value)
-    return true
-  of 0x1f80104a:
-    # JOY_CTRL
-    region = Serial
-    case kind
-    of Read: value = joyControl()
-    of Write: setJoyControl(value)
-    return true
-  of 0x1f80104e:
-    # JOY_BAUD
-    region = Serial
-    if kind == Read:
-      value = joyBaud()
-      return true
-  else:
-    return false
+# CD-ROM
+addressSpace.io8 0x1f801800, CDROM, cdrom.readStatus, cdrom.writeStatus
 
-proc handleIO32(address: word, value: var uint32, kind: IOKind, region: var MemoryRegion): bool =
-  case address
-  of 0x1f801000u32..0x1f801004u32:
-    # Expansion base address
-    region = BuiltIn
-    case kind
-    of Read: return true
-    of Write: return false
-  of 0x1f801060u32:
-    # RAM Size
-    region = BuiltIn
-    return true
-  of 0x1f801008u32..0x1f80101cu32:
-    # Memory region delay
-    region = BuiltIn
-    let i = (address - 0x1f801008) div 4
-    case kind
-    of Read: value = regionDelays[i].word
-    of Write:
-      word(regionDelays[i]) = value
+for i in 1..3:
+  capture i:
+    addressSpace.io8 (0x1f801800 + i.word), CDROM,
+      () => cdrom.readRegister(i),
+      (val: uint8) => cdrom.writeRegister(i, val)
+
+# 7-segment display
+addressSpace.io8 0x1f802041, Expansion2, nil,
+  (val: uint8) => debug fmt "POST {val}"
+
+# PCSX-redux MIPS API
+addressSpace.io8 0x1f802080, BuiltIn, nil,
+  proc(val: uint8) =
+    stdout.write(val.char)
+    stdout.flushFile
+addressSpace.io8 0x1f802081, BuiltIn, nil,
+  (val: uint8) => warn "Debug break"
+
+# UART status
+addressSpace.io8 0x1f802021, Serial, () => 4, nil
+# UART TX
+addressSpace.io8 0x1f802023, Serial, nil,
+  proc(val: uint8) =
+    stdout.write(val.char)
+    stdout.flushFile
+addressSpace.ignore8 0x1f802020, Serial
+addressSpace.ignore8 0x1f802022, Serial
+for address in 0x1f802024u32..0x1f80202fu32:
+  addressSpace.ignore8 address, Serial
+
+# Nocash halt until interrupt
+addressSpace.io8 0x1f802066, BuiltIn, () => 0, nil
+
+# CD-ROM DATA FIFO
+addressSpace.io16 0x1f801802, CDROM, cdrom.readData16, nil
+
+# PCSX-Redux MIPS API
+addressSpace.io16 0x1f802082, BuiltIn, nil,
+  proc(val: uint16) =
+    fatal fmt"Exit requested with code {val}"
+    quit 1
+
+# JOY_MODE
+addressSpace.io16 0x1f801048, Serial, joyMode, setJoyMode
+# JOY_CTRL
+addressSpace.io16 0x1f80104a, Serial, joyControl, setJoyControl
+# JOY_BAUD
+addressSpace.io16 0x1f80104e, Serial, joyBaud, nil
+
+# Memory region delay
+for i in regionDelays.low .. regionDelays.high:
+  capture i:
+    addressSpace.io32 (0x1f801008 + i.word*4), BuiltIn,
+      () => regionDelays[i].word,
+      proc(val: uint32) =
+        word(regionDelays[i]) = val
+        updateDelays()
+# Common delay
+addressSpace.io32 0x1f801020, BuiltIn,
+  () => commonDelay.word,
+  proc(val: uint32) =
+      word(commonDelay) = val
       updateDelays()
-    return true
-  of 0x1f801020u32:
-    # Common delay
-    region = BuiltIn
-    case kind
-    of Read: value = commonDelay.word
-    of Write:
-      word(commonDelay) = value
-      updateDelays()
-    return true
-  of 0x1f801c00u32 .. 0x1f801ffcu32:
-    # SPU (TODO)
-    region = SPU
-    return true
-  of 0x1f801100..0x1f801128:
-    # Timers
-    region = BuiltIn
-    let n = ((address div 16) mod 16).int
-    if n < timers.low or n > timers.high: return false
-    case address mod 16
-    of 0:
-      case kind
-      of Read: value = timers[n].counter()
-      of Write: timers[n].setCounter(value)
-    of 4:
-      case kind
-      of Read: value = timers[n].mode()
-      of Write: timers[n].setMode(value)
-    of 8:
-      case kind
-      of Read: value = timers[n].target()
-      of Write: timers[n].setTarget(value)
-    else:
-      return false
 
-    return true
-  of 0x1f801070u32:
-    # Interrupt status
-    region = BuiltIn
-    irqs.handleStatus value, kind
-    return true
-  of 0x1f801074u32:
-    # Interrupt mask
-    region = BuiltIn
-    irqs.handleMask value, kind
-    return true
-  of 0x1f801080u32..0x1f8010e8u32:
-    # DMA channel
-    region = BuiltIn
-    let channel = (address-0x1f801080u32) div 16
-    case address mod 16
-    of 0:
-      handleDMABaseAddress channel, value, kind
-      return true
-    of 4:
-      handleDMABlockControl channel, value, kind
-      return true
-    of 8:
-      handleDMAChannelControl channel, value, kind
-      return true
-    else: return false
-  of 0x1f8010f0u32:
-    # DMA control register
-    region = BuiltIn
-    handleDMAControl value, kind
-    return true
-  of 0x1f8010f4u32:
-    # DMA interrupt register
-    region = BuiltIn
-    handleDMAInterrupt value, kind
-    return true
-  of 0x1f801810u32:
-    # GPU
-    region = GPU
-    case kind
-    of Read: value = gpuread()
-    of Write: gp0(value)
-    return true
-  of 0x1f801814u32:
-    # GPU
-    region = GPU
-    case kind
-    of Read: value = gpustat()
-    of Write: gp1(value)
-    return true
-  of 0x1f802080:
-    # PCSX-Redux MIPS API
-    region = BuiltIn
-    if kind == Read:
-      value = 0x58534350
-      return true
-    else:
-      return false
-  of 0x1f802084:
-    # PCSX-Redux MIPS API
-    region = BuiltIn
-    if kind == Write:
-      var msg: string
-      var address = value
-      var c: uint8 = addressSpace.rawRead[:uint8](address)
-      while c != 0:
-        msg &= c.char
-        address += 1
-        c = addressSpace.rawRead[:uint8](address)
-      return true
-    else:
-      return false
-  of 0x1F801040:
-    # JOY_DATA
-    region = Serial
-    case kind
-    of Read: value = joyReceive()
-    of Write: joyTransmit(uint8(value and 0xff))
-    return true
-  of 0x1F801044:
-    # JOY_STAT
-    region = Serial
-    if kind == Read:
-      value = joyStat()
-      return true
-  else:
-    return false
+# Timers
+for i in 0 .. 2:
+  capture i:
+    addressSpace.io32 (0x1f801100 + i.word*16), BuiltIn,
+      () => timers[i].counter,
+      (val: word) => timers[i].setCounter(val)
+    addressSpace.io32 (0x1f801104 + i.word*16), BuiltIn,
+      () => timers[i].mode,
+      (val: word) => timers[i].setMode(val)
+    addressSpace.io32 (0x1f801108 + i.word*16), BuiltIn,
+      () => timers[i].target,
+      (val: word) => timers[i].setTarget(val)
 
-addressSpace.ioHandler8 = handleIO8
-addressSpace.ioHandler16 = handleIO16
-addressSpace.ioHandler32 = handleIO32
+# Interrupt status
+addressSpace.io32 0x1f801070, BuiltIn,
+    () => irqs.status,
+    (val: word) => irqs.setStatus(val)
+# Interrupt mask
+addressSpace.io32 0x1f801074, BuiltIn,
+    () => irqs.mask,
+    (val: word) => irqs.setMask(val)
+
+# DMA channels
+for chan in 0..6:
+  capture chan:
+    addressSpace.io32 (0x1f801080 + chan.word*16), BuiltIn,
+      () => dmaBaseAddress(chan),
+      (val: word) => setDMABaseAddress(chan, val)
+    addressSpace.io32 (0x1f801084 + chan.word*16), BuiltIn,
+      () => dmaBlockControl(chan),
+      (val: word) => setDMABlockControl(chan, val)
+    addressSpace.io32 (0x1f801088 + chan.word*16), BuiltIn,
+      () => dmaChannelControl(chan),
+      (val: word) => setDMAChannelControl(chan, val)
+
+# DMA control register
+addressSpace.io32 0x1f8010f0, BuiltIn, dmaControl, setDMAControl
+# DMA interrupt register
+addressSpace.io32 0x1f8010f4, BuiltIn, dmaInterrupt, setDMAInterrupt
+
+# GP0/GPUREAD
+addressSpace.io32 0x1f801810, GPU, gpuread, gp0
+
+# GP1/GPUSTAT
+addressSpace.io32 0x1f801814, GPU, gpustat, gp1
+
+# PCSX-Redux MIPS API
+addressSpace.io32 0x1f802080, BuiltIn, () => 0x58534350, nil
+addressSpace.io32 0x1f802084, BuiltIn, nil,
+  proc(val: uint32) =
+    var msg: string
+    var address = val
+    var c: uint8 = addressSpace.rawRead[:uint8](address)
+    while c != 0:
+      msg &= c.char
+      address += 1
+      c = addressSpace.rawRead[:uint8](address)
+
+# JOY_DATA
+addressSpace.io32 0x1F801040, Serial, joyReceive, joyTransmit
+# JOY_STAT
+addressSpace.io32 0x1F801044, Serial, joyStat, nil
+
+# Ignored (for now) values
+addressSpace.cell32 0x1f801000, BuiltIn
+addressSpace.cell32 0x1f801004, BuiltIn
+addressSpace.cell32 0x1f801060, BuiltIn
+
+# SIO
+for address in countup(0x1f801050u32, 0x1f80105cu32, 4):
+  addressSpace.ignore32 address, BuiltIn
+
+# SPU
+for address in countup(0x1f801c00u32, 0x1f801ffeu32, 2):
+  if address != 0x1F801DAEu32 and address != 0x1f801daau32:
+    addressSpace.cell16 address, SPU
+
+var spucnt: uint16 = 0
+addressSpace.io16 0x1f801daau32, SPU,
+  () => spucnt,
+  proc(val: uint16) = spucnt = val
+
+addressSpace.io16 0x1f801daeu32, SPU,
+  () => (spucnt and 0x3f) or (if spucnt.testBit 5: 1 shl 7 else: 0),
+  nil
 
 # Set up DMA handlers.
 dma.channels[2].read = gpuReadDMA

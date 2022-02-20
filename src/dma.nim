@@ -168,42 +168,44 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
     interrupt[flagsIRQs.bit n] = true
     checkInterrupt()
 
-proc handleDMABaseAddress*(n: ChannelNumber, value: var word, kind: IOKind) =
-  case kind
-  of Read: value = channels[n].baseAddress
-  of Write: channels[n].baseAddress = value and 0x00ff_ffff
+proc dmaBaseAddress*(n: ChannelNumber): word =
+  channels[n].baseAddress
 
-proc handleDMABlockControl*(n: ChannelNumber, value: var word, kind: IOKind) =
-  case kind
-  of Read: value = word(channels[n].blockControl)
-  of Write: word(channels[n].blockControl) = value
+proc setDMABaseAddress*(n: ChannelNumber, value: word) =
+  channels[n].baseAddress = value and 0x00ff_ffff
 
-proc handleDMAChannelControl*(n: ChannelNumber, value: var word, kind: IOKind) =
-  case kind
-  of Read: value = word(channels[n].channelControl)
-  of Write:
-    word(channels[n].channelControl) = value and channelControlMask[n]
-    checkChannel n, channels[n]
+proc dmaBlockControl*(n: ChannelNumber): word =
+  word(channels[n].blockControl)
 
-proc handleDMAControl*(value: var word, kind: IOKind) =
-  case kind
-  of Read: value = word(control)
-  of Write:
-    word(control) = value
-    for n, chan in channels.mpairs:
-      checkChannel n, chan
+proc setDMABlockControl*(n: ChannelNumber, value: word) =
+  word(channels[n].blockControl) = value
 
-proc handleDMAInterrupt*(value: var word, kind: IOKind) =
-  case kind
-  of Read: value = word(interrupt)
-  of Write:
-    # Update R/W bits
-    let writable = 0x00ff803fu32
-    word(interrupt).clearMask writable
-    word(interrupt).setMask (writable and value)
+proc dmaChannelControl*(n: ChannelNumber): word =
+  word(channels[n].channelControl)
 
-    # Bits 24-30 are reset to 0 by writing a 1 there
-    let ack = 0x7f000000u32
-    word(interrupt).clearMask (ack and value)
+proc setDMAChannelControl*(n: ChannelNumber, value: word) =
+  word(channels[n].channelControl) = value and channelControlMask[n]
+  checkChannel n, channels[n]
 
-    checkInterrupt()
+proc dmaControl*: word =
+  word(control)
+
+proc setDMAControl*(value: word) =
+  word(control) = value
+  for n, chan in channels.mpairs:
+    checkChannel n, chan
+
+proc dmaInterrupt*: word =
+  word(interrupt)
+
+proc setDMAInterrupt*(value: word) =
+  # Update R/W bits
+  let writable = 0x00ff803fu32
+  word(interrupt).clearMask writable
+  word(interrupt).setMask (writable and value)
+
+  # Bits 24-30 are reset to 0 by writing a 1 there
+  let ack = 0x7f000000u32
+  word(interrupt).clearMask (ack and value)
+
+  checkInterrupt()
