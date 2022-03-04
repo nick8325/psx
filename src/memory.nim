@@ -3,6 +3,8 @@
 import basics, utils
 import std/[strformat, strutils, tables, sugar]
 
+const loggerComponent = logMemory
+
 type
   # We represent the address space as a page table consisting of an array of
   # page descriptors. A page descriptor is a pointer to a page-aligned block

@@ -12,13 +12,10 @@ type
     logDMA, logIRQ, logTimer, logCDROM, logMachine, logJoy
 
 func initialLevel(component: Component): Level {.inline.} =
-  case component
-  of logMachine: lvlDebug
-  of logCDROM: lvlTrace
-  else: lvlInfo
+  lvlInfo
 
 func minLevel*(component: Component): Level {.inline.} =
-  lvlInfo.min(component.initialLevel)
+  lvlDebug.min(component.initialLevel)
 
 var
   loggers: array[Component, Logger]
