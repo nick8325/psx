@@ -685,6 +685,20 @@ let processCommand = consumer(word):
       drawing.setMaskBit = value.testBit 0
       drawing.skipMaskedPixels = value.testBit 1
 
+    of 0x80..0x9f:
+      # Copy VRAM to VRAM
+      var
+        src = take.ScreenCoord
+        dest = take.ScreenCoord
+        size = take.ScreenCoord
+      var settings = rasteriserSettings(transparent = false,
+                                        dither = false, crop = false, interlace = false)
+      # This detail comes from Nocash PSX
+      for j in 0..<(if size.y == 0: vramHeight else: size.y):
+        for i in 0..<(if size.x == 0: vramWidth else: size.x):
+          let pixel = getPixel(src.x + i, src.y + j)
+          putPixel(dest.x + i, dest.y + j, pixel, settings)
+
     of 0xa0..0xbf:
       # Copy rectangle to VRAM
       var
