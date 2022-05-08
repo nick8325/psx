@@ -2,6 +2,7 @@
 
 import basics, utils, irq, eventqueue
 import std/[strformat, math, options, deques]
+import sdl2
 
 const loggerComponent = logJoy
 
@@ -21,16 +22,34 @@ proc controller(val: uint8): tuple[done: bool, reply: seq[uint8]] =
     pos.inc
     if val != 0x42:
       warn fmt "Unknown command {val:x}"
-    return (done: false, reply: @[0x41u8, 0x5au8, 0x40u8, 0u8])
+    return (done: false, reply: @[0x41u8])
   of 1:
     pos.inc
-    return (done: false, reply: @[])
+    return (done: false, reply: @[0x5au8])
   of 2:
     pos.inc
-    return (done: false, reply: @[])
+    let keys = getKeyboardState()
+    var keys1: uint8 = 0xff
+    if keys[SDL_SCANCODE_RSHIFT.int] == 1: keys1 = keys1 and not 0x1u8
+    if keys[SDL_SCANCODE_RETURN.int] == 1: keys1 = keys1 and not 0x8u8
+    if keys[SDL_SCANCODE_UP.int] == 1: keys1 = keys1 and not 0x10u8
+    if keys[SDL_SCANCODE_RIGHT.int] == 1: keys1 = keys1 and not 0x20u8
+    if keys[SDL_SCANCODE_DOWN.int] == 1: keys1 = keys1 and not 0x40u8
+    if keys[SDL_SCANCODE_LEFT.int] == 1: keys1 = keys1 and not 0x80u8
+    return (done: false, reply: @[keys1])
   of 3:
     pos = 0
-    return (done: true, reply: @[])
+    let keys = getKeyboardState()
+    var keys2: uint8 = 0xff
+    if keys[SDL_SCANCODE_F.int] == 1: keys2 = keys2 and not 0x1u8
+    if keys[SDL_SCANCODE_V.int] == 1: keys2 = keys2 and not 0x2u8
+    if keys[SDL_SCANCODE_D.int] == 1: keys2 = keys2 and not 0x4u8
+    if keys[SDL_SCANCODE_C.int] == 1: keys2 = keys2 and not 0x8u8
+    if keys[SDL_SCANCODE_S.int] == 1: keys2 = keys2 and not 0x10u8
+    if keys[SDL_SCANCODE_Z.int] == 1: keys2 = keys2 and not 0x20u8
+    if keys[SDL_SCANCODE_X.int] == 1: keys2 = keys2 and not 0x40u8
+    if keys[SDL_SCANCODE_A.int] == 1: keys2 = keys2 and not 0x80u8
+    return (done: true, reply: @[keys2])
 
 pads[0][0x01] = controller
 
@@ -168,18 +187,18 @@ proc joyReceive*: word =
   var bytes = [0xffu8, 0xffu8, 0xffu8, 0xffu8]
   if rxFIFO.len > 0:
     bytes[0] = rxFIFO.popFirst()
-    if rxFIFO.len > 1: bytes[1] = rxFIFO[1]
-    if rxFIFO.len > 2: bytes[2] = rxFIFO[2]
-    if rxFIFO.len > 3: bytes[3] = rxFIFO[3]
+    if rxFIFO.len >= 1: bytes[1] = rxFIFO[0]
+    if rxFIFO.len >= 2: bytes[2] = rxFIFO[1]
+    if rxFIFO.len >= 3: bytes[3] = rxFIFO[2]
   else:
-    trace "Receive on empty FIFO"
+    debug "Receive on empty FIFO"
 
   result = bytes[0].word + (bytes[1].word shl 8) +
     (bytes[2].word shl 16) + (bytes[3].word shl 24)
 
   stat.rxFIFONotEmpty = (rxFIFO.len > 0)
 
-  trace fmt "Received {result:x}"
+  debug fmt "Received {result:x}"
 
   updateIRQ()
 
@@ -212,6 +231,7 @@ proc setJoyControl*(val: uint16) =
     selected[0] = none(uint8)
     selected[1] = none(uint8)
     pos = 0
+    rxFIFO.clear
   updateIRQ()
 
 proc joyBaud*: uint16 =
