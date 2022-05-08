@@ -563,6 +563,9 @@ proc draw*(settings: Settings, tri: Triangle) =
       of Both:
         let colour = shader.interpolate p
         let coord = textureMapper.interpolate p
+        # TODO: this is wrong!
+        # Mixing may convert a non-zero texture pixel to zero,
+        # resulting in it being interpreted as transparent
         putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y).mix(colour), settings)
 
 proc draw*(settings: Settings, rect: Rectangle) =

@@ -5,6 +5,7 @@ from cdrom import nil
 import std/[strformat, sugar, bitops]
 
 const loggerComponent = logMachine
+logMachine.level = lvlDebug
 
 var
   bios {.align: 4096.}: array[0x80000, byte]
