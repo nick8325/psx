@@ -5,6 +5,7 @@ import std/[bitops, strformat, deques, options]
 import machine
 
 const loggerComponent = logCDROM
+logCDROM.level = lvlDebug
 
 type
   Channel {.pure.} = enum Left, Right
@@ -80,7 +81,10 @@ proc command*(value: uint8) =
   case value
   of 0x1:
     # Stat
-    respond 3, [2]
+    respond 3, [0x18]
+  of 0x2:
+    # Setloc
+    respond 3, [0x18]
   of 0x19:
     # Test
     var param: uint8
@@ -93,11 +97,11 @@ proc command*(value: uint8) =
       respond 5, []
   of 0x1a:
     # GetID
-    respond 3, [2]
+    respond 3, [0x18]
     events.after(2000, "CDROM delay") do(): respond 2, [0x02, 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x41] # SCEA
   of 0x13:
     # GetTN
-    respond 3, [2, 1, 1]
+    respond 3, [0x18, 0, 0]
   of 0x14:
     # GetTD
     var param: uint8
@@ -107,22 +111,22 @@ proc command*(value: uint8) =
     of 1: respond 3, [2, 0, 0]
     else:
       warn fmt "Unknown track number {param}"
-      respond 5, [0x10]
+      respond 5, [0x18]
   of 0xe:
     # Setmode
     if not parameters.readFIFO(mode): return
     debug fmt"Mode is {mode:x}"
-    respond 3, [2]
+    respond 3, [0x18]
   of 0x9:
     # Pause
-    respond 3, [2]
-    respond 2, [2]
+    respond 3, [0x18]
+    respond 2, [0x18]
   of 0xa:
     # Init
     mode = 0
     data.clear
-    respond 3, [2]
-    respond 2, [2]
+    respond 3, [0x18]
+    respond 2, [0x18]
   else:
     warn fmt"Unknown command {value:02x}"
     queueInterrupt 5
