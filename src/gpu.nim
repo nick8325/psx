@@ -410,6 +410,9 @@ let
 # TODO: Measure on a real console how GPUSTAT changes throughout the frame
 
 proc gpustat*: word =
+  let bit13 =
+    if screen.verticalInterlace: not screen.frameNumber.testBit(0)
+    else: true
   let bit25 =
     case control.dmaDirection
     of DMADirection.Write: readyToReceiveDMA()
@@ -427,7 +430,7 @@ proc gpustat*: word =
     word(drawing.drawToDisplayArea) shl 10 or
     word(drawing.setMaskBit) shl 11 or
     word(drawing.skipMaskedPixels) shl 12 or
-    word(not screen.verticalInterlace or not screen.frameNumber.testBit(0)) shl 13 or
+    word(bit13) shl 13 or
     # Don't bother with GPUSTAT 14 (reverseflag)
     word(not textures.enabled) shl 15 or
     word(screen.dotclockMultiplier == Dot7) shl 16 or
