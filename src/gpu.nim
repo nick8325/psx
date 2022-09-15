@@ -149,8 +149,10 @@ type
     verticalRes: VerticalRes       # GPUSTAT 19
     verticalInterlace: bool        # GPUSTAT 22
     enabled: bool                  # GPUSTAT 23
-    frameNumber: int               # Number of frames drawn since boot
-    # (in interlaced mode, both even and odd frames count as 1)
+    framesDrawn: int               # Number of frames drawn since boot
+    frameNumber: int               # Current frame number
+    # N.B. framesDrawn increases at the start of vblank,
+    # frameNumber during vsync (in the middle of vblank)
     vblank: bool                   # Currently in vblank interval?
     # In GPU clocks
     horizontalRange: tuple[start: int, stop: int]
@@ -223,7 +225,7 @@ proc visibleScanlines*: int =
 proc screenHeight*: int =
   ## Height of screen in pixels.
 
-  visibleScanlines() * (if screen.verticalInterlace: 2 else: 1)
+  visibleScanlines() * (if screen.verticalInterlace and screen.verticalRes == ResDouble: 2 else: 1)
 
 # TODO: measure HBLANK/VBLANK timings on a real console
 
@@ -236,6 +238,13 @@ proc vblankClocks*: int64 {.inline.} =
   ## Clock cycles taken by one vblank.
 
   clocksPerScanline() * (scanlinesPerFrame[region] - visibleScanlines())
+
+proc preVsyncClocks*: int64 {.inline.} =
+  ## Clock cycles from start of vblank to vsync.
+
+  clocksPerScanline() *
+  clamp(scanlinesPerFrame[region].int - screen.verticalRange.stop,
+        1, scanlinesPerFrame[region].int-1)
 
 proc lastVBlankDelta*(): int64 {.inline.} =
   ## Number of clock cycles since the last VBLANK started.
@@ -314,6 +323,10 @@ proc afterHBlank*(name: string, p: proc()) =
 proc onVBlank*(name: string, p: proc()) =
   events.every(proc(): int64 = nextVBlankDelta(), name, p)
 
+proc onVSync*(name: string, p: proc()) =
+  onVBlank(name) do ():
+     events.after(preVsyncClocks(), name, p)
+
 proc afterVBlank*(name: string, p: proc()) =
   onVBlank(name) do ():
      events.after(vblankClocks(), name, p)
@@ -323,13 +336,17 @@ onVBlank("gpu vblank") do ():
   debug "VBLANK"
   lastVBlankStart = events.now()
   lastRegion = region
-  screen.frameNumber += 1
+  screen.framesDrawn += 1
   screen.vblank = true
   irqs.signal 0
 
   # PSX supports 480p if hooked up to a VGA monitor, but we don't
   if screen.verticalRes == ResDouble and not screen.verticalInterlace:
     warn "480p mode not supported"
+
+onVSync("gpu vsync") do ():
+  debug "VSYNC"
+  screen.frameNumber += 1
 
 afterVBlank("gpu end vblank") do ():
   debug "END VBLANK"
