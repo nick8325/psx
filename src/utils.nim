@@ -81,7 +81,10 @@ func bit*[T, U](slice: BitSlice[T, U], i: int): BitSlice[bool, U] {.inline.} =
   bit[U](slice.pos + i)
 
 func `[]`*[T, U](value: U, slice: BitSlice[T, U]): T {.inline.} =
-  cast[T](distinctBase(U)(value).bitsliced(slice.toSlice))
+  {.push warning[CastSizes]: off.}
+  let res = cast[T](distinctBase(U)(value).bitsliced(slice.toSlice))
+  {.pop.}
+  res
 
 func toSlice*[T, U](slice: BitSlice[T, U]): Slice[int] {.inline.} =
   slice.pos ..< slice.pos+slice.width
@@ -90,9 +93,11 @@ func toMask*[T, U](slice: BitSlice[T, U]): U {.inline.} =
   U(slice.toSlice.toMask[:distinctBase(U)])
 
 proc `[]=`*[T, U](value: var U, slice: BitSlice[T, U], part: T) {.inline.} =
+  {.push warning[CastSizes]: off.}
   let mask = distinctBase(U)(slice.toMask)
   distinctBase(U)(value).clearMask mask
   distinctBase(U)(value).setMask(mask and (cast[distinctBase(U)](part) shl slice.pos))
+  {.pop.}
 
 type
   ## A range of bits that should be sign extended on extraction.

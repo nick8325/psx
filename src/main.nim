@@ -1,6 +1,7 @@
 import sdl2, sdl2/gfx
 import machine, rasteriser, basics, eventqueue, irq, gpu
-import std/[strformat, monotimes, os]
+import std/os
+# import std/[strformat, monotimes]
 
 discard sdl2.init(INIT_EVERYTHING)
 

@@ -2,7 +2,9 @@
 
 import utils, basics
 import std/[options, strformat, sugar, algorithm]
+{.push warning[User]: off.}
 import glm
+{.pop.}
 
 const loggerComponent = logRasteriser
 
@@ -281,16 +283,16 @@ func makeInterpolator[T](inputs: array[3, Point],
   # Then we are looking for A such that MA = N, that is, A = M^-1 N.
 
   # Note: mat3 takes a list of column vectors.
-  let M = mat3(vec3(inputs[0].x.float64, inputs[1].x.float64, inputs[2].x.float64),
+  let m = mat3(vec3(inputs[0].x.float64, inputs[1].x.float64, inputs[2].x.float64),
                vec3(inputs[0].y.float64, inputs[1].y.float64, inputs[2].y.float64),
                vec3(1.float64, 1, 1))
-  let N = vec3(outputs[0].float64, outputs[1].float64, outputs[2].float64)
-  Interpolator(M.inverse * N)
+  let n = vec3(outputs[0].float64, outputs[1].float64, outputs[2].float64)
+  Interpolator(m.inverse * n)
 
 func interpolate(interpolator: Interpolator, p: Point): float64 =
-  let M = vec3(p.x.float64, p.y.float64, 1)
+  let m = vec3(p.x.float64, p.y.float64, 1)
   # Multiplication, viewing M as a 3x1 matrix
-  M.dot(interpolator.Vec3d)
+  m.dot(interpolator.Vec3d)
 
 type
   ColourInterpolator = object

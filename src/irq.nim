@@ -1,6 +1,6 @@
 ## The IRQ chip.
 
-import basics, memory, cpu, utils
+import basics, cpu, utils
 import std/[bitops, setutils, strformat]
 
 const loggerComponent = logIRQ

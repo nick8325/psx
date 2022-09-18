@@ -1,8 +1,7 @@
 ## The CD-ROM controller.
 
-import basics, utils, irq, eventqueue
+import utils, irq, eventqueue
 import std/[bitops, strformat, deques, options]
-import machine
 
 const loggerComponent = logCDROM
 logCDROM.level = lvlDebug

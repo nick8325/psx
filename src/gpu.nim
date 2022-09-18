@@ -352,7 +352,7 @@ afterVBlank("gpu end vblank") do ():
   debug "END VBLANK"
   screen.vblank = false
 
-proc displayArea: Rect =
+proc displayArea*: Rect =
   result.x1 = screen.displayAreaStart.x
   result.x2 = screen.displayAreaStart.y
   result.x2 = result.x1 + screenWidth()

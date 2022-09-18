@@ -3,7 +3,7 @@
 import basics, utils
 import std/[strformat, strutils, tables, sugar]
 
-const loggerComponent = logMemory
+#const loggerComponent = logMemory
 
 type
   # We represent the address space as a page table consisting of an array of
@@ -129,7 +129,9 @@ proc resolve[T](memory: Memory, address: word, kind: AccessKind): ResolvedAddres
   if entry.pointer.isNil:
     raise MachineError(error: BusError, address: address, kind: kind)
 
+  {.push warning[CastSizes]: off.}
   let pointer = cast[ptr T](cast[ByteAddress](entry.pointer) +% cast[ByteAddress](offset))
+  {.pop.}
 
   return (pointer: pointer, writable: entry.writable, io: entry.io(), region: entry.region())
 
