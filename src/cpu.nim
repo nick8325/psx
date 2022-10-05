@@ -784,6 +784,8 @@ proc step*(cpu: var CPU, time: var int64) {.inline.} =
       instr = cpu.fetch
 
     # Delay if we are running from uncached memory
+    # TODO: add a smaller delay when running from cached memory, to
+    # model the effect of cache misses
     if cpu.pc >= 0x80000000u32 and cpu.pc < 0xa0000000u32:
       time += addressSpace.latency[:word](cpu.pc)
 
