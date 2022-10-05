@@ -168,7 +168,7 @@ proc joyTransmit*(val32: word) =
       selected[control.slot] = none(uint8)
 
   events.after(tickRate*16, "Joypad reply") do():
-    debug fmt "Replying with {reply:x}, ACK = {ack}"
+    debug fmt "Replying with {reply}, ACK = {ack}"
 
     stat.padAck = ack
 
