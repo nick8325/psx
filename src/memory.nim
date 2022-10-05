@@ -249,6 +249,19 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind, region: var Memory
     let kindStr = toLowerAscii $kind
     warn fmt"Unknown I/O, address {address:08x}, value {value:08x} ({T.sizeof}-byte {kindStr})"
 
+proc latency*[T](memory: Memory, address: word): int64 {.inline.} =
+  ## Computes the latency in clocks of reading the given address.
+  ## Raises a MachineError if the address is invalid.
+
+  let resolved = memory.resolve[:T](address, Load)
+  var region = resolved.region
+
+  case T.sizeOf
+  of 1: memoryDelay8[region]
+  of 2: memoryDelay16[region]
+  of 4: memoryDelay32[region]
+  else: raise new AssertionDefect
+
 proc read*[T](memory: Memory, address: word, time: var int64): T {.inline.} =
   ## Read data from memory.
   ## Raises a MachineError if the address is invalid.

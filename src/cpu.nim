@@ -782,6 +782,11 @@ proc step*(cpu: var CPU, time: var int64) {.inline.} =
     let
       oldCPU = cpu
       instr = cpu.fetch
+
+    # Delay if we are running from uncached memory
+    if cpu.pc >= 0x80000000u32 and cpu.pc < 0xa0000000u32:
+      time += addressSpace.latency[:word](cpu.pc)
+
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(instr, time)
     trace fmt"{instr.format} {cpuDiff(oldCPU, cpu)}"
