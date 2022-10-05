@@ -92,8 +92,8 @@ proc clockRate(source: ClockSource): int64 =
   ## How often does a clock source tick?
 
   case source
-  of SystemClock: systemClock.int64
-  of SystemClockDiv8: systemClock.int64 * 8
+  of SystemClock: cpuClock.int64
+  of SystemClockDiv8: cpuClock.int64 * 8
   of DotClock: clocksPerPixel()
   of HBlank: clocksPerScanline()
 

@@ -52,7 +52,6 @@ const
   # How many timesteps it takes for one clock cycle of each component.
   cpuClock* = 11 # ~33.8MHz
   gpuClock* = 7  # ~53.2MHz
-  systemClock* = cpuClock * 8 # ~4.23MHz
   refreshRate*: array[Region, int] =
     [NTSC: 60, PAL: 50]
 
