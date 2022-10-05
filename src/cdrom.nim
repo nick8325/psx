@@ -1,6 +1,6 @@
 ## The CD-ROM controller.
 
-import utils, irq, eventqueue
+import utils, irq, eventqueue, basics
 import std/[bitops, strformat, deques, options]
 
 const loggerComponent = logCDROM
@@ -43,7 +43,7 @@ proc interruptPending: bool =
 
 proc checkInterrupts =
   trace fmt"{interrupts} {commandStart} {enabledInterrupts:08x} {smen}"
-  events.after(10000, "CDROM delay") do(): irqs.set(2, interruptPending())
+  events.after(20000*cpuClock, "CDROM delay") do(): irqs.set(2, interruptPending())
 
 proc queueInterrupt(interrupt: range[0..5]) =
   if not (interrupt in interrupts):
