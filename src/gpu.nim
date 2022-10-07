@@ -354,7 +354,7 @@ afterVBlank("gpu end vblank") do ():
 
 proc displayArea*: Rect =
   result.x1 = screen.displayAreaStart.x
-  result.x2 = screen.displayAreaStart.y
+  result.y1 = screen.displayAreaStart.y
   result.x2 = result.x1 + screenWidth()
   result.y2 = result.y1 + screenHeight()
 
