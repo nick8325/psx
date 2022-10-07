@@ -59,6 +59,7 @@ while runGame:
       for irq in 0..10:
         irqs.signal(irq)
 
+  # TODO: this seems to be running slow. Clean up the vblank handling.
   runSystem(nextVBlankDelta())
   runSystem(vblankClocks())
 
