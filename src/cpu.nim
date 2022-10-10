@@ -241,15 +241,15 @@ func `$`*(x: Immediate): string =
 func `$`*(x: Target): string =
   fmt"$0x{word(x):x}"
 
-func absTarget(target: Target, pc: word): word =
+func absTarget(target: Target, pc: word): word {.inline.} =
   ## Resolve a target address.
   (pc and 0xf000_0000u32) or (word(target) shl 2)
 
-func zeroExt(x: Immediate): word =
+func zeroExt(x: Immediate): word {.inline.} =
   ## Zero extend an immediate to a word.
   uint32(uint16(x))
 
-func signExt(x: Immediate): word =
+func signExt(x: Immediate): word {.inline.} =
   ## Sign extend an immediate to a word.
   cast[uint32](int32(cast[int16](uint16(x))))
 
@@ -473,14 +473,14 @@ func cpuDiff(cpu1: CPU, cpu2: CPU): string {.used.} =
   if cpu1.cop0.sr != cpu2.cop0.sr:
     result &= fmt "COP0.SR={cpu1.cop0.sr:x}->{cpu2.cop0.sr:x} "
 
-proc signedAdd(x, y: word): word =
+proc signedAdd(x, y: word): word {.inline.} =
   if x.signed > 0 and y.signed > high(iword) - x.signed:
     raise MachineError(error: ArithmeticOverflow)
   if x.signed < 0 and y.signed < low(iword) - x.signed:
     raise MachineError(error: ArithmeticOverflow)
   return x + y
 
-proc signedSub(x, y: word): word =
+proc signedSub(x, y: word): word {.inline.} =
   # x >= 0 ==> (x-y > iword.high <==> y < x-iword.high)
   if x.signed >= 0 and y.signed < x.signed - iword.high:
     raise MachineError(error: ArithmeticOverflow)
