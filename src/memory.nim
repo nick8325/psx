@@ -70,9 +70,6 @@ type
     ## The PSX address space.
 
     table {.align: 4096.}: array[0x100000, Page]
-    # Keep references to the underlying arrays, to prevent them
-    # getting garbage collected while 'table' is still alive
-    regions: seq[ref seq[byte]]
 
     # I/O handlers.
     # For each address, only one of io8/16/32 needs to handle it -
@@ -143,7 +140,6 @@ proc mapRegion*(memory: var Memory, arr: var openArray[byte], address: word,
   assert arr.len mod pageSize == 0
   assert address mod pageSize == 0
 
-  memory.regions.add(cast[ref seq[byte]](arr))
   let startingPage = address div pageSize
   for i in 0 ..< arr.len div pageSize:
     let page = sliceArray[pageSize, byte](arr, i * pageSize)
