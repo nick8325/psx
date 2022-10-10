@@ -43,21 +43,21 @@ const initCOP0: COP0 =
   COP0(sr: 1 shl 22, cause: 0, epc: 0, badvaddr: 0, bpc: 0, bda: 0,
        dcic: 0, bdam: 0, bpcm: 0)
 
+# User-settable bits in COP0.SR.
+template cu: auto = BitSlice[word, word](pos: 28, width: 4)
+template bev: auto = bit[word] 22
+template cm: auto = bit[word] 19
+template swc: auto = bit[word] 17
+template isc: auto = bit[word] 16
+template im: auto = BitSlice[word, word](pos: 8, width: 8)
+template ku: auto = [bit[word] 1, bit[word] 3, bit[word] 5]
+template ie: auto = [bit[word] 0, bit[word] 2, bit[word] 4]
+template ie0: auto = ie[0]
+
+# IRQ bits in COP0.CAUSE.
+template ip: auto = BitSlice[word, word](pos: 8, width: 8)
+
 const
-  # User-settable bits in COP0.SR.
-  cu = BitSlice[word, word](pos: 28, width: 4)
-  bev = bit[word] 22
-  cm {.used.} = bit[word] 19
-  swc = bit[word] 17
-  isc = bit[word] 16
-  im = BitSlice[word, word](pos: 8, width: 8)
-  ku = [bit[word] 1, bit[word] 3, bit[word] 5]
-  ie = [bit[word] 0, bit[word] 2, bit[word] 4]
-  ie0 = ie[0]
-
-  # IRQ bits in COP0.CAUSE.
-  ip = BitSlice[word, word](pos: 8, width: 8)
-
   # Read-write SR bits
   writableSRBits: word =
     block:
@@ -153,17 +153,17 @@ let initCPU*: CPU = block:
       cop0: initCOP0,
       gte: initGTE)
 
-func `[]`*(cpu: CPU, reg: Register): word =
+func `[]`*(cpu: CPU, reg: Register): word {.inline.} =
   ## Access registers by number.
   assert cpu.registers[r0] == 0
   cpu.registers[reg]
 
-func `[]=`*(cpu: var CPU, reg: Register, val: word) =
+func `[]=`*(cpu: var CPU, reg: Register, val: word) {.inline.} =
   ## Access registers by number. Takes care of ignoring writes to R0.
   cpu.registers[reg] = val
   cpu.registers[r0] = 0
 
-func delayedGet(cpu: CPU, reg: Register): word =
+func delayedGet(cpu: CPU, reg: Register): word {.inline.} =
   ## Access registers by number, but also look in the load delay slot.
   assert cpu.registers[r0] == 0
   if cpu.delayedUpdate.reg == reg:
@@ -171,18 +171,18 @@ func delayedGet(cpu: CPU, reg: Register): word =
   else:
     return cpu.registers[reg]
 
-func setIRQ*(cpu: var CPU, irq: bool) =
+func setIRQ*(cpu: var CPU, irq: bool) {.inline.} =
   ## Update the IRQ flag.
 
   cpu.cop0.cause[ip.bit 2] = irq
 
-proc jump*(cpu: var CPU, pc: word) =
+proc jump*(cpu: var CPU, pc: word) {.inline.} =
   ## Jump to a particular address.
 
   cpu.pc = pc
   cpu.nextPC = pc+4
 
-proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word =
+proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word {.inline.} =
   ## Resolve a virtual address to a physical address,
   ## also checking access permissions.
   if address >= 0x80000000u32 and cpu.cop0.sr[ku[0]]:
@@ -197,15 +197,15 @@ proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word =
 
   return address # memory.nim does memory mirroring
 
-proc fetch*(cpu: CPU): word =
+proc fetch*(cpu: CPU): word {.inline.} =
   ## Fetch the next instruction.
   addressSpace.fetch(cpu.resolveAddress(cpu.pc, Fetch))
 
-proc read*[T](cpu: CPU, address: word, time: var int64): T =
+proc read*[T](cpu: CPU, address: word, time: var int64): T {.inline.} =
   ## Read from a given virtual address.
   addressSpace.read[:T](cpu.resolveAddress(address, Load), time)
 
-proc write*[T](cpu: CPU, address: word, val: T) =
+proc write*[T](cpu: CPU, address: word, val: T) {.inline.} =
   ## Write to a given virtual address.
   addressSpace.write[:T](cpu.resolveAddress(address, Store), val)
 
