@@ -179,15 +179,17 @@ func `[]`*[T, U](val: Masked[U], slice: BitSlice[T, U]): T {.inline.} =
 
 template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidth: int, signed: bool = false) =
   when signed:
-    const slice = SignedBitSlice[T, U](pos: thePos, width: theWidth)
+    proc name(whole: U): T {.inject, used, inline.} =
+      whole[SignedBitSlice[T, U](pos: thePos, width: theWidth)]
+
+    proc `name =`(whole: var U, part: T) {.inject, used, inline.} =
+      whole[SignedBitSlice[T, U](pos: thePos, width: theWidth)] = part
   else:
-    const slice = BitSlice[T, U](pos: thePos, width: theWidth)
+    proc name(whole: U): T {.inject, used, inline.} =
+      whole[BitSlice[T, U](pos: thePos, width: theWidth)]
 
-  proc name(whole: U): T {.inject, used, inline.} =
-    whole[slice]
-
-  proc `name =`(whole: var U, part: T) {.inject, used, inline.} =
-    whole[slice] = part
+    proc `name =`(whole: var U, part: T) {.inject, used, inline.} =
+      whole[BitSlice[T, U](pos: thePos, width: theWidth)] = part
 
 func clampedConvert*[T](x: int): T {.inline.} =
   x.clamp(T.low.int, T.high.int).T

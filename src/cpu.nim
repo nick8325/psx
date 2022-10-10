@@ -11,8 +11,7 @@ type
   Register* = distinct range[0..31]  ## A register.
   CoRegister = distinct range[0..31] ## A coprocessor register.
 
-const
-  r0 = Register(0)
+template r0: auto = Register(0)
 
 func `==`*(x, y: Register): bool {.borrow.}
 
@@ -287,18 +286,17 @@ const opcodeType: array[Opcode, OpcodeType] =
    JALR: RegDS, SYSCALL: Exc, BREAK: Exc, MFC0: MFC, MTC0: MTC, RFE: None,
    COP2: COP, MFC2: MFC, MTC2: MTC, CFC2: MFC, CTC2: MTC]
 
-const
-  # The different parts of a machine instruction.
-  opcode = BitSlice[int, word](pos: 26, width: 6)
-  rs = BitSlice[Register, word](pos: 21, width: 5)
-  rt = BitSlice[Register, word](pos: 16, width: 5)
-  rd = BitSlice[Register, word](pos: 11, width: 5)
-  shamt = BitSlice[int, word](pos: 6, width: 5)
-  funct = BitSlice[int, word](pos: 0, width: 6)
-  imm = BitSlice[Immediate, word](pos: 0, width: 16)
-  target = BitSlice[Target, word](pos: 0, width: 26)
-  copimm = BitSlice[word, word](pos: 0, width: 25)
-  exc = BitSlice[word, word](pos: 6, width: 20)
+# The different parts of a machine instruction.
+template opcode: auto = BitSlice[int, word](pos: 26, width: 6)
+template rs: auto = BitSlice[Register, word](pos: 21, width: 5)
+template rt: auto = BitSlice[Register, word](pos: 16, width: 5)
+template rd: auto = BitSlice[Register, word](pos: 11, width: 5)
+template shamt: auto = BitSlice[int, word](pos: 6, width: 5)
+template funct: auto = BitSlice[int, word](pos: 0, width: 6)
+template imm: auto = BitSlice[Immediate, word](pos: 0, width: 16)
+template target: auto = BitSlice[Target, word](pos: 0, width: 26)
+template copimm: auto = BitSlice[word, word](pos: 0, width: 25)
+template exc: auto = BitSlice[word, word](pos: 6, width: 20)
 
 proc decode(instr: word): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
