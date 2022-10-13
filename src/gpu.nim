@@ -449,7 +449,7 @@ proc gpustat*: word =
     word(bit31) shl 31
   trace fmt"GPUSTAT returned {result:08x}"
 
-let processCommand = consumer(word):
+var processCommand = consumer(word):
   while true:
     let value = take
     let cmd = value[command]
@@ -762,17 +762,16 @@ let processCommand = consumer(word):
       warn fmt"Unrecognised GP0 command {value[command]:02x}"
       while true: yield
 
-var iter = processCommand.start
 proc gp0*(value: word) =
   trace fmt"GP0 {value:08x}"
-  iter.give(value)
+  processCommand.give(value)
 
 proc gp1*(value: word) =
   debug fmt"GP1 {value:08x}"
   case value[command] and 0x3f
   of 0x00:
     # Reset
-    iter = processCommand.start
+    processCommand.reset
     let cmds = [0x01_000000u32, 0x02_000000u32, 0x03_000001u32, 0x04_000000u32,
                 0x05_000000u32, 0x06_c00_200u32, 0x07_100_010u32, 0x08000001u32]
     for cmd in cmds:

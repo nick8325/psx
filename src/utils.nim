@@ -195,29 +195,63 @@ func clampedConvert*[T](x: int): T {.inline.} =
   x.clamp(T.low.int, T.high.int).T
 
 type
-  Consumer*[T] = distinct iterator(t: T)
+  Consumer*[T] = object
+    buffer: seq[T]
+    initial: proc: iterator(t: T, replay: bool)
+    iter: iterator(t: T, replay: bool)
 
-template consumer*[T](_: typedesc[T], body: untyped): untyped =
-  mixin consumerArg
-  iterator it(consumerArg {.inject.}: T) {.closure.} =
-    body
-  it
+iterator empty[T](t: T, replay: bool) {.closure.} =
+  discard
 
-proc toIter[T](co: Consumer[T]): iterator(t: T) =
-  (iterator(t: T))(co)
+proc runIter[T](co: var Consumer[T], value: T, replay: bool) =
+  while true:
+    assert not co.iter.finished
+    co.iter(value, replay)
+    if co.iter.finished:
+      co.iter = co.initial()
+      co.buffer.setLen(0)
+    else:
+      break
 
-proc start*[T](iter: iterator(t: T)): Consumer[T] =
-  result = Consumer[T](iter)
-  toIter(result)(T.default)
+proc `=copy`[T](dest: var Consumer[T], src: Consumer[T]) =
+    dest.buffer = @[]
+    dest.initial = src.initial
+    dest.iter = empty
 
-proc give*[T](co: Consumer[T], value: T) =
-  assert not toIter(co).finished
-  toIter(co)(value)
+    for value in src.buffer:
+      dest.runIter(value, true)
+
+template consumer*[T](_: typedesc[T], body: untyped): Consumer[T] =
+  mixin consumerArg, consumerReplay
+  bind runIter, default
+
+  let initial = proc: iterator(t: T, replay: bool) =
+    iterator it(consumerArg {.inject.}: T, consumerReplay {.inject.}: bool) {.closure.} =
+      body
+    it
+
+  var result = Consumer[T](buffer: @[], initial: initial, iter: empty)
+  runIter[T](result, T.default, false)
+  result
+
+proc reset*[T](co: var Consumer[T]) =
+  co.buffer.setLen(0)
+  co.iter = co.initial()
+  co.runIter(T.default, false)
+
+proc give*[T](co: var Consumer[T], value: T) =
+  co.runIter(value, false)
+  co.buffer.add(value)
 
 template take*: untyped =
   mixin consumerArg
   yield
   consumerArg
+
+template effect*(body: untyped): untyped =
+  mixin consumerReplay
+  if not consumerReplay:
+    body
 
 template cmpKey*[T](key: untyped): untyped =
   proc compare(x, y: T): int = cmp(key(x), key(y))
