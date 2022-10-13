@@ -450,82 +450,83 @@ proc gpustat*: word =
   trace fmt"GPUSTAT returned {result:08x}"
 
 var processCommand = consumer(word):
-  while true:
-    let value = take
-    let cmd = value[command]
-    case cmd
-    of 0x00: discard # NOP
-    of 0x01: discard # Clear cache
-    of 0x02:
-      # Fill rectangle
-      let colour = Colour(value[rest]).unpack
-      var
-        coord = take.ScreenCoord
-        size = take.ScreenCoord
-      var settings = rasteriserSettings(transparent = false,
-                                        dither = false, crop = false, interlace = true)
-      # Rounding from Nocash PSX
-      let x = coord.x and 0x3f0
-      let y = coord.y and 0x1ff
-      let w = ((size.x and 0x3ff) + 0xf) and not 0xf
-      let h = size.y and 0x1ff
+  let value = take
+  let cmd = value[command]
+  case cmd
+  of 0x00: discard # NOP
+  of 0x01: discard # Clear cache
+  of 0x02:
+    # Fill rectangle
+    let colour = Colour(value[rest]).unpack
+    var
+      coord = take.ScreenCoord
+      size = take.ScreenCoord
+    var settings = rasteriserSettings(transparent = false,
+                                      dither = false, crop = false, interlace = true)
+    # Rounding from Nocash PSX
+    let x = coord.x and 0x3f0
+    let y = coord.y and 0x1ff
+    let w = ((size.x and 0x3ff) + 0xf) and not 0xf
+    let h = size.y and 0x1ff
 
-      settings.fill x, y, w, h, colour
+    effect: settings.fill x, y, w, h, colour
 
-    of 0x1f:
-      # Interrupt requested
+  of 0x1f:
+    # Interrupt requested
+    effect:
       control.interruptRequested = true
       irqs.signal 1
-    of 0x20..0x3f:
-      # A polygon.
-      # The bits of the command word have the following meaning:
-      # * bit 0: if 1 then texture blending is disabled
-      # * bit 1: enable transparency (using global transparency settings)
-      # * bit 2: polygon is textured
-      # * bit 3: if 0, draw a triangle; if 1, draw a quadrilateral
-      # * bit 4: polygon is shaded
-      #
-      # The parameters come in the following order, where (0) is the command word:
-      # (0) command+colour (1) vertex (2) texcoord+palette
-      # (3) colour (4) vertex (5) texcoord+texpage
-      # (6) colour (7) vertex (8) texcoord
-      # (9) colour (10) vertex (11) texcoord
-      # but only those parameters appropriate to the particular drawing
-      # command are sent:
-      # * (9)-(11) skipped for triangles
-      # * Texcoords skipped for untextured polygons
-      # * Colours (3),(6),(9) (but not 0) skipped for unshaded polygons
+  of 0x20..0x3f:
+    # A polygon.
+    # The bits of the command word have the following meaning:
+    # * bit 0: if 1 then texture blending is disabled
+    # * bit 1: enable transparency (using global transparency settings)
+    # * bit 2: polygon is textured
+    # * bit 3: if 0, draw a triangle; if 1, draw a quadrilateral
+    # * bit 4: polygon is shaded
+    #
+    # The parameters come in the following order, where (0) is the command word:
+    # (0) command+colour (1) vertex (2) texcoord+palette
+    # (3) colour (4) vertex (5) texcoord+texpage
+    # (6) colour (7) vertex (8) texcoord
+    # (9) colour (10) vertex (11) texcoord
+    # but only those parameters appropriate to the particular drawing
+    # command are sent:
+    # * (9)-(11) skipped for triangles
+    # * Texcoords skipped for untextured polygons
+    # * Colours (3),(6),(9) (but not 0) skipped for unshaded polygons
 
-      let
-        rawTextures = cmd.testBit 0
-        transparent = cmd.testBit 1
-        textured = cmd.testBit 2
-        quad = cmd.testBit 3
-        shaded = cmd.testBit 4
-        sides = if quad: 4 else: 3
+    let
+      rawTextures = cmd.testBit 0
+      transparent = cmd.testBit 1
+      textured = cmd.testBit 2
+      quad = cmd.testBit 3
+      shaded = cmd.testBit 4
+      sides = if quad: 4 else: 3
 
-      var
-        vertices: array[4, Point]
-        colours: array[4, rasteriser.Colour]
-        texcoords: array[4, Point]
-        texpage: TexPage
-        palette: Point
+    var
+      vertices: array[4, Point]
+      colours: array[4, rasteriser.Colour]
+      texcoords: array[4, Point]
+      texpage: TexPage
+      palette: Point
 
-      colours[0] = Colour(value[rest]).unpack
+    colours[0] = Colour(value[rest]).unpack
 
-      for i in 0..<sides:
-        if i > 0:
-          if shaded: colours[i] = Colour(take()).unpack
-          else: colours[i] = colours[0] # monochrome
-        vertices[i] = Vertex(take()).unpack + drawing.drawingAreaOffset.unpack
-        if textured:
-          let arg = take()
-          texcoords[i] = TexCoord(arg[word2]).unpack
-          case i
-          of 0: palette = Palette(arg[word1]).unpack
-          of 1: texpage = TexPage(arg[word1])
-          else: discard
+    for i in 0..<sides:
+      if i > 0:
+        if shaded: colours[i] = Colour(take()).unpack
+        else: colours[i] = colours[0] # monochrome
+      vertices[i] = Vertex(take()).unpack + drawing.drawingAreaOffset.unpack
+      if textured:
+        let arg = take()
+        texcoords[i] = TexCoord(arg[word2]).unpack
+        case i
+        of 0: palette = Palette(arg[word1]).unpack
+        of 1: texpage = TexPage(arg[word1])
+        else: discard
 
+    effect:
       for i in 0..<(if quad: 2 else: 1):
         # Convert vertices [i,i+1,i+2] to a triangle
         let
@@ -546,54 +547,55 @@ var processCommand = consumer(word):
         let settings = rasteriserSettings(transparent = transparent,
                                           dither = shaded, crop = true, interlace = true)
         settings.draw Triangle(vertices: vs, shadingMode: shadingMode,
-                               colours: cs, texture: texture)
+                                colours: cs, texture: texture)
 
-    of 0x40..0x5f:
-      # A straight line or polyline.
-      # The bits of the command word have the following meaning:
-      # * bit 1: enable transparency (using global transparency settings)
-      # * bit 3: if 0, draw a line; if 1, draw a polyline
-      # * bit 4: polygon is shaded
-      #
-      # The parameters come in the following order, where (0) is the command word:
-      # (0) command+colour (1) vertex (2) optional colour (3) vertex etc.
-      # Polylines end in a 0x5xxx5xxx (TODO: check)
+  of 0x40..0x5f:
+    # A straight line or polyline.
+    # The bits of the command word have the following meaning:
+    # * bit 1: enable transparency (using global transparency settings)
+    # * bit 3: if 0, draw a line; if 1, draw a polyline
+    # * bit 4: polygon is shaded
+    #
+    # The parameters come in the following order, where (0) is the command word:
+    # (0) command+colour (1) vertex (2) optional colour (3) vertex etc.
+    # Polylines end in a 0x5xxx5xxx (TODO: check)
 
-      let
-        transparent = cmd.testBit 1
-        polyline = cmd.testBit 3
-        shaded = cmd.testBit 4
+    let
+      transparent = cmd.testBit 1
+      polyline = cmd.testBit 3
+      shaded = cmd.testBit 4
 
-      var
-        vertices: seq[Point]
-        colours: seq[rasteriser.Colour]
+    var
+      vertices: seq[Point]
+      colours: seq[rasteriser.Colour]
 
-      template addColour(arg: word) =
-        colours.add Colour(arg).unpack
-      template addVertex(arg: word) =
-        vertices.add(Vertex(arg).unpack + drawing.drawingAreaOffset.unpack)
+    template addColour(arg: word) =
+      colours.add Colour(arg).unpack
+    template addVertex(arg: word) =
+      vertices.add(Vertex(arg).unpack + drawing.drawingAreaOffset.unpack)
 
-      addColour value[rest].word
-      addVertex take()
+    addColour value[rest].word
+    addVertex take()
 
-      if polyline:
-        while true:
-          let arg = take()
-          if (arg and 0x50005000u32) == 0x50005000u32: break
-          if shaded:
-            addColour(arg)
-            addVertex(take())
-          else:
-            colours.add colours[0]
-            addVertex(arg)
-
-      else:
+    if polyline:
+      while true:
+        let arg = take()
+        if (arg and 0x50005000u32) == 0x50005000u32: break
         if shaded:
-          addColour(take())
+          addColour(arg)
+          addVertex(take())
         else:
           colours.add colours[0]
-        addVertex(take())
+          addVertex(arg)
 
+    else:
+      if shaded:
+        addColour(take())
+      else:
+        colours.add colours[0]
+      addVertex(take())
+
+    effect:
       let settings = rasteriserSettings(transparent = transparent,
                                         dither = true, crop = true, interlace = true)
 
@@ -607,75 +609,77 @@ var processCommand = consumer(word):
       if vertices[^1] notin vertices[0..^2]:
         putPixel(vertices[^1].x, vertices[^1].y, colours[^1], settings)
 
-    of 0x60..0x7f:
-      # A rectangle.
-      # The bits of the command word have the following meaning:
-      # * bit 0: if 1 then texture blending is disabled
-      # * bit 1: enable transparency (using global transparency settings)
-      # * bit 2: polygon is textured
-      # * bit 3-4: if 0, variable size; if 1, 1x1; if 2, 8x8; if 3, 16x16
-      #
-      # The parameters come in the following order, where (0) is the command word:
-      # (0) command+colour (1) vertex (2) (optional) texcoord+palette
-      # (3) (optional) width+height
+  of 0x60..0x7f:
+    # A rectangle.
+    # The bits of the command word have the following meaning:
+    # * bit 0: if 1 then texture blending is disabled
+    # * bit 1: enable transparency (using global transparency settings)
+    # * bit 2: polygon is textured
+    # * bit 3-4: if 0, variable size; if 1, 1x1; if 2, 8x8; if 3, 16x16
+    #
+    # The parameters come in the following order, where (0) is the command word:
+    # (0) command+colour (1) vertex (2) (optional) texcoord+palette
+    # (3) (optional) width+height
 
-      let
-        rawTextures = cmd.testBit 0
-        transparent = cmd.testBit 1
-        textured = cmd.testBit 2
+    let
+      rawTextures = cmd.testBit 0
+      transparent = cmd.testBit 1
+      textured = cmd.testBit 2
 
-      var
-        texcoord: Point
-        palette: Point
-        width, height: int
+    var
+      texcoord: Point
+      palette: Point
+      width, height: int
 
-      let
-        colour = Colour(value[rest]).unpack
-        pos = Vertex(take()).unpack + drawing.drawingAreaOffset.unpack
+    let
+      colour = Colour(value[rest]).unpack
+      pos = Vertex(take()).unpack + drawing.drawingAreaOffset.unpack
 
-      if textured:
-        let arg = take()
-        palette = Palette(arg[word1]).unpack
-        texcoord = TexCoord(arg[word2]).unpack
+    if textured:
+      let arg = take()
+      palette = Palette(arg[word1]).unpack
+      texcoord = TexCoord(arg[word2]).unpack
 
-      if cmd.testBit 4:
-        if cmd.testBit 3:
-          width = 16
-          height = 16
-        else:
-          width = 8
-          height = 8
+    if cmd.testBit 4:
+      if cmd.testBit 3:
+        width = 16
+        height = 16
       else:
-        if cmd.testBit 3:
-          width = 1
-          height = 1
-        else:
-          let arg = take()
-          width = ScreenCoord(arg).unpack.x
-          height = ScreenCoord(arg).unpack.y
+        width = 8
+        height = 8
+    else:
+      if cmd.testBit 3:
+        width = 1
+        height = 1
+      else:
+        let arg = take()
+        width = ScreenCoord(arg).unpack.x
+        height = ScreenCoord(arg).unpack.y
 
-      let
-        rect = (x1: pos.x, y1: pos.y, x2: pos.x + width, y2: pos.y + height)
-        texture = Texture[1](
-          page: (x: textures.base.x64 * 64, y: textures.base.y256 * 256),
-          windowMask: textures.window.mask.unpack,
-          windowOffset: textures.window.offset.unpack,
-          coords: [texcoord],
-          colourMode: textures.colourDepth.colourMode(palette))
+    let
+      rect = (x1: pos.x, y1: pos.y, x2: pos.x + width, y2: pos.y + height)
+      texture = Texture[1](
+        page: (x: textures.base.x64 * 64, y: textures.base.y256 * 256),
+        windowMask: textures.window.mask.unpack,
+        windowOffset: textures.window.offset.unpack,
+        coords: [texcoord],
+        colourMode: textures.colourDepth.colourMode(palette))
 
-        shadingMode =
-          if textured and textures.enabled:
-            if rawTextures: Textures else: Both
-          else: Colours
+      shadingMode =
+        if textured and textures.enabled:
+          if rawTextures: Textures else: Both
+        else: Colours
 
-        settings = rasteriserSettings(transparent = transparent,
-                                      dither = false, crop = true, interlace = true)
+      settings = rasteriserSettings(transparent = transparent,
+                                    dither = false, crop = true, interlace = true)
+    effect:
       settings.draw Rectangle(rect: rect, shadingMode: shadingMode,
                               colour: colour, texture: texture,
                               flipX: textures.flip.x, flipY: textures.flip.y)
 
-    of 0xe1:
-      # Texpage
+  of 0xe1:
+    # Texpage
+    effect:
       let page = value[rest].TexPage
       textures.base.x64 = page.baseX64
       textures.base.y256 = page.baseY256
@@ -688,79 +692,82 @@ var processCommand = consumer(word):
       textures.flip.x = page.flipX
       textures.flip.y = page.flipY
 
-    of 0xe2:
-      textures.window = value[rest].TextureWindow
+  of 0xe2:
+    effect: textures.window = value[rest].TextureWindow
 
-    of 0xe3:
-      drawing.drawingAreaTopLeft = value[rest].PackedScreenCoord
+  of 0xe3:
+    effect: drawing.drawingAreaTopLeft = value[rest].PackedScreenCoord
 
-    of 0xe4:
-      drawing.drawingAreaBottomRight = value[rest].PackedScreenCoord
+  of 0xe4:
+    effect: drawing.drawingAreaBottomRight = value[rest].PackedScreenCoord
 
-    of 0xe5:
-      drawing.drawingAreaOffset = value[rest].PackedSignedCoord
+  of 0xe5:
+    effect: drawing.drawingAreaOffset = value[rest].PackedSignedCoord
 
-    of 0xe6:
-      # Mask bit settings
+  of 0xe6:
+    # Mask bit settings
+    effect:
       drawing.setMaskBit = value.testBit 0
       drawing.skipMaskedPixels = value.testBit 1
 
-    of 0x80..0x9f:
-      # Copy VRAM to VRAM
-      var
-        src = take.ScreenCoord
-        dest = take.ScreenCoord
-        size = take.ScreenCoord
-      var settings = rasteriserSettings(transparent = false,
-                                        dither = false, crop = false, interlace = false)
+  of 0x80..0x9f:
+    # Copy VRAM to VRAM
+    var
+      src = take.ScreenCoord
+      dest = take.ScreenCoord
+      size = take.ScreenCoord
+    var settings = rasteriserSettings(transparent = false,
+                                      dither = false, crop = false, interlace = false)
+    effect:
       # This detail comes from Nocash PSX
       for j in 0..<(if size.y == 0: vramHeight else: size.y):
         for i in 0..<(if size.x == 0: vramWidth else: size.x):
           let pixel = getPixel(src.x + i, src.y + j)
           putPixel(dest.x + i, dest.y + j, pixel, settings)
 
-    of 0xa0..0xbf:
-      # Copy rectangle to VRAM
-      var
-        coord = take.ScreenCoord
-        size = take.ScreenCoord
-      var settings = rasteriserSettings(transparent = false,
-                                        dither = false, crop = false, interlace = false)
+  of 0xa0..0xbf:
+    # Copy rectangle to VRAM
+    var
+      coord = take.ScreenCoord
+      size = take.ScreenCoord
+    var settings = rasteriserSettings(transparent = false,
+                                      dither = false, crop = false, interlace = false)
 
-      var
-        arg: word = 0
-        even = true
-      # This detail comes from Nocash PSX
-      for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
-        for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
-          if even:
-            arg = take()
-            putHalfword(i, j, arg[word2], settings)
-            even = false
-          else:
-            putHalfword(i, j, arg[word1], settings)
-            even = true
-    of 0xc0..0xdf:
-      # Copy rectangle to CPU
-      let
-        coord = take.Vertex
-        size = take.Vertex
+    var
+      arg: word = 0
+      even = true
+    # This detail comes from Nocash PSX
+    for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
+      for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
+        if even:
+          arg = take()
+          effect: putHalfword(i, j, arg[word2], settings)
+          even = false
+        else:
+          effect: putHalfword(i, j, arg[word1], settings)
+          even = true
+  of 0xc0..0xdf:
+    # Copy rectangle to CPU
+    let
+      coord = take.Vertex
+      size = take.Vertex
 
-      var
-        val: word = 0
-        even = true
-      for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
-        for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
-          if even:
-            val = getHalfword(i, j).word
-            even = false
-          else:
-            val = val or (getHalfword(i, j).word shl 16)
-            resultQueue.addLast val
-            even = true
-    else:
+    var
+      val: word = 0
+      even = true
+    for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
+      for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
+        if even:
+          val = getHalfword(i, j).word
+          even = false
+        else:
+          val = val or (getHalfword(i, j).word shl 16)
+          effect: resultQueue.addLast val
+          even = true
+  else:
+    effect:
       warn fmt"Unrecognised GP0 command {value[command]:02x}"
-      while true: yield
+    while true: discard take()
 
 proc gp0*(value: word) =
   trace fmt"GP0 {value:08x}"

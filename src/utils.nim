@@ -214,12 +214,16 @@ proc runIter[T](co: var Consumer[T], value: T, replay: bool) =
       break
 
 proc `=copy`[T](dest: var Consumer[T], src: Consumer[T]) =
-    dest.buffer = @[]
-    dest.initial = src.initial
-    dest.iter = empty
+  dest.buffer = @[]
+  dest.initial = src.initial
+  dest.iter = empty
+  dest.runIter(T.default, false)
 
-    for value in src.buffer:
-      dest.runIter(value, true)
+  for value in src.buffer:
+    dest.buffer.add value
+    dest.runIter(value, true)
+
+  assert dest.buffer == src.buffer
 
 template consumer*[T](_: typedesc[T], body: untyped): Consumer[T] =
   mixin consumerArg, consumerReplay
@@ -227,6 +231,7 @@ template consumer*[T](_: typedesc[T], body: untyped): Consumer[T] =
 
   let initial = proc: iterator(t: T, replay: bool) =
     iterator it(consumerArg {.inject.}: T, consumerReplay {.inject.}: bool) {.closure.} =
+      var consumerEffectLevel {.inject.} = 0
       body
     it
 
@@ -236,22 +241,27 @@ template consumer*[T](_: typedesc[T], body: untyped): Consumer[T] =
 
 proc reset*[T](co: var Consumer[T]) =
   co.buffer.setLen(0)
-  co.iter = co.initial()
+  co.iter = empty
   co.runIter(T.default, false)
 
 proc give*[T](co: var Consumer[T], value: T) =
-  co.runIter(value, false)
   co.buffer.add(value)
+  co.runIter(value, false)
 
 template take*: untyped =
-  mixin consumerArg
+  mixin consumerArg, consumerEffectLevel
+  assert consumerEffectLevel == 0, "take inside effect"
   yield
   consumerArg
 
 template effect*(body: untyped): untyped =
-  mixin consumerReplay
-  if not consumerReplay:
-    body
+  mixin consumerReplay, consumerEffectLevel
+  consumerEffectLevel.inc
+  try:
+    if not consumerReplay:
+      body
+  finally:
+    consumerEffectLevel.dec
 
 template cmpKey*[T](key: untyped): untyped =
   proc compare(x, y: T): int = cmp(key(x), key(y))
