@@ -50,9 +50,7 @@ events.every(proc: int64 = clockRate, "dump ram") do():
 if paramCount() >= 1:
   loadEXE(readFile(paramStr(1)))
 
-var
-  state: State
-  saved = false
+var state: State = save()
 
 while runGame:
   while pollEvent(evt):
@@ -60,8 +58,22 @@ while runGame:
       runGame = false
       break
     elif evt.kind == KeyDown:
-      for irq in 0..10:
-        irqs.signal(irq)
+      case evt.key.keysym.sym
+      of K_S:
+        echo "saving"
+        state = save()
+
+      of K_L:
+        echo "loading"
+        load(state)
+
+      of K_I:
+        echo "triggering IRQs"
+        for irq in 0..10:
+          irqs.signal(irq)
+
+      else:
+        echo "unknown key"
 
   # TODO: this seems to be running slow. Clean up the vblank handling.
   runSystem(nextVBlankDelta())
@@ -72,16 +84,6 @@ while runGame:
   if fps.getFramerate != refreshRate[region].cint:
     fps.setFramerate refreshRate[region].cint
 #  fps.delay
-
-  if events.now >= 5*clockRate and not saved:
-    echo "saving"
-    state = save()
-    saved = true
-
-  if events.now >= 10*clockRate:
-    echo "restoring"
-    load(state)
-    echo fmt"time: {events.now div clockRate}"
 
 destroy render
 destroy window
