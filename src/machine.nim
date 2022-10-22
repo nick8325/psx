@@ -1,6 +1,6 @@
 ## Hooking up the PSX itself.
 
-import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, joy, utils
+import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, joy, utils, savestates
 from cdrom import nil
 import std/[strformat, sugar, bitops]
 
@@ -8,12 +8,12 @@ const loggerComponent = logMachine
 logMachine.level = lvlDebug
 
 var
-  bios {.align: 4096.}: array[0x80000, byte]
-  ram {.align: 4096.}: array[0x200000, byte]
-  scratchpad {.align: 4096.}: array[0x1000, byte]
-  expansion {.align: 4096.}: array[0x1000, byte]
-  ioPorts {.align: 4096.}: array[0x1000, byte]
-  cacheControl {.align: 4096.}: array[0x1000, byte]
+  bios {.align: 4096, saved.}: array[0x80000, byte]
+  ram {.align: 4096, saved.}: array[0x200000, byte]
+  scratchpad {.align: 4096, saved.}: array[0x1000, byte]
+  expansion {.align: 4096, saved.}: array[0x1000, byte]
+  ioPorts {.align: 4096, saved.}: array[0x1000, byte]
+  cacheControl {.align: 4096, saved.}: array[0x1000, byte]
 
 # Initialise expansion to -1, and read in BIOS
 for x in expansion.mitems: x = 0xff
@@ -77,10 +77,11 @@ proc delay(region: RegionDelay, common: CommonDelay, size: int): int =
   cpuClock * (first + (accesses-1) * seq)
 
 var
-  regionDelays: array[6, RegionDelay]
+  regionDelays {.saved.}: array[6, RegionDelay]
+  commonDelay {.saved.}: CommonDelay
+const
   regions: array[6, MemoryRegion] =
     [Expansion1, Expansion3, BIOS, SPU, CDROM, Expansion2]
-  commonDelay: CommonDelay
 
 proc updateDelays =
   ## Update the memory delay information.
@@ -236,7 +237,7 @@ for address in countup(0x1f801c00u32, 0x1f801ffeu32, 2):
   if address != 0x1F801DAEu32 and address != 0x1f801daau32:
     addressSpace.cell16 address, SPU
 
-var spucnt: uint16 = 0
+var spucnt {.saved.}: uint16 = 0
 addressSpace.io16 0x1f801daau32, SPU,
   () => spucnt,
   proc(val: uint16) = spucnt = val
@@ -261,7 +262,7 @@ type EXE {.packed.} = object
   initialSPBase, initialSPOffset: word
 
 const wantedID: array[8, char] = ['P', 'S', '-', 'X', ' ', 'E', 'X', 'E']
-var header: EXE
+var header {.saved.}: EXE
 
 proc loadEXE*(exe: string) =
   if exe.len > EXE.sizeof:

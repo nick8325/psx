@@ -1,6 +1,6 @@
 ## An interpreter for the R3000A CPU.
 
-import utils, basics, memory, gte
+import utils, basics, memory, gte, savestates
 import std/[tables, bitops, strformat]
 
 const loggerComponent = logCPU
@@ -794,4 +794,4 @@ proc step*(cpu: var CPU, time: var int64) {.inline.} =
     cpu.handleException(error)
 
 var
-  cpu*: CPU = initCPU ## The main processor
+  cpu* {.saved.}: CPU = initCPU ## The main processor

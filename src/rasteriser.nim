@@ -1,6 +1,6 @@
 ## The backend of the GPU - converts drawing commands into a framebuffer.
 
-import utils, basics
+import utils, basics, savestates
 import std/[options, strformat, sugar, algorithm]
 {.push warning[User]: off.}
 import glm
@@ -176,7 +176,7 @@ func toColour(p: Pixel): Colour =
 # Video RAM.
 
 var
-  vram*: array[512, array[1024, Pixel]]
+  vram* {.saved.}: array[512, array[1024, Pixel]]
 
 proc getPixel*(x, y: int): Pixel {.inline.} =
   ## Read a pixel from the VRAM.

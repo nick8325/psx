@@ -1,6 +1,6 @@
 ## Timers.
 
-import basics, utils, irq, eventqueue, gpu
+import basics, utils, irq, eventqueue, gpu, savestates
 import std/[bitops, strformat, options, math]
 
 const loggerComponent = logTimer
@@ -64,7 +64,7 @@ TimerMode.bitfield reachedTarget, bool, 11, 1
 TimerMode.bitfield reachedMax, bool, 12, 1
 
 var
-  timers*: array[TimerId, Timer]
+  timers* {.saved.}: array[TimerId, Timer]
 
 for i, timer in timers.mpairs:
   timer.id = i

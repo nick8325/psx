@@ -1,6 +1,6 @@
 ## Joypad/memory card bus.
 
-import basics, utils, irq, eventqueue
+import basics, utils, irq, eventqueue, savestates
 import std/[strformat, math, options, deques]
 import sdl2
 
@@ -11,10 +11,10 @@ type
   Joypad* = proc(val: uint8): tuple[done: bool, reply: seq[uint8]]
 
 var
-  pos: range[0..3] = 0
+  pos {.saved.}: range[0..3] = 0
 
 var
-  pads*: array[2, array[256, Joypad]]
+  pads* {.saved.}: array[2, array[256, Joypad]]
 
 proc controller(val: uint8): tuple[done: bool, reply: seq[uint8]] =
   case pos
@@ -78,11 +78,11 @@ Control.bitfield slot, range[0..1], 13, 1
 
 ## Hardware registers.
 var
-  stat: Stat
-  mode: uint16 # Ignore mode settings for now
-  control: Control
-  rxFIFO: Deque[uint8]
-  selected: array[2, Option[uint8]]
+  stat {.saved.}: Stat
+  mode {.saved.}: uint16 # Ignore mode settings for now
+  control {.saved.}: Control
+  rxFIFO {.saved.}: Deque[uint8]
+  selected {.saved.}: array[2, Option[uint8]]
 
 const
   # Don't support changing baud rate for now

@@ -1,6 +1,6 @@
 ## The DMA controller.
 
-import basics, utils, irq, memory
+import basics, utils, irq, memory, savestates
 import std/[bitops, strformat]
 
 const loggerComponent = logDMA
@@ -40,9 +40,9 @@ proc initChannel(n: ChannelNumber): Channel =
     warn fmt"Write {value:x} to unknown DMA channel {n}"
 
 var
-  channels*: array[ChannelNumber, Channel]
-  control = Control(0x07654321)
-  interrupt: Interrupt
+  channels* {.saved.}: array[ChannelNumber, Channel]
+  control {.saved.} = Control(0x07654321)
+  interrupt {.saved.}: Interrupt
 
 # BlockControl's fields.
 const

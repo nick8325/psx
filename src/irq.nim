@@ -1,6 +1,6 @@
 ## The IRQ chip.
 
-import basics, cpu, utils
+import basics, cpu, utils, savestates
 import std/[bitops, setutils, strformat]
 
 const loggerComponent = logIRQ
@@ -12,7 +12,7 @@ type
     source: set[0..10]
 
 var
-  irqs*: IRQs
+  irqs* {.saved.}: IRQs
 
 proc setCPUIRQ(irqs: var IRQs) =
   ## Update the processor IRQ flags from irq.stat.

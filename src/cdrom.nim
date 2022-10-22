@@ -1,6 +1,6 @@
 ## The CD-ROM controller.
 
-import utils, irq, eventqueue, basics
+import utils, irq, eventqueue, basics, savestates
 import std/[bitops, strformat, deques, options]
 
 const loggerComponent = logCDROM
@@ -11,28 +11,28 @@ type
 
 var
   # This selects which register gets read/written
-  index: 0..3
+  index {.saved.}: 0..3
 
   # Various FIFOs
-  parameters = initDeque[uint8]()
-  data = initDeque[uint8]()
-  response = initDeque[uint8]()
+  parameters {.saved.} = initDeque[uint8]()
+  data {.saved.} = initDeque[uint8]()
+  response {.saved.} = initDeque[uint8]()
 
   # First argument: CD out Left/Right, second argument: SPU in Left/Right
-  volume: array[Channel, array[Channel, uint8]]
+  volume {.saved.}: array[Channel, array[Channel, uint8]]
 
-  smen: bool # Command Start Interrupt on next command
-  bfrd: bool # Load data into FIFO
+  smen {.saved.}: bool # Command Start Interrupt on next command
+  bfrd {.saved.}: bool # Load data into FIFO
 
   # Queued interrupts
-  interrupts = initDeque[range[0..5]]()
-  commandStart: bool
+  interrupts {.saved.} = initDeque[range[0..5]]()
+  commandStart {.saved.}: bool
 
   # Interrupt enable register
-  enabledInterrupts: uint8
+  enabledInterrupts {.saved.}: uint8
 
   # "Setmode" mode register
-  mode: uint8
+  mode {.saved.}: uint8
 
 proc interruptPending: bool =
   if interrupts.len > 0 and (enabledInterrupts and 7) != 0:

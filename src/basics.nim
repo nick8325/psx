@@ -1,5 +1,7 @@
 ## PSX-specific stuff shared throughout the program.
 
+import savestates
+
 type
   word* = uint32
   iword* = int32
@@ -60,7 +62,7 @@ const
   vramHeight* = 512
 
 var
-  region*: Region = NTSC ## The game's region. Updated by the BIOS.
+  region* {.saved.}: Region = NTSC ## The game's region. Updated by the BIOS.
 
 type
   MemoryRegion* {.pure.} = enum
@@ -70,10 +72,10 @@ type
 
 var
   ## Number of clock cycles' delay for reads to each region.
-  memoryDelay8*: array[MemoryRegion, int] =
+  memoryDelay8* {.saved.}: array[MemoryRegion, int] =
     [Scratchpad: 0, RAM: cpuClock*5, BuiltIn: 0, GPU: cpuClock*3,
      MDEC: cpuClock*3, Serial: cpuClock*3,
      # These ones are set by the BIOS.
      BIOS: 0, SPU: 0, CDROM: 0, Expansion1: 0, Expansion2: 0, Expansion3: 0]
-  memoryDelay16*: array[MemoryRegion, int] = memoryDelay8
-  memoryDelay32*: array[MemoryRegion, int] = memoryDelay8
+  memoryDelay16* {.saved.}: array[MemoryRegion, int] = memoryDelay8
+  memoryDelay32* {.saved.}: array[MemoryRegion, int] = memoryDelay8

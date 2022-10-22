@@ -1,7 +1,7 @@
 import sdl2, sdl2/gfx
-import machine, rasteriser, basics, eventqueue, irq, gpu
+import machine, rasteriser, basics, eventqueue, irq, gpu, savestates
 import std/os
-# import std/[strformat, monotimes]
+import std/[strformat, monotimes]
 
 discard sdl2.init(INIT_EVERYTHING)
 
@@ -50,6 +50,10 @@ events.every(proc: int64 = clockRate, "dump ram") do():
 if paramCount() >= 1:
   loadEXE(readFile(paramStr(1)))
 
+var
+  state: State
+  saved = false
+
 while runGame:
   while pollEvent(evt):
     if evt.kind == QuitEvent:
@@ -69,7 +73,15 @@ while runGame:
     fps.setFramerate refreshRate[region].cint
 #  fps.delay
 
-#  if events.time >= 5*clockRate: break
+  if events.now >= 5*clockRate and not saved:
+    echo "saving"
+    state = save()
+    saved = true
+
+  if events.now >= 10*clockRate:
+    echo "restoring"
+    load(state)
+    echo fmt"time: {events.now div clockRate}"
 
 destroy render
 destroy window

@@ -1,6 +1,6 @@
 ## The GPU.
 
-import basics, utils, irq, eventqueue, rasteriser
+import basics, utils, irq, eventqueue, rasteriser, savestates
 import std/[bitops, strformat, deques, options]
 
 const loggerComponent = logGPU
@@ -165,10 +165,10 @@ type
     result: word                   # GPUREAD
 
 var
-  textures = TextureSettings(enabled: true)
-  drawing = DrawingSettings()
-  screen = ScreenSettings(vblank: true)
-  control = ControlSettings()
+  textures {.saved.} = TextureSettings(enabled: true)
+  drawing {.saved.} = DrawingSettings()
+  screen {.saved.} = ScreenSettings(vblank: true)
+  control {.saved.} = ControlSettings()
 
 # Screen settings, including dot-clocks and other such analogue stuff
 
@@ -181,8 +181,8 @@ const
     [Dot10: 10i64, Dot8: 8, Dot5: 5, Dot4: 4, Dot7: 7]
 
 var
-  lastVBlankStart: int64 = 0
-  lastRegion: Region = region
+  lastVBlankStart {.saved.}: int64 = 0
+  lastRegion {.saved.}: Region = region
 
 proc clocksPerPixel*: int64 {.inline.} =
   ## Clock cycles per pixel drawn.
@@ -387,7 +387,7 @@ proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: 
 # I/O interface
 
 var
-  resultQueue = initDeque[word]()
+  resultQueue {.saved.} = initDeque[word]()
 
 proc readyToSendVRAM: bool =
   resultQueue.len > 0
@@ -449,7 +449,8 @@ proc gpustat*: word =
     word(bit31) shl 31
   trace fmt"GPUSTAT returned {result:08x}"
 
-var processCommand = consumer(word):
+var processCommand {.saved.}: Consumer[word]
+processCommand = consumer(word):
   let value = take
   let cmd = value[command]
   case cmd
