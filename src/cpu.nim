@@ -782,7 +782,7 @@ func exceptionCode(error: MachineError): int =
 proc handleException(cpu: var CPU, error: MachineError) =
   ## Handle an exception, by jumping to the exception vector etc.
 
-  if error.error.isError or true:
+  if error.error.isError:
     info fmt"{error.error} interrupt: {cpu}"
   else:
     debug fmt"{error.error} exception: {cpu}"
