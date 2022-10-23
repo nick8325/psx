@@ -1,7 +1,7 @@
 ## Joypad/memory card bus.
 
 import basics, utils, irq, eventqueue, savestates
-import std/[strformat, math, options, deques]
+import std/[strformat, math, options, deques, sugar]
 import sdl2
 
 const loggerComponent = logJoy
@@ -11,23 +11,27 @@ type
   Joypad* = proc(val: uint8): tuple[done: bool, reply: seq[uint8]]
 
 var
-  pos {.saved.}: range[0..3] = 0
-
-var
   pads* {.saved.}: array[2, array[256, Joypad]]
 
-proc controller(val: uint8): tuple[done: bool, reply: seq[uint8]] =
-  case pos
+type
+  Controller = object
+    pos: range[0..3]
+
+var
+  controller {.saved.}: Controller
+
+proc send(controller: var Controller, val: uint8): tuple[done: bool, reply: seq[uint8]] =
+  case controller.pos
   of 0:
-    pos.inc
+    controller.pos.inc
     if val != 0x42:
       warn fmt "Unknown command {val:x}"
     return (done: false, reply: @[0x41u8])
   of 1:
-    pos.inc
+    controller.pos.inc
     return (done: false, reply: @[0x5au8])
   of 2:
-    pos.inc
+    controller.pos.inc
     let keys = getKeyboardState()
     var keys1: uint8 = 0xff
     if keys[SDL_SCANCODE_RSHIFT.int] == 1: keys1 = keys1 and not 0x1u8
@@ -38,7 +42,7 @@ proc controller(val: uint8): tuple[done: bool, reply: seq[uint8]] =
     if keys[SDL_SCANCODE_LEFT.int] == 1: keys1 = keys1 and not 0x80u8
     return (done: false, reply: @[keys1])
   of 3:
-    pos = 0
+    controller.pos = 0
     let keys = getKeyboardState()
     var keys2: uint8 = 0xff
     if keys[SDL_SCANCODE_F.int] == 1: keys2 = keys2 and not 0x1u8
@@ -51,7 +55,102 @@ proc controller(val: uint8): tuple[done: bool, reply: seq[uint8]] =
     if keys[SDL_SCANCODE_A.int] == 1: keys2 = keys2 and not 0x80u8
     return (done: true, reply: @[keys2])
 
-pads[0][0x01] = controller
+type
+  MemoryCardState {.pure.} = enum
+    Initial, ReceiveID1, ReceiveID2, SendAddressMSB, SendAddressLSB,
+    ReceiveCommandAck1, ReceiveCommandAck2, ReceiveAddressMSB,
+    ReceiveAddressLSB, ReceiveData, ReceiveChecksum, End
+  MemoryCard = object
+    state: MemoryCardState
+    msb, lsb: uint8
+    checksum: uint8
+    data: Deque[uint8]
+    writing: bool
+    written: bool
+
+var
+  memoryCard: MemoryCard
+
+const memoryCardData = staticRead "../test.mcr"
+
+proc send(card: var MemoryCard, val: byte): tuple[done: bool, reply: seq[uint8]] =
+  let oldState = card.state
+  case card.state
+  of Initial:
+    case val
+    of 0x52:
+      card.state.inc
+      card.writing = false
+      result = (done: false, reply: @[if card.written: 0 else: 8])
+    of 0x57:
+      card.state.inc
+      card.writing = true
+      card.written = true
+      result = (done: false, reply: @[if card.written: 0 else: 8])
+    else:
+      warn fmt"Unknown memory card command: {val:02x}"
+      card.state = Initial
+      result = (done: true, reply: @[0xff])
+  of ReceiveID1:
+    card.state.inc
+    result = (done: false, reply: @[0x5a])
+  of ReceiveID2:
+    card.state.inc
+    result = (done: false, reply: @[0x5d])
+  of SendAddressMSB:
+    card.msb = val and 3
+    card.state.inc
+    result = (done: false, reply: @[0])
+  of SendAddressLSB:
+    card.lsb = val
+    card.checksum = card.msb xor card.lsb
+
+    let sector = int(card.lsb) + int(card.msb) shl 8
+    card.data.clear
+    for i in 0..<128:
+      let data = memoryCardData[sector*128+i].uint8
+      card.data.addLast data
+      card.checksum = card.checksum xor data
+
+    if card.writing:
+      card.state = ReceiveData
+    else:
+      card.state = ReceiveCommandAck1
+    result = (done: false, reply: @[0])
+  of ReceiveCommandAck1:
+    card.state.inc
+    result = (done: false, reply: @[0x5c])
+  of ReceiveCommandAck2:
+    if card.writing:
+      card.state = End
+    else:
+      card.state = ReceiveAddressMSB
+    result = (done: false, reply: @[0x5d])
+  of ReceiveAddressMSB:
+    card.state.inc
+    result = (done: false, reply: @[card.msb])
+  of ReceiveAddressLSB:
+    card.state.inc
+    result = (done: false, reply: @[card.lsb])
+  of ReceiveData:
+    let data = card.data.popFirst
+    if len(card.data) == 0:
+      card.state.inc
+    result = (done: false, reply: @[data])
+  of ReceiveChecksum:
+    if card.writing:
+      card.state = ReceiveCommandAck1
+    else:
+      card.state = End
+    result = (done: false, reply: @[card.checksum])
+  of End:
+    card.state = Initial
+    result = (done: true, reply: @[0x47])
+
+  info fmt"MC: in={val:2x} out={result.reply[0]:2x} done={result.done} state={oldState}->{card.state}"
+
+pads[0][0x01] = (val: byte) => controller.send(val)
+pads[0][0x81] = (val: byte) => memoryCard.send(val)
 
 type
   Stat = distinct word
@@ -230,7 +329,8 @@ proc setJoyControl*(val: uint16) =
   if not control.txEnable:
     selected[0] = none(uint8)
     selected[1] = none(uint8)
-    pos = 0
+    controller.pos = 0
+    memoryCard = MemoryCard(written: true)
     rxFIFO.clear
   updateIRQ()
 
