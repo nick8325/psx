@@ -798,10 +798,10 @@ proc handleException(cpu: var CPU, error: MachineError) =
   if branchTaken:
     cpu.cop0.tar = cpu.nextPC
 
+  # The COP field is set even on non-COP-related instructions
   let cop =
-    case error.error
-    of CoprocessorUnusable: error.cop
-    else: 0
+    try: cpu.fetch[opcode] and 3
+    except MachineError: 0
 
   cpu.cop0.cause =
     (word(error.exceptionCode) shl 2) or
