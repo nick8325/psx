@@ -30,6 +30,7 @@ type
     cause: word
     epc: word
     badvaddr: word
+    tar: word
     # We don't really use these ones, but they can be get and set.
     # Details from Nocash PSX.
     bpc: word
@@ -40,14 +41,14 @@ type
 
 const initCOP0: COP0 =
   # Initial value of COP0. BEV=1, everything else 0.
-  COP0(sr: 1 shl 22, cause: 0, epc: 0, badvaddr: 0, bpc: 0, bda: 0,
-       dcic: 0, bdam: 0, bpcm: 0)
+  COP0(sr: 1 shl 22, cause: 0, epc: 0, badvaddr: 0, tar: 0,
+       bpc: 0, bda: 0, dcic: 0, bdam: 0, bpcm: 0)
 
 # User-settable bits in COP0.SR.
 template cu: auto = BitSlice[word, word](pos: 28, width: 4)
 template bev: auto = bit[word] 22
-template cm: auto = bit[word] 19
-template swc: auto = bit[word] 17
+template pe: auto = bit[word] 20
+template pz: auto = bit[word] 18
 template isc: auto = bit[word] 16
 template im: auto = BitSlice[word, word](pos: 8, width: 8)
 template ku: auto = [bit[word] 1, bit[word] 3, bit[word] 5]
@@ -62,9 +63,8 @@ const
   writableSRBits: word =
     block:
       var result: word = 0
-      # Note: CM is not user-settable (and not set at all currently).
       result = result or cu.toMask
-      for x in @[bev, swc, isc] & @ie & @ku:
+      for x in @[bev, pz, isc] & @ie & @ku:
         result = result or x.toMask
       result = result or im.toMask
       result
@@ -74,15 +74,15 @@ const
 
   # Read-only SR bits which should print a warning on write
   forbiddenSRBits: word =
-    # Writing to CM or IM is OK, just ignored
-    fixedSRBits and not cm.toMask and not im.toMask
+    # Writing to PE or IM is OK, just ignored
+    fixedSRBits and not pe.toMask and not im.toMask
 
 proc `[]`(cop0: COP0, reg: CoRegister): word =
   ## Access registers by number.
   case reg
   of CoRegister(3): cop0.bpc
   of CoRegister(5): cop0.bda
-  of CoRegister(6): 0 # JUMPDEST
+  of CoRegister(6): cop0.tar
   of CoRegister(7): cop0.dcic
   of CoRegister(8): cop0.badvaddr
   of CoRegister(9): cop0.bdam
@@ -100,8 +100,9 @@ proc `[]=`(cop0: var COP0, reg: CoRegister, val: word) =
   case reg
   of CoRegister(3): cop0.bpc = val
   of CoRegister(5): cop0.bda = val
-  of CoRegister(6): discard # JUMPDEST
+  of CoRegister(6): discard
   of CoRegister(7): cop0.dcic = val
+  of CoRegister(8): discard
   of CoRegister(9): cop0.bdam = val
   of CoRegister(11): cop0.bpcm = val
   of CoRegister(12):
@@ -134,11 +135,18 @@ type
     ## CPU state.
     pc*: word ## Current PC.
     nextPC: word ## Next PC. Used to implement branch delay slot.
+    lastPC: word ## Previous PC. Used for exception handling.
+    branchDelay: BranchDelayState ## Branch delay state. Used for exception handling.
     registers: array[Register, word] ## Registers.
     lo, hi: word ## LO/HI registers.
     delayedUpdate: tuple[reg: Register, val: word] ## Load delay slot
     cop0: COP0 ## COP0 registers.
     gte: GTE ## GTE registers.
+
+  BranchDelayState = enum
+    bdNoBranch, ## Not in branch delay slot
+    bdNotTaken, ## In branch delay slot, branch not taken
+    bdTaken     ## In branch delay slot, branch taken
 
 let initCPU*: CPU = block:
   # The initial state of the CPU after reset.
@@ -146,6 +154,8 @@ let initCPU*: CPU = block:
   var registers: array[Register, word]
   CPU(pc: pc,
       nextPC: pc+4,
+      lastPC: 0,
+      branchDelay: bdNoBranch,
       registers: registers,
       lo: 0,
       hi: 0,
@@ -179,8 +189,10 @@ func setIRQ*(cpu: var CPU, irq: bool) {.inline.} =
 proc jump*(cpu: var CPU, pc: word) {.inline.} =
   ## Jump to a particular address.
 
+  cpu.lastPC = cpu.pc
   cpu.pc = pc
   cpu.nextPC = pc+4
+  cpu.branchDelay = bdNoBranch
 
 proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word {.inline.} =
   ## Resolve a virtual address to a physical address,
@@ -528,6 +540,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
   ## Decode and execute an instruction.
   time += cpuClock
   var newPC = cpu.nextPC + 4
+  var branchDelay = bdNoBranch
 
   # Load delay slot: a register write to be done *next* instruction.
   var newDelayedUpdate = (reg: r0, val: 0u32)
@@ -544,9 +557,15 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     target = instr[target]
     copimm = instr[copimm]
 
+  template jumpTo(dest: word) =
+    newPC = dest
+    branchDelay = bdTaken
+
   template branchIf(x: bool) =
     if x:
-      newPC = cpu.nextPC + imm.signExt shl 2
+      jumpTo(cpu.nextPC + imm.signExt shl 2)
+    else:
+      branchDelay = bdNotTaken
 
   template link(r: Register) =
     r.set(cpu.nextPC + 4)
@@ -555,7 +574,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     link(Register(31))
 
   template absJump() =
-    newPC = target.absTarget(cpu.nextPC)
+    jumpTo(target.absTarget(cpu.nextPC))
 
   template logCall() =
     debug fmt"call from {cpu.pc:x} to {newPC:x}"
@@ -695,10 +714,10 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
   of BLTZAL: branchIf(cpu[rs].signed < 0); link()
   of J: absJump()
   of JR:
-    newPC = cpu[rs]
+    jumpTo(cpu[rs])
     if rs.int == 31: logReturn()
   of JAL: absJump; link(); logCall()
-  of JALR: newPC = cpu[rs]; link(rd); logCall()
+  of JALR: jumpTo(cpu[rs]); link(rd); logCall()
   of SYSCALL: raise MachineError(error: SystemCall)
   of BREAK: raise MachineError(error: Breakpoint)
   of MFC0:
@@ -726,8 +745,10 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     checkCOPAccessible(2)
     cpu.gte[rd.int.controlReg] = cpu[rt]
 
+  cpu.lastPC = cpu.pc
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
+  cpu.branchDelay = branchDelay
 
   # The PSX bios has the following instruction sequence:
   #   LW r9, $0x64(r29)
@@ -761,19 +782,21 @@ func exceptionCode(error: MachineError): int =
 proc handleException(cpu: var CPU, error: MachineError) =
   ## Handle an exception, by jumping to the exception vector etc.
 
-  if error.error.isError:
+  if error.error.isError or true:
     info fmt"{error.error} interrupt: {cpu}"
   else:
     debug fmt"{error.error} exception: {cpu}"
 
-  var branchDelay: bool = false
+  let branchDelay = (cpu.branchDelay != bdNoBranch)
+  let branchTaken = (cpu.branchDelay == bdTaken)
 
-  if cpu.nextPC == cpu.pc + 4:
-    cpu.cop0.epc = cpu.pc
+  if branchDelay:
+    cpu.cop0.epc = cpu.lastPC
   else:
-    # Exception in branch delay slot
-    branchDelay = true
-    cpu.cop0.epc = cpu.pc - 4
+    cpu.cop0.epc = cpu.pc
+
+  if branchTaken:
+    cpu.cop0.tar = cpu.nextPC
 
   let cop =
     case error.error
@@ -783,6 +806,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
   cpu.cop0.cause =
     (word(error.exceptionCode) shl 2) or
     (word(cop) shl 28) or
+    (word(branchTaken) shl 30) or
     (word(branchDelay) shl 31) or
     (cpu.cop0.cause and ip.toMask)
 
