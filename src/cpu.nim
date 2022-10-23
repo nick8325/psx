@@ -573,6 +573,14 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
   template set(r: Register, v: word) =
     update = (reg: r, val: v)
 
+  template checkCOPAccessible(i: 0..3) =
+    if not cpu.cop0.sr[cu.bit i]:
+      raise MachineError(error: CoprocessorUnusable)
+
+  template checkKernelMode() =
+    if cpu.cop0.sr[ku[0]]:
+      checkCOPAccessible(0)
+
   case op
   of ADD: rd.set(signedAdd(cpu[rs], cpu[rt]))
   of ADDI: rt.set(signedAdd(cpu[rs], imm.signExt))
@@ -693,14 +701,30 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
   of JALR: newPC = cpu[rs]; link(rd); logCall()
   of SYSCALL: raise MachineError(error: SystemCall)
   of BREAK: raise MachineError(error: Breakpoint)
-  of MFC0: rt.set(cpu.cop0[CoRegister(rd)])
-  of MTC0: cpu.cop0[CoRegister(rd)] = cpu[rt]
-  of RFE: leaveKernel(cpu.cop0)
-  of COP2: cpu.gte.execute(copimm.int)
-  of MFC2: rt.delayedSet(cpu.gte[rd.int.dataReg])
-  of MTC2: cpu.gte[rd.int.dataReg] = cpu[rt]
-  of CFC2: rt.delayedSet(cpu.gte[rd.int.controlReg])
-  of CTC2: cpu.gte[rd.int.controlReg] = cpu[rt]
+  of MFC0:
+    checkKernelMode()
+    rt.set(cpu.cop0[CoRegister(rd)])
+  of MTC0:
+    checkKernelMode()
+    cpu.cop0[CoRegister(rd)] = cpu[rt]
+  of RFE:
+    checkKernelMode()
+    leaveKernel(cpu.cop0)
+  of COP2:
+    checkCOPAccessible(2)
+    cpu.gte.execute(copimm.int)
+  of MFC2:
+    checkCOPAccessible(2)
+    rt.delayedSet(cpu.gte[rd.int.dataReg])
+  of MTC2:
+    checkCOPAccessible(2)
+    cpu.gte[rd.int.dataReg] = cpu[rt]
+  of CFC2:
+    checkCOPAccessible(2)
+    rt.delayedSet(cpu.gte[rd.int.controlReg])
+  of CTC2:
+    checkCOPAccessible(2)
+    cpu.gte[rd.int.controlReg] = cpu[rt]
 
   cpu.pc = cpu.nextPC
   cpu.nextPC = newPC
