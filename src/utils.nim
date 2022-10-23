@@ -230,7 +230,7 @@ template consumer*[T](_: typedesc[T], body: untyped): Consumer[T] =
   bind runIter, default
 
   let initial = proc: iterator(t: T, replay: bool) =
-    iterator it(consumerArg {.inject.}: T, consumerReplay {.inject.}: bool) {.closure.} =
+    iterator it(consumerArg {.inject.}: T, consumerReplay {.inject.}: bool) {.closure, gensym.} =
       var consumerEffectLevel {.inject.} = 0
       body
     it
@@ -264,7 +264,7 @@ template effect*(body: untyped): untyped =
     consumerEffectLevel.dec
 
 template cmpKey*[T](key: untyped): untyped =
-  proc compare(x, y: T): int = cmp(key(x), key(y))
+  proc compare(x, y: T): int {.gensym.} = cmp(key(x), key(y))
   compare
 
 func signum*[T](x: T): T =
