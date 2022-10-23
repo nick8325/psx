@@ -86,8 +86,8 @@ var
 
 const
   # Don't support changing baud rate for now
-  baudReload = 0x44
-  tickRate = baudReload * cpuClock
+  baudReload = 0x88
+  tickRate = 2 * baudReload * cpuClock
 
 proc reset =
   word(stat) = 0
@@ -167,7 +167,7 @@ proc joyTransmit*(val32: word) =
       debug fmt "Finished with controller {selected[control.slot]} in slot {control.slot}"
       selected[control.slot] = none(uint8)
 
-  events.after(tickRate*16, "Joypad reply") do():
+  events.after(tickRate*2, "Joypad reply") do():
     debug fmt "Replying with {reply}, ACK = {ack}"
 
     stat.padAck = ack
@@ -178,7 +178,7 @@ proc joyTransmit*(val32: word) =
     updateIRQ()
 
     if ack:
-      events.after(tickRate*8, "Joypad ACK end") do():
+      events.after(100*cpuClock, "Joypad ACK end") do():
         trace fmt "Switching off ACK"
         stat.padAck = false
         updateIRQ()
@@ -203,7 +203,7 @@ proc joyReceive*: word =
   updateIRQ()
 
 proc joyStat*: word =
-  stat.timer = int(baudReload - ((events.now() div tickRate) mod baudReload))
+  stat.timer = int(baudReload - ((events.now() div cpuClock) mod baudReload))
   trace fmt"Read status as {stat.word:x} at {events.now()}"
   stat.word
 
