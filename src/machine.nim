@@ -1,7 +1,6 @@
 ## Hooking up the PSX itself.
 
-import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, joy, utils, savestates
-from cdrom import nil
+import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, joy, utils, savestates, cdrom
 import std/[strformat, sugar, bitops]
 
 const loggerComponent = logMachine
@@ -249,6 +248,7 @@ addressSpace.io16 0x1f801daeu32, SPU,
 # Set up DMA handlers.
 dma.channels[2].read = gpuReadDMA
 dma.channels[2].write = gpuWriteDMA
+dma.channels[3].read = cdromReadDMA
 
 type EXE {.packed.} = object
   id: array[8, char]
