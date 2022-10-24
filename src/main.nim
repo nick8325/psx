@@ -1,5 +1,5 @@
 import sdl2, sdl2/gfx
-import machine, rasteriser, basics, eventqueue, irq, gpu, savestates
+import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom
 import std/os
 import std/[strformat, monotimes]
 
@@ -71,6 +71,9 @@ while runGame:
         echo "triggering IRQs"
         for irq in 0..10:
           irqs.signal(irq)
+
+      of K_C:
+        echo dumpCDROM()
 
       else:
         echo "unknown key"

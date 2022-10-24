@@ -1,7 +1,7 @@
 ## The CD-ROM controller.
 
 import utils, irq, eventqueue, basics, savestates
-import std/[bitops, strformat, deques, options]
+import std/[bitops, strformat, deques, options, tables]
 
 const loggerComponent = logCDROM
 logCDROM.level = lvlDebug
@@ -16,8 +16,6 @@ let
 const
   framesPerSec = 75
 
-let leadIn = 2 * framesPerSec
-
 proc toFrame(min, sec, sect: int): int =
   min*60*framesPerSec + sec*framesPerSec + sect
 
@@ -26,6 +24,9 @@ proc toTime(frame: int): tuple[min: int, sec: int, sect: int] =
   result.min = totalSecs div 60
   result.sec = totalSecs mod 60
   result.sect = frame mod framesPerSec
+
+const
+  leadIn = toFrame(0, 2, 0)
 
 type
   Channel {.pure.} = enum Left, Right
@@ -47,6 +48,7 @@ var
 
   # Queued interrupts
   interrupts {.saved.} = initDeque[range[0..5]]()
+  responses {.saved.}: Table[range[0..5], seq[int]]
   commandStart {.saved.}: bool
 
   # Interrupt enable register
@@ -58,6 +60,7 @@ var
   # Location seeked to
   seekPos {.saved.}: int
   firstStat {.saved.}: bool = true
+  reading {.saved.}: bool
 
 proc interruptPending: bool =
   if interrupts.len > 0 and (enabledInterrupts and 7) != 0:
@@ -68,12 +71,42 @@ proc interruptPending: bool =
 
 proc checkInterrupts =
   trace fmt"{interrupts} {commandStart} {enabledInterrupts:08x} {smen}"
-  events.after(20000*cpuClock, "CDROM delay") do(): irqs.set(2, interruptPending())
+  events.after(20000*cpuClock, "CDROM delay") do():
+    irqs.set(2, false)
+    irqs.set(2, interruptPending())
+    if interrupts.len > 0:
+      for x in responses[interrupts[0]]:
+        response.addLast x.uint8
+      responses[interrupts[0]] = @[]
 
-proc queueInterrupt(interrupt: range[0..5]) =
-  if not (interrupt in interrupts):
-    interrupts.addLast interrupt
-  checkInterrupts()
+proc dumpCDROM*: string =
+  fmt"""
+index={index}
+parameters={parameters}
+response={response}
+smen={smen}
+bfrd={bfrd}
+interrupts={interrupts}
+responses={responses}
+commandStart={commandStart}
+enabledInterrupts={enabledInterrupts}
+mode={mode}
+seekPos={seekPos}
+firstStat={firstStat}
+interruptPending={interruptPending()}
+reading={reading}"""
+
+proc respond*(interrupt: 0..5, values: openarray[int]) =
+  var msg = fmt"Response {interrupt}:"
+  for val in values: msg &= fmt" {val:02x}"
+  debug msg
+  if interrupt in interrupts:
+    debug "Skipping interrupt because already triggered"
+  else:
+    if not (interrupt in interrupts):
+      interrupts.addLast interrupt
+      responses[interrupt] = @values
+    checkInterrupts()
 
 var emptyFIFOs = 0
 proc readFIFO(fifo: var Deque[uint8], res: var uint8): bool =
@@ -83,12 +116,14 @@ proc readFIFO(fifo: var Deque[uint8], res: var uint8): bool =
   else:
     emptyFIFOs.inc
     warn fmt"empty FIFO {emptyFIFOs}"
-    queueInterrupt 5
+    respond 5, []
     return false
 
 proc readData8*: uint8 =
   trace fmt"reading from data FIFO, length {data.len}"
   discard readFIFO(data, result)
+  if data.len == 0:
+    debug "Data FIFO is empty now"
 
 proc readData16*: uint16 =
   let x = readData8()
@@ -102,20 +137,41 @@ proc cdromReadDMA*: word =
   let d = readData8()
   result = a.word + b.word shl 8 + c.word shl 16 + d.word shl 24
 
-proc respond*(interrupt: 0..5, values: openarray[int]) =
-  var msg = fmt"Response {interrupt}:"
-  for val in values: msg &= fmt" {val:02x}"
-  debug msg
-  parameters.clear
-  for x in values: response.addLast x.uint8
-  queueInterrupt interrupt
+proc scheduleRead* =
+  events.after(400000*cpuClock, "CDROM delay") do():
+    if reading:
+      respond 1, [0x22]
+      var offset, limit: int
+      if (mode and 0x20) != 0:
+        # Raw read
+        offset = 0xc
+        limit = 2340
+      else:
+        # Non-raw read
+        offset = 0x18
+        limit = 2048
+      let start = (seekPos - leadIn) * sectorSize + offset
+      debug fmt"Reading sector of {limit} bytes from start {start}"
+      for i in 0..<limit:
+        data.addLast (cdfile[start + i].uint8)
+      var msg = "Data: "
+      for x in data: msg &= fmt"{x:02x}"
+      #debug msg
+      debug fmt"Data FIFO has length {data.len}"
+      seekPos += 1
+      scheduleRead()
 
 proc command*(value: uint8) =
+  if response.len != 0:
+    warn "Response buffer not empty when command sent"
+    echo dumpCDROM()
+
   # TODO: start of command interrupt
   let stat = if firstStat: 0x12 else: 0x2
 
   debug fmt"Command {value:02x}"
   if smen: commandStart = true
+  checkInterrupts()
   case value
   of 0x1:
     # Stat
@@ -132,8 +188,8 @@ proc command*(value: uint8) =
     respond 3, [stat]
   of 0x15:
     # SeekL
-    respond 3, [stat or 0x40]
-    events.after(40000000*cpuClock, "CDROM delay") do(): respond 2, [stat]
+    respond 3, [stat]
+    events.after(400000*cpuClock, "CDROM delay") do(): respond 2, [stat]
   of 0x19:
     # Test
     var param: uint8
@@ -170,30 +226,19 @@ proc command*(value: uint8) =
     events.after(40000000*cpuClock, "CDROM delay") do(): respond 3, [stat]
   of 0x6:
     # Read
-    respond 3, [stat or 0x20]
-    events.after(400000*cpuClock, "CDROM delay") do():
-      respond 1, [stat]
-      var offset, limit: int
-      if (mode and 0x20) != 0:
-        # Raw read
-        offset = 0xc
-        limit = 2340
-      else:
-        # Non-raw read
-        offset = 0x18
-        limit = 2048
-      let start = (seekPos - leadIn) * sectorSize + offset
-      debug fmt"Reading sector of {limit} bytes from start {start}"
-      for i in 0..<limit:
-        data.addLast (cdfile[start + i].uint8)
-      var msg = "Data: "
-      for x in data: msg &= fmt"{x:02x}"
-      debug msg
-      debug fmt"Data FIFO has length {data.len}"
+    respond 3, [stat]
+    reading=true
+    scheduleRead()
+  of 0x1e:
+    # Read TOC
+    respond 3, [stat]
+    events.after(40000000*cpuClock, "CDROM delay") do():
+      respond 2, [stat]
   of 0x9:
     # Pause
-    respond 3, [stat]
-    events.after(4000000*cpuClock, "CDROM delay") do():
+    respond 3, [stat or 0x20]
+    reading=false
+    events.after(400000*cpuClock, "CDROM delay") do():
       respond 2, [stat]
   of 0xa:
     # Init
@@ -204,7 +249,7 @@ proc command*(value: uint8) =
     respond 2, [stat]
   else:
     warn fmt"Unknown command {value:02x}"
-    queueInterrupt 5
+    respond 5, []
 
 proc readStatus*: uint8 =
   result =
@@ -262,6 +307,7 @@ proc writeRegister*(address: 1..3, value: uint8) =
       # Request register
       smen = smen or value.testBit 5
       bfrd = value.testBit 7
+      echo fmt"smen = {smen}, bfrd = {bfrd}"
   of 1:
     case address
     of 1:
@@ -275,6 +321,7 @@ proc writeRegister*(address: 1..3, value: uint8) =
       # Interrupt flag register
       if (value and 0x7) != 0:
         if interrupts.len > 0:
+          debug fmt"ACK interrupt {interrupts[0]}"
           discard interrupts.popFirst
       if value.testBit 4: commandStart = false
       if value.testBit 6: parameters.clear
