@@ -69,7 +69,7 @@ type
     written: bool
 
 var
-  memoryCard: MemoryCard
+  memoryCard {.saved.}: MemoryCard
 
 const memoryCardData = staticRead "../test.mcr"
 
