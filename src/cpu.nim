@@ -243,7 +243,7 @@ type
     # System
     SYSCALL, BREAK, MFC0, MTC0, RFE,
     # GTE
-    COP2, MFC2, MTC2, CFC2, CTC2
+    COP2, MFC2, MTC2, CFC2, CTC2, LWC2, SWC2
   Immediate = distinct uint16   ## An immediate operand.
   Target = distinct range[0 .. (1 shl 26)-1] ## A 26-bit jump target.
 
@@ -281,6 +281,7 @@ type
     Jump,  ## Absolute jump
     MFC,   ## MFCn/CFCn - RD is (COP) source, RT is target
     MTC,   ## MTCn/CFCn - RT is source, RD is (COP) target
+    LWC,   ## LWCn/SWCn - RT is (COP) target, RS+imm is source address
     Exc,   ## Only opcode and funct used, rest is user-settable (SYSCALL and BREAK)
     COP,   ## Coprocessor instruction, lowest 25 bits are opcode
     None   ## No arguments (RFE)
@@ -296,7 +297,7 @@ const opcodeType: array[Opcode, OpcodeType] =
    SWL: Mem, SWR: Mem, BEQ: Imm, BNE: Imm, BGEZ: ImmS, BGEZAL: ImmS, BGTZ: ImmS,
    BLEZ: ImmS, BLTZ: ImmS, BLTZAL: ImmS, J: Jump, JR: RegS, JAL: Jump,
    JALR: RegDS, SYSCALL: Exc, BREAK: Exc, MFC0: MFC, MTC0: MTC, RFE: None,
-   COP2: COP, MFC2: MFC, MTC2: MTC, CFC2: MFC, CTC2: MTC]
+   COP2: COP, MFC2: MFC, MTC2: MTC, CFC2: MFC, CTC2: MTC, LWC2: LWC, SWC2: LWC]
 
 # The different parts of a machine instruction.
 template opcode: auto = BitSlice[int, word](pos: 26, width: 6)
@@ -403,6 +404,8 @@ proc decode(instr: word): Opcode {.inline.} =
   of 42: instr.ret SWL
   of 43: instr.ret SW
   of 46: instr.ret SWR
+  of 50: instr.ret LWC2
+  of 58: instr.ret SWC2
   of 16:
     case int(instr[rs])
     of 0: instr.ret MFC0
@@ -412,7 +415,7 @@ proc decode(instr: word): Opcode {.inline.} =
       instr.ret RFE
     else: raise MachineError(error: ReservedInstruction)
   of 18:
-    if int(instr[rs]).testBit(5):
+    if int(instr[rs]).testBit(4):
       instr.ret COP2
     else:
       case int(instr[rs])
@@ -429,7 +432,7 @@ proc format*(instr: word): string =
   let
     op =
       try: decode(instr)
-      except MachineError: return fmt"(unknown instruction {instr:08x})"
+      except MachineError: return fmt"(unknown instruction {instr:08x}, opcode={instr[opcode]:b}, rs={instr[rs].int:b})"
     rd = instr[rd]
     rs = instr[rs]
     rt = instr[rt]
@@ -459,6 +462,7 @@ proc format*(instr: word): string =
   of Jump: args(target)
   of MFC: args(rt, CoRegister(rd))
   of MTC: args(CoRegister(rd), rt)
+  of LWC: args(CoRegister(rt), fmt"{imm}({rs})")
   of Exc: args(fmt"$0x{exc:x}")
   of COP: args(fmt"$0x{copimm}")
   of None: $op
@@ -744,6 +748,12 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
   of CTC2:
     checkCOPAccessible(2)
     cpu.gte[rd.int.controlReg] = cpu[rt]
+  of LWC2:
+    checkCOPAccessible(2)
+    cpu.gte[rt.int.dataReg] = cpu.read[:word](cpu[rs] + imm.signExt, time)
+  of SWC2:
+    checkCOPAccessible(2)
+    cpu.write[:word](cpu[rs] + imm.signExt, cpu.gte[rt.int.dataReg])
 
   cpu.lastPC = cpu.pc
   cpu.pc = cpu.nextPC
