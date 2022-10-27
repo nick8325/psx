@@ -9,7 +9,7 @@ const
 type
   Component* = enum
     logCPU, logMemory, logEventQueue, logGPU, logRasteriser,
-    logDMA, logIRQ, logTimer, logCDROM, logMachine, logJoy
+    logDMA, logIRQ, logTimer, logCDROM, logMachine, logJoy, logGTE
 
 func initialLevel(component: Component): Level {.inline.} =
   lvlInfo
@@ -105,16 +105,17 @@ type
     pos*: int
     width*: int
 
-func signExtendFrom[T](x: T, bit: int): T {.inline.} =
+func signExtendFrom*[T](x: T, bit: int): T {.inline.} =
   let
-    low = 1 shl (bit-1)
-    range = 1 shl bit
+    low = 1.T shl (bit-1)
+    range = 1.T shl bit
   ((x +% low) mod range) -% low
 
 static:
   assert signExtendFrom(0x8f, 8) == -113
   assert signExtendFrom(0x7f, 8) == 127
   assert signExtendFrom(2047, 11) == -1
+  assert signExtendFrom(0x18f, 8) == -113
 
 func unsign[T, U](slice: SignedBitSlice[T, U]): BitSlice[T, U] {.inline.} =
   BitSlice[T, U](pos: slice.pos, width: slice.width)

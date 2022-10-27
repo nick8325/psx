@@ -152,6 +152,7 @@ let initCPU*: CPU = block:
   # The initial state of the CPU after reset.
   const pc = 0xbfc00000u32
   var registers: array[Register, word]
+  var initGTE: GTE
   CPU(pc: pc,
       nextPC: pc+4,
       lastPC: 0,
@@ -735,7 +736,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     leaveKernel(cpu.cop0)
   of COP2:
     checkCOPAccessible(2)
-    cpu.gte.execute(copimm.int)
+    cpu.gte.execute(copimm)
   of MFC2:
     checkCOPAccessible(2)
     rt.delayedSet(cpu.gte[rd.int.dataReg])
