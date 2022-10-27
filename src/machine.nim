@@ -293,9 +293,13 @@ proc runSystem*(clocks: int64) =
       if header.id == wantedID:
         info "Switching to loaded EXE"
         cpu.cpu.jump(header.initialPC)
+        cpu.cpu[Register(4)] = 1
+        cpu.cpu[Register(5)] = 0
         cpu.cpu[Register(28)] = header.initialGP
-        cpu.cpu[Register(29)] = header.initialSPBase + header.initialSPOffset
-        cpu.cpu[Register(30)] = header.initialSPBase + header.initialSPOffset
+        var base = header.initialSPBase
+        if base == 0: base = cpu.cpu[Register(29)]
+        cpu.cpu[Register(29)] = base + header.initialSPOffset
+        cpu.cpu[Register(30)] = base + header.initialSPOffset
 
     cpu.cpu.step(time)
     events.fastForward(time - now)
