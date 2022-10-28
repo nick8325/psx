@@ -154,8 +154,8 @@ proc scheduleRead* =
       debug fmt"Reading sector of {limit} bytes from start {start}"
       for i in 0..<limit:
         data.addLast (cdfile[start + i].uint8)
-      var msg = "Data: "
-      for x in data: msg &= fmt"{x:02x}"
+      #var msg = "Data: "
+      #for x in data: msg &= fmt"{x:02x}"
       #debug msg
       debug fmt"Data FIFO has length {data.len}"
       seekPos += 1
@@ -307,7 +307,6 @@ proc writeRegister*(address: 1..3, value: uint8) =
       # Request register
       smen = smen or value.testBit 5
       bfrd = value.testBit 7
-      echo fmt"smen = {smen}, bfrd = {bfrd}"
   of 1:
     case address
     of 1:

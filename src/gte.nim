@@ -318,6 +318,7 @@ proc execute*(gte: var GTE, op: word) =
 
   case op.opcode
   of RTPS.int, RTPT.int:
+    gte.lm = false
     template rtp(v: untyped) =
       gte.IRandMac = (gte.TR * 0x1000 + gte.RTM*gte.v).sf
       gte.pushS
