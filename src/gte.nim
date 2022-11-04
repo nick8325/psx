@@ -133,93 +133,92 @@ proc `[]=`*(gte: var GTE, reg: Register, valueIn: uint32) =
   else:
     discard
 
-proc clamp(gte: var GTE, val, lo, hi: float, bit: int): float =
+proc clamp(gte: var GTE, val, lo, hi: int64, bit: int): int64 =
   if val < lo or val > hi:
     gte.registers[FLAG].uint32.setBit bit
   val.clamp(lo, hi)
-proc clampedSet(gte: var GTE, reg: Register, val, lo, hi: float, bit: int) =
+proc clampedSet(gte: var GTE, reg: Register, val, lo, hi: int64, bit: int) =
   let clampedVal = gte.clamp(val, lo, hi, bit)
   gte[reg] = clampedVal.int32.unsigned
-proc truncate(val: float): uint32 =
-  let val64 = val.clamp(int64.low.float, int64.high.float).int64
-  uint32(val64.euclMod(1i64 shl 32))
+proc truncate(val: int64): uint32 =
+  cast[uint32](val)
 
 static:
   assert truncate(-1) == 0xffffffffu32
 
-proc vec3(gte: GTE, xy: Register, z: Register): Vec3d =
-  vec3(gte.registers[xy].int16s[0].float,
-       gte.registers[xy].int16s[1].float,
-       gte.registers[z].uint16.float)
+proc vec3(gte: GTE, xy: Register, z: Register): Vec3l =
+  vec3(gte.registers[xy].int16s[0].int64,
+       gte.registers[xy].int16s[1].int64,
+       gte.registers[z].uint16.int64)
 
-proc vec3(gte: GTE, x: Register, y: Register, z: Register): Vec3d =
-  vec3(gte.registers[x].int32.float,
-       gte.registers[y].int32.float,
-       gte.registers[z].int32.float)
+proc vec3(gte: GTE, x: Register, y: Register, z: Register): Vec3l =
+  vec3(gte.registers[x].int32.int64,
+       gte.registers[y].int32.int64,
+       gte.registers[z].int32.int64)
 
-proc mat3x3(gte: GTE, r1, r5: Register): Mat3x3d =
+proc mat3x3(gte: GTE, r1, r5: Register): Mat3x3l =
   let r2 = r1.succ
   let r3 = r2.succ
   let r4 = r3.succ
   assert r5 == r4.succ
-  result[0,0] = gte.registers[r1].int16s[0].float
-  result[0,1] = gte.registers[r1].int16s[1].float
-  result[0,2] = gte.registers[r2].int16s[0].float
-  result[1,0] = gte.registers[r2].int16s[1].float
-  result[1,1] = gte.registers[r3].int16s[0].float
-  result[1,2] = gte.registers[r3].int16s[1].float
-  result[2,0] = gte.registers[r4].int16s[0].float
-  result[2,1] = gte.registers[r4].int16s[1].float
-  result[2,2] = gte.registers[r5].int16.float
+  result[0,0] = gte.registers[r1].int16s[0]
+  result[0,1] = gte.registers[r1].int16s[1]
+  result[0,2] = gte.registers[r2].int16s[0]
+  result[1,0] = gte.registers[r2].int16s[1]
+  result[1,1] = gte.registers[r3].int16s[0]
+  result[1,2] = gte.registers[r3].int16s[1]
+  result[2,0] = gte.registers[r4].int16s[0]
+  result[2,1] = gte.registers[r4].int16s[1]
+  result[2,2] = gte.registers[r5].int16
 
-proc rgb(gte: GTE, reg: Register): Vec3d =
-  vec3(gte.registers[reg].rgbc.red.float,
-       gte.registers[reg].rgbc.green.float,
-       gte.registers[reg].rgbc.blue.float)
+proc rgb(gte: GTE, reg: Register): Vec3l =
+  vec3(gte.registers[reg].rgbc.red.int64,
+       gte.registers[reg].rgbc.green.int64,
+       gte.registers[reg].rgbc.blue.int64)
 
-proc V0(gte: GTE): Vec3d = gte.vec3(VXY0, VZ0)
-proc V1(gte: GTE): Vec3d = gte.vec3(VXY1, VZ1)
-proc V2(gte: GTE): Vec3d = gte.vec3(VXY2, VZ2)
+proc V0(gte: GTE): Vec3l = gte.vec3(VXY0, VZ0)
+proc V1(gte: GTE): Vec3l = gte.vec3(VXY1, VZ1)
+proc V2(gte: GTE): Vec3l = gte.vec3(VXY2, VZ2)
 
 proc RGBC(gte: GTE): tuple[red, green, blue, code: uint8] =
   gte.registers[RGBC].rgbc
-proc RGB(gte: GTE): Vec3d = gte.rgb(RGBC)
+proc RGB(gte: GTE): Vec3l = gte.rgb(RGBC)
 
-proc `OTZ=`(gte: var GTE, otz: float) =
+proc `OTZ=`(gte: var GTE, otz: int64) =
   gte.clampedSet OTZ, otz, 0, 0xffff, 18
 
-proc IR0(gte: GTE): float =
-  gte.registers[IR0].int16.float
-proc `IR0=`(gte: var GTE, ir: float) =
+proc IR0(gte: GTE): int64 =
+  gte.registers[IR0].int16
+proc `IR0=`(gte: var GTE, ir: int64) =
   gte.clampedSet IR0, ir, 0, 0x1000, 12
 
-proc IR(gte: GTE): Vec3d =
-  vec3(gte.registers[IR1].int16.float,
-       gte.registers[IR2].int16.float,
-       gte.registers[IR3].int16.float)
-proc `IR=`(gte: var GTE, ir: Vec3d) =
-  let lo: float = if gte.lm: 0 else: -0x8000
+proc IR(gte: GTE): Vec3l =
+  vec3(gte.registers[IR1].int16.int64,
+       gte.registers[IR2].int16.int64,
+       gte.registers[IR3].int16.int64)
+proc `IR=`(gte: var GTE, ir: Vec3l) =
+  let lo: int64 = if gte.lm: 0 else: -0x8000
   gte.clampedSet IR1, ir[0], lo, 0x7fff, 24
   gte.clampedSet IR2, ir[1], lo, 0x7fff, 23
   gte.clampedSet IR3, ir[2], lo, 0x7fff, 22
 
-proc S0(gte: GTE): Vec3d = gte.vec3(SXY0, SZ0)
-proc S1(gte: GTE): Vec3d = gte.vec3(SXY1, SZ1)
-proc S2(gte: GTE): Vec3d = gte.vec3(SXY2, SZ2)
-proc SZ0(gte: GTE): float = gte.registers[SZ0].uint16.float
-proc SZ1(gte: GTE): float = gte.registers[SZ1].uint16.float
-proc SZ2(gte: GTE): float = gte.registers[SZ2].uint16.float
-proc SZ3(gte: GTE): float = gte.registers[SZ3].uint16.float
+proc S0(gte: GTE): Vec3l = gte.vec3(SXY0, SZ0)
+proc S1(gte: GTE): Vec3l = gte.vec3(SXY1, SZ1)
+proc S2(gte: GTE): Vec3l = gte.vec3(SXY2, SZ2)
+proc SZ0(gte: GTE): int64 = gte.registers[SZ0].uint16.int64
+proc SZ1(gte: GTE): int64 = gte.registers[SZ1].uint16.int64
+proc SZ2(gte: GTE): int64 = gte.registers[SZ2].uint16.int64
+proc SZ3(gte: GTE): int64 = gte.registers[SZ3].uint16.int64
 
-proc `SX2=`(gte: var GTE, val: float) =
+proc `SX2=`(gte: var GTE, val: int64) =
   let x = gte.clamp(val, -0x400, 0x3ff, 14)
   gte.registers[SXY2].int16s.low = x.int16
 
-proc `SY2=`(gte: var GTE, val: float) =
+proc `SY2=`(gte: var GTE, val: int64) =
   let y = gte.clamp(val, -0x400, 0x3ff, 13)
   gte.registers[SXY2].int16s.high = y.int16
 
-proc `SZ3=`(gte: var GTE, val: float) =
+proc `SZ3=`(gte: var GTE, val: int64) =
   let z = gte.clamp(val, 0, 0xffff, 18)
   gte.registers[SZ3].uint16 = z.uint16
 
@@ -230,10 +229,10 @@ proc pushS(gte: var GTE) =
   gte.registers[SZ1] = gte.registers[SZ2]
   gte.registers[SZ2] = gte.registers[SZ3]
 
-proc RGB0(gte: GTE): Vec3d = gte.rgb(RGB0)
-proc RGB1(gte: GTE): Vec3d {.used.} = gte.rgb(RGB1)
-proc RGB2(gte: GTE): Vec3d = gte.rgb(RGB2)
-proc `RGB2=`(gte: var GTE, rgb: Vec3d) =
+proc RGB0(gte: GTE): Vec3l = gte.rgb(RGB0)
+proc RGB1(gte: GTE): Vec3l {.used.} = gte.rgb(RGB1)
+proc RGB2(gte: GTE): Vec3l = gte.rgb(RGB2)
+proc `RGB2=`(gte: var GTE, rgb: Vec3l) =
   gte.registers[RGB2].rgbc =
     (red: rgb[0].clamp(0, 255).uint8,
      green: rgb[1].clamp(0, 255).uint8,
@@ -247,43 +246,43 @@ proc pushRGB(gte: var GTE) =
   gte.registers[RGB0] = gte.registers[RGB1]
   gte.registers[RGB1] = gte.registers[RGB2]
 
-proc MAC0(gte: GTE): float = gte.registers[MAC0].int32.float
-proc `MAC0=`(gte: var GTE, val: float) =
+proc MAC0(gte: GTE): int64 = gte.registers[MAC0].int32
+proc `MAC0=`(gte: var GTE, val: int64) =
   gte[MAC0] = val.truncate
-  if val >= 2f^31: gte.registers[FLAG].uint32.setBit 16
-  if val < -2f^31: gte.registers[FLAG].uint32.setBit 15
+  if val >= 2i64^31:   gte.registers[FLAG].uint32.setBit 16
+  if val < -(2i64^31): gte.registers[FLAG].uint32.setBit 15
 
-proc MAC(gte: GTE): Vec3d = gte.vec3(MAC1, MAC2, MAC3)
-proc `MAC=`(gte: var GTE, mac: Vec3d) =
+proc MAC(gte: GTE): Vec3l = gte.vec3(MAC1, MAC2, MAC3)
+proc `MAC=`(gte: var GTE, mac: Vec3l) =
   gte[MAC1] = mac[0].truncate
   gte[MAC2] = mac[1].truncate
   gte[MAC3] = mac[2].truncate
-  if mac[0] >= 2f^43: gte.registers[FLAG].uint32.setBit 30
-  if mac[1] >= 2f^43: gte.registers[FLAG].uint32.setBit 29
-  if mac[2] >= 2f^43: gte.registers[FLAG].uint32.setBit 28
-  if mac[0] < -2f^43: gte.registers[FLAG].uint32.setBit 27
-  if mac[1] < -2f^43: gte.registers[FLAG].uint32.setBit 26
-  if mac[2] < -2f^43: gte.registers[FLAG].uint32.setBit 25
+  if mac[0] >= 2i64^43:   gte.registers[FLAG].uint32.setBit 30
+  if mac[1] >= 2i64^43:   gte.registers[FLAG].uint32.setBit 29
+  if mac[2] >= 2i64^43:   gte.registers[FLAG].uint32.setBit 28
+  if mac[0] < -(2i64^43): gte.registers[FLAG].uint32.setBit 27
+  if mac[1] < -(2i64^43): gte.registers[FLAG].uint32.setBit 26
+  if mac[2] < -(2i64^43): gte.registers[FLAG].uint32.setBit 25
 
-proc RTM(gte: GTE): Mat3x3d = gte.mat3x3(RT1, RT5)
-proc TR(gte: GTE): Vec3d = gte.vec3(TRX, TRY, TRZ)
-proc LLM(gte: GTE): Mat3x3d = gte.mat3x3(L1, L5)
-proc BC(gte: GTE): Vec3d = gte.vec3(RBC, GBC, BBC)
-proc LCM(gte: GTE): Mat3x3d = gte.mat3x3(LC1, LC5)
-proc FC(gte: GTE): Vec3d = gte.vec3(RFC, GFC, BFC)
-proc OFX(gte: GTE): float = gte.registers[OFX].int32.float
-proc OFY(gte: GTE): float = gte.registers[OFY].int32.float
-proc H(gte: GTE): float = gte.registers[H].uint16.float
-proc DQA(gte: GTE): float = gte.registers[DQA].int16.float
-proc DQB(gte: GTE): float = gte.registers[DQB].int32.float
-proc ZSF3(gte: GTE): float = gte.registers[ZSF3].int16.float
-proc ZSF4(gte: GTE): float = gte.registers[ZSF4].int16.float
+proc RTM(gte: GTE): Mat3x3l = gte.mat3x3(RT1, RT5)
+proc TR(gte: GTE): Vec3l = gte.vec3(TRX, TRY, TRZ)
+proc LLM(gte: GTE): Mat3x3l = gte.mat3x3(L1, L5)
+proc BC(gte: GTE): Vec3l = gte.vec3(RBC, GBC, BBC)
+proc LCM(gte: GTE): Mat3x3l = gte.mat3x3(LC1, LC5)
+proc FC(gte: GTE): Vec3l = gte.vec3(RFC, GFC, BFC)
+proc OFX(gte: GTE): int64 = gte.registers[OFX].int32
+proc OFY(gte: GTE): int64 = gte.registers[OFY].int32
+proc H(gte: GTE): int64 = gte.registers[H].uint16.int64
+proc DQA(gte: GTE): int64 = gte.registers[DQA].int16
+proc DQB(gte: GTE): int64 = gte.registers[DQB].int32
+proc ZSF3(gte: GTE): int64 = gte.registers[ZSF3].int16
+proc ZSF4(gte: GTE): int64 = gte.registers[ZSF4].int16
 
-proc `IRandMAC=`(gte: var GTE, val: Vec3d) =
+proc `IRandMAC=`(gte: var GTE, val: Vec3l) =
     gte.IR = val
     gte.MAC = val
 
-proc `***`(v1, v2: Vec3d): Vec3d =
+proc `***`(v1, v2: Vec3l): Vec3l =
   for i in 0..2:
     result[i] = v1[i] * v2[i]
 
@@ -308,13 +307,13 @@ proc execute*(gte: var GTE, op: word) =
   gte.lm = op.lm
   gte.sf = op.sf
 
-  template sf(v: Vec3d): Vec3d =
-    if op.sf: v / (2f^12)
+  template sf(v: Vec3l): Vec3l =
+    if op.sf: vec3(v[0] shr 12, v[1] shr 12, v[2] shr 12)
     else: v
 
   template invsf[T](v: T): T =
     if op.sf: v
-    else: v / (2f^12)
+    else: v shr 12
 
   case op.opcode
   of RTPS.int, RTPT.int:
@@ -323,14 +322,18 @@ proc execute*(gte: var GTE, op: word) =
       gte.IRandMac = (gte.TR * 0x1000 + gte.RTM*gte.v).sf
       gte.pushS
       gte.SZ3 = gte.MAC[2].invsf
-      var divisor = (gte.H * 0x20000 / gte.SZ3 + 1) / 2
+      var divisor =
+        if gte.SZ3 == 0:
+          int64.high
+        else:
+          (gte.H * 0x20000 div gte.SZ3 + 1) div 2
       divisor = gte.clamp(divisor, 0, 0x1ffff, 17)
       gte.MAC0 = divisor*gte.IR[0] + gte.OFX
-      gte.SX2 = gte.MAC0/0x10000
+      gte.SX2 = gte.MAC0 div 0x10000
       gte.MAC0 = divisor*gte.IR[1] + gte.OFY
-      gte.SY2 = gte.MAC0/0x10000
+      gte.SY2 = gte.MAC0 div 0x10000
       gte.MAC0 = divisor*gte.DQA + gte.DQB
-      gte.IR0 = gte.MAC0/0x1000
+      gte.IR0 = gte.MAC0 div 0x1000
     rtp V0
     if op.opcode == RTPT.int:
       rtp V1
@@ -341,17 +344,17 @@ proc execute*(gte: var GTE, op: word) =
        gte.S0[0]*gte.S2[1] - gte.S1[0]*gte.S0[1] - gte.S2[0]*gte.S1[1])
   of AVSZ3.int:
     gte.MAC0 = gte.ZSF3*(gte.SZ1+gte.SZ2+gte.SZ3)
-    gte.OTZ = gte.MAC0 / 0x1000
+    gte.OTZ = gte.MAC0 div 0x1000
   of AVSZ4.int:
     gte.MAC0 = gte.ZSF4*(gte.SZ0+gte.SZ1+gte.SZ2+gte.SZ3)
-    gte.OTZ = gte.MAC0 / 0x1000
+    gte.OTZ = gte.MAC0 div 0x1000
   of MVMVA.int:
     let m =
       case op.multiplyMatrix
       of 0: gte.RTM
       of 1: gte.LLM
       of 2: gte.LCM
-      else: Mat3x3d() # use whatever
+      else: Mat3x3l() # use whatever
     let v =
       case op.multiplyVector
       of 0: gte.V0
@@ -364,7 +367,7 @@ proc execute*(gte: var GTE, op: word) =
       of 0: gte.TR
       of 1: gte.BC
       of 2: gte.FC
-      of 3: Vec3d()
+      of 3: Vec3l()
       else: raise newException(AssertionDefect, "unreachable")
     gte.MAC = (t * 0x1000 + m * v).sf
     gte.IR = gte.MAC
@@ -386,7 +389,7 @@ proc execute*(gte: var GTE, op: word) =
       gte.IRandMAC = (gte.LLM * gte.V0).sf
       gte.IRandMAC = (gte.BC * 0x1000 + gte.LCM * gte.IR).sf
       if cc or depth:
-        gte.MAC = gte.RGB *** gte.IR * 16
+        gte.MAC = (gte.RGB *** gte.IR) * 16
       if depth:
         gte.MAC = gte.MAC + (gte.FC-gte.MAC)*gte.IR0
       if cc or depth:
@@ -413,11 +416,11 @@ proc execute*(gte: var GTE, op: word) =
       if op.opcode == DCPL.int:
         gte.MAC = (gte.RGB *** gte.IR) * 16
       elif op.opcode == INTPL.int:
-        gte.MAC = gte.IR * (2f^12)
+        gte.MAC = gte.IR * (2^12)
       elif op.opcode == DPCS.int:
-        gte.MAC = gte.RGB * (2f^16)
+        gte.MAC = gte.RGB * (2^16)
       else: # DCPT
-        gte.MAC = gte.RGB0 * (2f^16)
+        gte.MAC = gte.RGB0 * (2^16)
       gte.MAC = gte.MAC + (gte.FC - gte.MAC)*gte.IR0
       gte.MAC = gte.MAC.sf
       gte.pushRGB
@@ -429,7 +432,7 @@ proc execute*(gte: var GTE, op: word) =
       dc
   of GPF.int, GPL.int:
     if op.opcode == GPF.int:
-      gte.MAC = Vec3d()
+      gte.MAC = Vec3l()
     else: # GPL
       gte.MAC = gte.MAC.sf
     gte.MAC = (gte.IR * gte.IR0 + gte.MAC).sf
