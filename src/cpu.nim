@@ -423,7 +423,7 @@ proc decode(instr: word): Opcode {.inline.} =
       of 0: instr.ret MFC2
       of 2: instr.ret CFC2
       of 4: instr.ret MTC2
-      of 6: instr.ret CFC2
+      of 6: instr.ret CTC2
       else: raise MachineError(error: ReservedInstruction)
   else: raise MachineError(error: ReservedInstruction)
 

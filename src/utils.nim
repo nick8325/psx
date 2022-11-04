@@ -105,17 +105,22 @@ type
     pos*: int
     width*: int
 
-func signExtendFrom*[T](x: T, bit: int): T {.inline.} =
+func signExtendFrom*[T](x: T, bits: int): T {.inline.} =
   let
-    low = 1.T shl (bit-1)
-    range = 1.T shl bit
-  ((x +% low) mod range) -% low
+    mask = (-1.T) shl (bits-1)
+  if x.testBit (bits-1):
+    x or mask
+  else:
+    x and not mask
 
 static:
   assert signExtendFrom(0x8f, 8) == -113
   assert signExtendFrom(0x7f, 8) == 127
   assert signExtendFrom(2047, 11) == -1
   assert signExtendFrom(0x18f, 8) == -113
+  assert signExtendFrom(0x8000i32, 16) == -0x8000
+  assert signExtendFrom(0x7ffffi32, 16) == -1
+  assert signExtendFrom(0x7fffffffi32, 16) == -1
 
 func unsign[T, U](slice: SignedBitSlice[T, U]): BitSlice[T, U] {.inline.} =
   BitSlice[T, U](pos: slice.pos, width: slice.width)

@@ -69,10 +69,10 @@ func `[]`*(gte: GTE, reg: Register): uint32 =
 
   # Take care of registers that aren't the full 32 bits
   case reg
-  of VZ0, VZ1, VZ2, IR0, IR1, IR2, IR3, RT5, L5, LC5, H, DQA:
+  of VZ0, VZ1, VZ2, IR0, IR1, IR2, IR3, RT5, L5, LC5, H, DQA, ZSF3, ZSF4:
     # 16-bit sign-extended
     result = signExtendFrom(result.signed, 16).unsigned
-  of SZ0, SZ1, SZ2, SZ3, ZSF3, ZSF4:
+  of SZ0, SZ1, SZ2, SZ3, OTZ:
     # 16-bit zero-extended
     result = result and 0xffff
   of IRGB, ORGB:
@@ -87,7 +87,7 @@ func `[]`*(gte: GTE, reg: Register): uint32 =
     discard
 
 proc `[]=`*(gte: var GTE, reg: Register, valueIn: uint32) =
-  trace fmt"Setting register {reg} to {valueIn:x}"
+  trace fmt"Setting register {reg}={reg.int} to {valueIn:x}"
   var value = valueIn
 
   # Used for IRGB/ORGB
@@ -96,7 +96,7 @@ proc `[]=`*(gte: var GTE, reg: Register, valueIn: uint32) =
   uint32.bitfield blue5, uint32, 10, 5
 
   # Ignore writes to read-only registers
-  if reg in {OTZ, ORGB, LZCR}:
+  if reg in {ORGB, LZCR}:
     return
 
   gte.registers[reg].uint32 = value
