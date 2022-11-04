@@ -317,11 +317,10 @@ proc currentScanline*(): int64 {.inline.} =
 proc screenSettings*(): string =
   ## Dump the screen settings.
 
-  result = fmt"{screenWidth()}x{screenHeight()}"
+  result = fmt"{screenWidth()}x{screenHeight()}, {region}"
   if screen.verticalInterlace: result &= " interlaced"
-  result &= fmt", hblank time {hblankClocks()}"
-  result &= fmt", vblank time {vblankClocks()}"
-  result &= fmt", current scanline {currentScanline()}"
+  result &= fmt", hblank {hblankClocks()}"
+  result &= fmt", vblank {vblankClocks()}"
 
 proc onHBlank*(name: string, p: proc()) =
   events.every(proc(): int64 = nextHBlankDelta(), name, p)
@@ -820,12 +819,15 @@ proc gp1*(value: word) =
     screen.verticalRange = (start: value.PackedCoord.x, stop: value.PackedCoord.y)
   of 0x08:
     # Display mode
+    let oldSettings = screenSettings()
     screen.dotclockMultiplier =
       if value.testBit 6: Dot7 else: DotclockMultiplier(value and 3)
     screen.verticalRes = VerticalRes(value.testBit 2)
     region = Region(value.testBit 3)
     screen.displayAreaDepth = ColourDepth(value.testBit 4)
     screen.verticalInterlace = value.testBit 5
+    let newSettings = screenSettings()
+    if oldSettings != newSettings: info newSettings
   of 0x09:
     # Texture disable
     textures.allowDisable = value.testBit 0
