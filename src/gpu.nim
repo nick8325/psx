@@ -191,15 +191,25 @@ proc clocksPerPixel*: int64 {.inline.} =
   # TODO: support 480p mode?
   # (PSX hardware supports it if connected to VGA monitor)
 
-proc clocksPerScanline*(region: Region = region): int64 {.inline.} =
+proc clocksPerScanline*(region: Region): int64 {.inline.} =
   ## Clock cycles per scanline.
 
   gpuClock * gpuClocksPerScanline[region]
 
-proc clocksPerFrame*(region: Region = region): int64 {.inline.} =
+proc clocksPerScanline*: int64 {.inline.} =
+  ## Clock cycles per scanline.
+  
+  clocksPerScanline(region)
+
+proc clocksPerFrame*(region: Region): int64 {.inline.} =
   ## Clock cycles per screen refresh.
 
   clocksPerScanline(region) * scanlinesPerFrame[region]
+
+proc clocksPerFrame*: int64 {.inline.} =
+  ## Clock cycles per screen refresh.
+
+  clocksPerFrame(region)
 
 proc maxScreenWidth: int64 =
   ## Maximum permissible screen width.
