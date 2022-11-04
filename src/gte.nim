@@ -162,15 +162,15 @@ proc mat3x3(gte: GTE, r1, r5: Register): Mat3x3d =
   let r3 = r2.succ
   let r4 = r3.succ
   assert r5 == r4.succ
-  result[0][0] = gte.registers[r1].int16s[0].float
-  result[0][1] = gte.registers[r1].int16s[1].float
-  result[0][2] = gte.registers[r2].int16s[0].float
-  result[1][0] = gte.registers[r2].int16s[1].float
-  result[1][1] = gte.registers[r3].int16s[0].float
-  result[1][2] = gte.registers[r3].int16s[1].float
-  result[2][0] = gte.registers[r4].int16s[0].float
-  result[2][1] = gte.registers[r4].int16s[1].float
-  result[2][2] = gte.registers[r5].int16.float
+  result[0,0] = gte.registers[r1].int16s[0].float
+  result[0,1] = gte.registers[r1].int16s[1].float
+  result[0,2] = gte.registers[r2].int16s[0].float
+  result[1,0] = gte.registers[r2].int16s[1].float
+  result[1,1] = gte.registers[r3].int16s[0].float
+  result[1,2] = gte.registers[r3].int16s[1].float
+  result[2,0] = gte.registers[r4].int16s[0].float
+  result[2,1] = gte.registers[r4].int16s[1].float
+  result[2,2] = gte.registers[r5].int16.float
 
 proc rgb(gte: GTE, reg: Register): Vec3d =
   vec3(gte.registers[reg].rgbc.red.float,
@@ -189,7 +189,7 @@ proc `OTZ=`(gte: var GTE, otz: float) =
   gte.clampedSet OTZ, otz, 0, 0xffff, 18
 
 proc IR0(gte: GTE): float =
-  gte.registers[IR1].int16.float
+  gte.registers[IR0].int16.float
 proc `IR0=`(gte: var GTE, ir: float) =
   gte.clampedSet IR0, ir, 0, 0x1000, 12
 
