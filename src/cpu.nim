@@ -700,14 +700,14 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, dummyTime)
-      newValue = value.replaceLeft(cpu[rt], address and 3)
+      newValue = value.replaceRight(cpu[rt], 3-(address and 3))
     cpu.write[:word](address and not 3u32, newValue)
   of SWR:
     var dummyTime: int64 # On an actual MIPS this doesn't do a load
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, dummyTime)
-      newValue = value.replaceRight(cpu[rt], address and 3)
+      newValue = value.replaceLeft(cpu[rt], 3-(address and 3))
     cpu.write[:word](address and not 3u32, newValue)
   of BEQ: branchIf(cpu[rs] == cpu[rt])
   of BNE: branchIf(cpu[rs] != cpu[rt])
