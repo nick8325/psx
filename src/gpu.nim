@@ -364,8 +364,14 @@ afterVBlank("gpu end vblank") do ():
 proc displayArea*: Rect =
   result.x1 = screen.displayAreaStart.x
   result.y1 = screen.displayAreaStart.y
-  result.x2 = result.x1 + screenWidth()
-  result.y2 = result.y1 + screenHeight()
+  result.x2 = result.x1 + screenWidth() - 1
+  result.y2 = result.y1 + screenHeight() - 1
+
+proc visibleLines*: Option[bool] =
+  if screen.verticalRes == ResDouble and
+    screen.verticalInterlace and
+    not drawing.drawToDisplayArea:
+    result = some(screen.frameNumber.testBit(0))
 
 proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: bool): rasteriser.Settings =
   if crop:
