@@ -229,7 +229,7 @@ proc visibleScanlines*: int =
   ## Number of scanlines drawn per frame.
   ## In interlaced mode, this is half the screen height.
 
-  clamp(screen.verticalRange.stop - screen.verticalRange.start + 1,
+  clamp(screen.verticalRange.stop - screen.verticalRange.start,
         1, scanlinesPerFrame[region].int-1)
 
 proc screenHeight*: int =
