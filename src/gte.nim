@@ -40,8 +40,12 @@ type
     # We also ignore the values of IRGB and ORGB - these are computed
     # from IR1-IR3.
     registers: array[Register, RegisterVal]
-    sf: bool # Shift flag, taken from instruction opcode
-    lm: bool # IR1-3 signedness, taken from instruction opcode
+    ## Higher-accuracy versions of MAC0-MAC3.
+    accMAC0: int64
+    accMAC: Vec3l
+
+    ## IR1-3 signedness, taken from instruction opcode
+    lm: bool
 
 static:
   assert Register.high.int == 63
@@ -51,7 +55,7 @@ proc `$`*(gte: GTE): string =
   for reg in Register:
     if reg notin {SXYP, IRGB, ORGB}:
       result &= fmt"{reg}: {gte.registers[reg].uint32:x} "
-  result &= fmt"sf={gte.sf} lm={gte.lm}"
+  result &= fmt"lm={gte.lm}"
 
 ######################################################################
 # High-level access to the state.
@@ -179,7 +183,7 @@ proc `SZ3=`(gte: var GTE, val: int64) =
 
 proc RGB0(gte: GTE): Vec3l = gte.registers[RGB0].rgbc.rgb
 proc RGB1(gte: GTE): Vec3l {.used.} = gte.registers[RGB1].rgbc.rgb
-proc RGB2(gte: GTE): Vec3l = gte.registers[RGB2].rgbc.rgb
+proc RGB2(gte: GTE): Vec3l {.used.} = gte.registers[RGB2].rgbc.rgb
 proc `RGB2=`(gte: var GTE, rgb: Vec3l) =
   gte.registers[RGB2].rgbc =
     (red: rgb[0].clamp(0, 255).uint8,
@@ -190,17 +194,16 @@ proc `RGB2=`(gte: var GTE, rgb: Vec3l) =
   if rgb[1] < 0 or rgb[1] > 255: gte.registers[FLAG].uint32.setBit 20
   if rgb[2] < 0 or rgb[2] > 255: gte.registers[FLAG].uint32.setBit 19
 
-proc MAC0(gte: GTE): int64 = gte.registers[MAC0].int32.int64
-proc `MAC0=`(gte: var GTE, val: int64): int64 {.discardable.} =
-  ## Returns the unclamped value of MAC0
+proc MAC0(gte: GTE): int64 {.used.} = gte.registers[MAC0].int32.int64
+proc `MAC0=`(gte: var GTE, val: int64) =
+  gte.accMAC0 = val
   gte.registers[MAC0].uint32 = cast[uint32](val)
   if val >= 2i64^31:   gte.registers[FLAG].uint32.setBit 16
   if val < -(2i64^31): gte.registers[FLAG].uint32.setBit 15
-  val
 
 proc MAC(gte: GTE): Vec3l = gte.vec3(MAC1, MAC2, MAC3)
-proc `MAC=`(gte: var GTE, mac: Vec3l): Vec3l {.discardable.} =
-  ## Returns the unclamped value of MAC
+proc `MAC=`(gte: var GTE, mac: Vec3l) =
+  gte.accMAC = mac
   gte.registers[MAC1].uint32 = cast[uint32](mac[0])
   gte.registers[MAC2].uint32 = cast[uint32](mac[1])
   gte.registers[MAC3].uint32 = cast[uint32](mac[2])
@@ -210,7 +213,6 @@ proc `MAC=`(gte: var GTE, mac: Vec3l): Vec3l {.discardable.} =
   if mac[0] < -(2i64^43): gte.registers[FLAG].uint32.setBit 27
   if mac[1] < -(2i64^43): gte.registers[FLAG].uint32.setBit 26
   if mac[2] < -(2i64^43): gte.registers[FLAG].uint32.setBit 25
-  mac
 
 proc RTM(gte: GTE): Mat3x3l = gte.mat3x3(RT1, RT5)
 proc TR(gte: GTE): Vec3l = gte.vec3(TRX, TRY, TRZ)
@@ -301,12 +303,12 @@ proc `[]=`*(gte: var GTE, reg: Register, value: uint32) =
   else:
     discard
 
-  gte.registers[SXYP].uint32 = value
+  gte.registers[reg].uint32 = value
 
 ######################################################################
 # Executing GTE opcodes.
 
-proc `shl`(v: Vec3l, amount: int): Vec3l =
+proc `shl`(v: Vec3l, amount: int): Vec3l {.used.} =
   for i in 0..2:
     result[i] = v[i] shl amount
 
@@ -349,23 +351,19 @@ proc execute*(gte: var GTE, op: word) =
   debug fmt"before: {gte}"
   gte[FLAG] = 0
   gte.lm = op.lm
-  gte.sf = op.sf
 
-  template sf(v: Vec3l): Vec3l =
-    if op.sf: vec3(v[0] shr 12, v[1] shr 12, v[2] shr 12)
-    else: v
-
-  template invsf[T](v: T): T =
-    if op.sf: v
-    else: v shr 12
+  let shift =
+    if op.sf: 12
+    else: 0
 
   case op.opcode
   of RTPS.int, RTPT.int:
     gte.lm = false
-    template rtp(v: untyped) =
-      gte.IR = (gte.MAC = (gte.TR * 0x1000 + gte.RTM*gte.v).sf)
+    template rtp(v: Vec3l) =
+      gte.MAC = (gte.TR * 0x1000 + gte.RTM*v) shr shift
+      gte.IR = gte.accMAC
       gte.pushS
-      gte.SZ3 = gte.MAC[2].invsf
+      gte.SZ3 = gte.accMAC[2] shr (12 - shift)
       var divisor =
         if gte.SZ3 == 0:
           int64.high
@@ -373,25 +371,27 @@ proc execute*(gte: var GTE, op: word) =
           ((gte.H * 0x20000) div gte.SZ3 + 1) div 2
       divisor = gte.clamp(divisor, 0, 0x1ffff, 17)
       gte.MAC0 = divisor*gte.IR[0] + gte.OFX
-      gte.SX2 = gte.MAC0 div 0x10000
+      gte.SX2 = gte.accMAC0 div 0x10000
       gte.MAC0 = divisor*gte.IR[1] + gte.OFY
-      gte.SY2 = gte.MAC0 div 0x10000
+      gte.SY2 = gte.accMAC0 div 0x10000
       gte.MAC0 = divisor*gte.DQA + gte.DQB
-      gte.IR0 = gte.MAC0 div 0x1000
-    rtp V0
+      gte.IR0 = gte.accMAC0 div 0x1000
     if op.opcode == RTPT.int:
-      rtp V1
-      rtp V2
+      rtp gte.V0
+      rtp gte.V1
+      rtp gte.V2
+    else:
+      rtp gte.V0
   of NCLIP.int:
     gte.MAC0 =
       (gte.S0[0]*gte.S1[1] + gte.S1[0]*gte.S2[1] + gte.S2[0]*gte.S0[1] -
        gte.S0[0]*gte.S2[1] - gte.S1[0]*gte.S0[1] - gte.S2[0]*gte.S1[1])
   of AVSZ3.int:
     gte.MAC0 = gte.ZSF3*(gte.SZ1+gte.SZ2+gte.SZ3)
-    gte.OTZ = gte.MAC0 div 0x1000
+    gte.OTZ = gte.accMAC0 div 0x1000
   of AVSZ4.int:
     gte.MAC0 = gte.ZSF4*(gte.SZ0+gte.SZ1+gte.SZ2+gte.SZ3)
-    gte.OTZ = gte.MAC0 div 0x1000
+    gte.OTZ = gte.accMAC0 div 0x1000
   of MVMVA.int:
     let m =
       case op.multiplyMatrix
@@ -413,79 +413,85 @@ proc execute*(gte: var GTE, op: word) =
       of 2: gte.FC
       of 3: Vec3l()
       else: raise newException(AssertionDefect, "unreachable")
-    gte.MAC = (t * 0x1000 + m * v).sf
-    gte.IR = gte.MAC
+    gte.MAC = (t * 0x1000 + m * v) shr shift
+    gte.IR = gte.accMAC
   of SQR.int:
-    gte.MAC = (gte.IR * gte.IR).sf
-    gte.IR = gte.MAC
+    gte.MAC = (gte.IR * gte.IR) shr shift
+    gte.IR = gte.accMAC
   of OP.int:
     gte.MAC =
       vec3(gte.IR[2]*gte.RTM[1,1] - gte.IR[1]*gte.RTM[2,2],
            gte.IR[0]*gte.RTM[2,2] - gte.IR[2]*gte.RTM[0,0],
-           gte.IR[1]*gte.RTM[0,0] - gte.IR[0]*gte.RTM[1,1]).sf
-    gte.IR = gte.MAC
+           gte.IR[1]*gte.RTM[0,0] - gte.IR[0]*gte.RTM[1,1]) shr shift
+    gte.IR = gte.accMAC
   of NCS.int, NCT.int, NCCS.int, NCCT.int, NCDS.int, NCDT.int:
     let triple = op.opcode in [NCT.int, NCCT.int, NCDT.int]
     let cc = op.opcode in [NCCS.int, NCCT.int]
     let depth = op.opcode in [NCDS.int, NCDT.int]
 
-    template nc(v: untyped) =
-      gte.IR = (gte.MAC = (gte.LLM * gte.V0).sf)
-      gte.IR = (gte.MAC = (gte.BC * 0x1000 + gte.LCM * gte.IR).sf)
+    template nc(v: Vec3l) =
+      gte.MAC = (gte.LLM * gte.V0) shr shift
+      gte.IR = gte.accMAC
+      gte.MAC = (gte.BC * 0x1000 + gte.LCM * gte.IR) shr shift
+      gte.IR = gte.accMAC
       if cc or depth:
         gte.MAC = (gte.RGB * gte.IR) * 16
       if depth:
         gte.MAC = gte.MAC + (gte.FC-gte.MAC)*gte.IR0
       if cc or depth:
-        gte.MAC = gte.MAC.sf
+        gte.MAC = gte.accMAC shr shift
       gte.pushRGB
-      gte.RGB2 = gte.MAC / 16
-      gte.IR = gte.MAC
+      gte.RGB2 = gte.accMAC / 16
+      gte.IR = gte.accMAC
 
-    nc V0
     if triple:
-      nc V1
-      nc V2
+      nc gte.V0
+      nc gte.V1
+      nc gte.V2
+    else:
+      nc gte.V0
   of CC.int, CDP.int:
-    gte.IR = (gte.MAC = (gte.BC * 0x1000 + gte.LCM * gte.IR).sf)
+    gte.MAC = (gte.BC * 0x1000 + gte.LCM * gte.IR) shr shift
+    gte.IR = gte.accMAC
     gte.MAC = (gte.RGB * gte.IR) * 16
     if op.opcode == CDP.int:
       gte.MAC = gte.MAC + (gte.FC - gte.MAC)*gte.IR0
-    gte.MAC = gte.MAC.sf
+    gte.MAC = gte.accMAC shr shift
     gte.pushRGB
-    gte.RGB2 = gte.MAC / 16
-    gte.IR = gte.MAC
+    gte.RGB2 = gte.accMAC / 16
+    gte.IR = gte.accMAC
   of DCPL.int, DPCS.int, DPCT.int, INTPL.int:
-    template dc =
+    for i in 0..<(if op.opcode == DPCT.int: 3 else: 1):
       if op.opcode == DCPL.int:
-        gte.MAC = (gte.RGB * gte.IR) * 16
+        echo "DCPL"
+        gte.MAC = (gte.RGB * gte.IR) shl 4
       elif op.opcode == INTPL.int:
-        gte.MAC = gte.IR * (2^12)
+        echo "INTPL"
+        gte.MAC = gte.IR shl 12
       elif op.opcode == DPCS.int:
-        gte.MAC = gte.RGB * (2^16)
+        echo "DPCS"
+        gte.MAC = gte.RGB shl 16
       else: # DCPT
-        gte.MAC = gte.RGB0 * (2^16)
-      echo fmt"MAC={gte.MAC} FC={gte.FC} IR0={gte.IR0}"
-      gte.MAC = gte.MAC + (gte.FC - gte.MAC)*gte.IR0
-      echo fmt"MAC={gte.MAC}"
-      gte.MAC = gte.MAC.sf
+        echo "DCPT"
+        gte.MAC = gte.RGB0 shl 16
+      echo fmt"MAC={gte.MAC} FC={gte.FC} IR0={gte.IR0} shift={shift}"
+      gte.lm = false
+      gte.IR = (gte.FC shl 12 - gte.MAC) shr shift
+      gte.MAC = (gte.IR * gte.IR0 + gte.MAC) shr shift
+      gte.lm = op.lm
       echo fmt"MAC={gte.MAC}"
       gte.pushRGB
-      gte.RGB2 = gte.MAC / 16
-      gte.IR = gte.MAC
-    dc
-    if op.opcode == DPCT.int:
-      dc
-      dc
+      gte.RGB2 = gte.accMAC / 16
+      gte.IR = gte.accMAC
   of GPF.int, GPL.int:
     if op.opcode == GPF.int:
       gte.MAC = Vec3l()
     else: # GPL
-      gte.MAC = gte.MAC.sf
-    gte.MAC = (gte.IR * gte.IR0 + gte.MAC).sf
+      gte.MAC = gte.MAC shr shift
+    gte.MAC = (gte.IR * gte.IR0 + gte.accMAC) shr shift
     gte.pushRGB
-    gte.RGB2 = gte.MAC / 16
-    gte.IR = gte.MAC
+    gte.RGB2 = gte.accMAC / 16
+    gte.IR = gte.accMAC
   else:
     warn fmt"Unrecognised GTE op {op.opcode:x}"
 
