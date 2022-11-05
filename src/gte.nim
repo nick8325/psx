@@ -331,6 +331,38 @@ template pushRGBfromMAC(gte: var GTE) =
   gte.RGB2 = gte.accMAC / 16
   gte.IR = gte.accMAC
 
+proc perspectiveDivisor(gte: var GTE): int64 =
+  ## Compute an approximation of ((H*0x20000/SZ3)+1)/2.
+  ## Used in RTPS and RTPT.
+  ## All information gratefully taken from Nocash.
+
+  if gte.H >= gte.SZ3 * 2:
+    # Out of bounds
+    gte.registers[FLAG].uint32.setBit 17
+    result = 0x1ffff
+  elif gte.SZ3 == 1:
+    # See "Some special cases" note in Nocash docs.
+    if gte.H == 0: result = 0
+    elif gte.H == 1: result = 0x10000
+    # SZ3 == 1 and H > 1 => out of bounds
+    else: raise newException(AssertionDefect, "unreachable")
+  else:
+    var z = gte.SZ3.uint16.countLeadingZeroBits
+    assert 0 <= z and z <= 15
+    let n = gte.H shl z
+    assert 0 <= n and n <= 0x7fff8000
+    var d = gte.SZ3 shl z
+    assert 0x8000 <= d and d <= 0xffff
+    let i = (d-0x7fc0) shr 7
+    assert 0 <= i and i <= 0x100
+    let u = max(0, (0x40000 div (i+0x100) + 1) div 2 - 0x101) + 0x101
+    assert 0x101 <= u and u <= 0x200
+    d = (0x2000080 - d*u) shr 8
+    assert 0x10000 >= d and d >= 0xff01
+    d = (0x80 + d*u) shr 8
+    assert 0x20000 >= d and d >= 0x10000
+    result = min(0x1ffff, ((n*d) + 0x8000) shr 16)
+
 type
   Opcode {.pure.} = enum
     ## Opcode numbers.
@@ -382,12 +414,7 @@ proc execute*(gte: var GTE, op: word) =
       gte.setIR false, viaMAC((gte.TR * 0x1000 + gte.RTM*v) shr shift)
       gte.pushS
       gte.SZ3 = gte.accMAC[2] shr (12 - shift)
-      var divisor =
-        if gte.SZ3 == 0:
-          int64.high
-        else:
-          ((gte.H * 0x20000) div gte.SZ3 + 1) div 2
-      divisor = gte.clamp(divisor, 0, 0x1ffff, 17)
+      let divisor = gte.perspectiveDivisor
       gte.SX2 = viaMAC0(divisor*gte.IR1 + gte.OFX, shift=16)
       gte.SY2 = viaMAC0(divisor*gte.IR2 + gte.OFY, shift=16)
       gte.IR0 = viaMAC0(divisor*gte.DQA + gte.DQB, shift=12)
