@@ -7,162 +7,109 @@ import glm
 const loggerComponent = logGTE
 logGTE.level = lvlDebug
 
+######################################################################
+# Registers and state.
+
 type
   Register* = enum
+    ## A GTE register name.
     # Data registers
-    VXY0, VZ0, VXY1, VZ1, VXY2, VZ2,
-    RGBC, OTZ, IR0, IR1, IR2, IR3,
-    SXY0, SXY1, SXY2, SXYP,
-    SZ0, SZ1, SZ2, SZ3,
-    RGB0, RGB1, RGB2,
-    RES1,
-    MAC0, MAC1, MAC2, MAC3,
-    IRGB, ORGB, LZCS, LZCR,
+    VXY0, VZ0, VXY1, VZ1, VXY2, VZ2, RGBC, OTZ, IR0, IR1, IR2, IR3,
+    SXY0, SXY1, SXY2, SXYP, SZ0, SZ1, SZ2, SZ3, RGB0, RGB1, RGB2,
+    RES1, MAC0, MAC1, MAC2, MAC3, IRGB, ORGB, LZCS, LZCR,
     # Control registers
-    RT1, RT2, RT3, RT4, RT5,
-    TRX, TRY, TRZ,
-    L1, L2, L3, L4, L5,
-    RBC, GBC, BBC,
-    LC1, LC2, LC3, LC4, LC5,
-    RFC, GFC, BFC,
-    OFX, OFY,
-    H,
-    DQA, DQB,
-    ZSF3, ZSF4,
-    FLAG
+    RT1, RT2, RT3, RT4, RT5, TRX, TRY, TRZ, LL1, LL2, LL3, LL4, LL5,
+    RBC, GBC, BBC, LC1, LC2, LC3, LC4, LC5, RFC, GFC, BFC,
+    OFX, OFY, H, DQA, DQB, ZSF3, ZSF4, FLAG
 
-static:
-  assert Register.high.int == 63
-
-type
-  GTE* = object
-    # Note: we ignore the values of SXYP and ORGB - these are mirrors
-    # of SXY2 and IRGB, respectively.
-    registers: array[Register, RegisterVal]
-    sf: bool
-    lm: bool
   RegisterVal {.union.} = object
+    ## The value held in a register, interpreted as some datatype.
     uint32: uint32
     int32: int32
     uint16s: tuple[low, high: uint16]
     int16s: tuple[low, high: int16]
     uint16: uint16
     int16: int16
-    rgbc: tuple[red, green, blue, code: uint8]
+    rgbc: PackedRGBC
+
+  PackedRGBC = tuple[red, green, blue, code: uint8]
+
+  GTE* = object
+    ## The state of the GTE.
+    # Note: we ignore the values of SXYP - this is a mirror of SXY2.
+    # We also ignore the values of IRGB and ORGB - these are computed
+    # from IR1-IR3.
+    registers: array[Register, RegisterVal]
+    sf: bool # Shift flag, taken from instruction opcode
+    lm: bool # IR1-3 signedness, taken from instruction opcode
 
 static:
+  assert Register.high.int == 63
   assert RegisterVal.sizeof == 4
 
-func dataReg*(r: 0..31): Register =
-  Register(r)
+proc `$`*(gte: GTE): string =
+  for reg in Register:
+    if reg notin {SXYP, IRGB, ORGB}:
+      result &= fmt"{reg}: {gte.registers[reg].uint32:x} "
+  result &= fmt"sf={gte.sf} lm={gte.lm}"
 
-func controlReg*(r: 0..31): Register =
-  Register(r.int+32)
+######################################################################
+# High-level access to the state.
 
-func `[]`*(gte: GTE, reg: Register): uint32 =
-  if reg == SXYP: # mirror of SXY2
-    result = gte.registers[SXY2].uint32
-  elif reg == ORGB: # mirror of IRGB
-    result = gte.registers[IRGB].uint32
-  else:
-    result = gte.registers[reg].uint32
+# The GTE registers above are a mishmash of different things:
+# * Some hold a signed 32-bit value (e.g. MAC0-3).
+# * Some hold a 16-bit value, signed (IR0) or unsigned (H).
+# * Sometimes a group of registers represents a 3-vector (IR1-3)
+#   or 3x3 matrix (RT1-RT5). 3-vectors can be stored in three
+#   registers or packed into two (if the elements are 16-bit).
+#
+# The functions here provide a higher-level view of the state.
+# All registers have getter and setter functions. The getter takes
+# care of extracting and zero-/sign-extending the value.
+# The setter clamps the value to the correct range, and sets
+# the appropriate flag bits on over-/underflow.
+#
+# Although GTE registers are (at most) 32-bit, when implementing the
+# GTE, we need to do some internal calculations at 64-bit precision.
+# The getters and setters therefore use int64 values.
+# Scalar registers are modelled as a single int64:
+#   proc MAC0(gte: GTE): int64
+#   proc `MAC0=`(gte: var GTE, val: int64)
+# Vector registers are modelled as a Vec3l = Vec3[int64]:
+#   proc IR(gte: GTE): Vec3l
+#   proc `IR=`(gte: var GTE, ir: Vec3l)
+# Matrix registers are modelled as a Mat3x3l = Mat3x3[int64]:
+#   proc RTM(gte: GTE): Mat3x3l
 
-  # Take care of registers that aren't the full 32 bits
-  case reg
-  of VZ0, VZ1, VZ2, IR0, IR1, IR2, IR3, RT5, L5, LC5, H, DQA, ZSF3, ZSF4:
-    # 16-bit sign-extended
-    result = signExtendFrom(result.signed, 16).unsigned
-  of SZ0, SZ1, SZ2, SZ3, OTZ:
-    # 16-bit zero-extended
-    result = result and 0xffff
-  of IRGB, ORGB:
-    # 15-bit zero-extended
-    result = result and 0x7fff
-  of FLAG:
-    # Certain bits are fixed
-    result = result and 0x7ffff000u32
-    if (result and 0x7f87e000u32) != 0:
-      result = result or 0x80000000u32
-  else:
-    discard
-
-proc `[]=`*(gte: var GTE, reg: Register, valueIn: uint32) =
-  trace fmt"Setting register {reg}={reg.int} to {valueIn:x}"
-  var value = valueIn
-
-  # Used for IRGB/ORGB
-  uint32.bitfield red5, uint32, 0, 5
-  uint32.bitfield green5, uint32, 5, 5
-  uint32.bitfield blue5, uint32, 10, 5
-
-  # Ignore writes to read-only registers
-  if reg in {ORGB, LZCR}:
-    return
-
-  gte.registers[reg].uint32 = value
-
-  # Take care of registers with special behaviour on write
-  case reg
-  of SXYP:
-    # Mirror of SXY2 plus FIFO
-    gte.registers[SXY0] = gte.registers[SXY1]
-    gte.registers[SXY1] = gte.registers[SXY2]
-    gte.registers[SXY2].uint32 = value
-  of IRGB:
-    # Colour conversion
-    gte.registers[IR1].uint32 = value.red5.uint32 * 0x80
-    gte.registers[IR2].uint32 = value.green5.uint32 * 0x80
-    gte.registers[IR3].uint32 = value.blue5.uint32 * 0x80
-    gte.registers[ORGB].uint32 = value
-  of IR1, IR2, IR3:
-    # Colour conversion
-    var conv: uint32
-    conv.red5 =   (gte[IR1].signed div 0x80).clamp(0, 0x1f).unsigned
-    conv.green5 = (gte[IR2].signed div 0x80).clamp(0, 0x1f).unsigned
-    conv.blue5 =  (gte[IR3].signed div 0x80).clamp(0, 0x1f).unsigned
-    gte.registers[IRGB].uint32 = conv
-    gte.registers[ORGB].uint32 = conv
-  of LZCS:
-    # Count leading zeroes
-    if value.signed == 0 or value.signed == -1:
-      gte.registers[LZCR].uint32 = 32
-    elif value.signed >= 0:
-      gte.registers[LZCR].uint32 = countLeadingZeroBits(value).uint32
-    else:
-      gte.registers[LZCR].uint32 = countLeadingZeroBits(not value).uint32
-  else:
-    discard
-
-proc clamp(gte: var GTE, val, lo, hi: int64, bit: int): int64 =
-  if val < lo or val > hi:
+# First, helper functions used by the getters and setters
+proc clamp[T](gte: var GTE, val: int64, lo, hi: T, bit: int): T =
+  ## Clamp a value to a given range. Sets a flag on over-/underflow.
+  if val < lo.int64 or val > hi.int64:
     gte.registers[FLAG].uint32.setBit bit
-  val.clamp(lo, hi)
-proc clampedSet(gte: var GTE, reg: Register, val, lo, hi: int64, bit: int) =
-  let clampedVal = gte.clamp(val, lo, hi, bit)
-  gte[reg] = clampedVal.int32.unsigned
-
-proc truncate(val: int64): uint32 =
-  cast[uint32](val)
-
-static:
-  assert truncate(-1) == 0xffffffffu32
+  val.clamp(lo.int64, hi.int64).T
 
 proc vec3s(gte: GTE, xy: Register, z: Register): Vec3l =
+  ## Convert a pair of XY register and Z register to a vector.
+  ## The Z register is interpreted as signed.
   vec3(gte.registers[xy].int16s[0].int64,
        gte.registers[xy].int16s[1].int64,
        gte.registers[z].int16.int64)
 
 proc vec3u(gte: GTE, xy: Register, z: Register): Vec3l =
+  ## Convert a pair of XY register and Z register to a vector.
+  ## The Z register is interpreted as unsigned.
   vec3(gte.registers[xy].int16s[0].int64,
        gte.registers[xy].int16s[1].int64,
        gte.registers[z].uint16.int64)
 
 proc vec3(gte: GTE, x: Register, y: Register, z: Register): Vec3l =
+  ## Convert a triple of registers to a vector.
   vec3(gte.registers[x].int32.int64,
        gte.registers[y].int32.int64,
        gte.registers[z].int32.int64)
 
 proc mat3x3(gte: GTE, r1, r5: Register): Mat3x3l =
+  ## Convert a sequence of 5 registers to a 3x3 matrix.
   let r2 = r1.succ
   let r3 = r2.succ
   let r4 = r3.succ
@@ -178,36 +125,37 @@ proc mat3x3(gte: GTE, r1, r5: Register): Mat3x3l =
   result[1,2] = gte.registers[r4].int16s[1]
   result[2,2] = gte.registers[r5].int16
 
-proc rgb(gte: GTE, reg: Register): Vec3l =
-  vec3(gte.registers[reg].rgbc.red.int64,
-       gte.registers[reg].rgbc.green.int64,
-       gte.registers[reg].rgbc.blue.int64)
+proc rgb(rgbc: PackedRGBC): Vec3l =
+  ## Convert an RGBC value to an RGB 3-vector.
+  vec3(rgbc.red.int64, rgbc.green.int64, rgbc.blue.int64)
 
+# Now the getters and setters themselves
 proc V0(gte: GTE): Vec3l = gte.vec3s(VXY0, VZ0)
 proc V1(gte: GTE): Vec3l = gte.vec3s(VXY1, VZ1)
 proc V2(gte: GTE): Vec3l = gte.vec3s(VXY2, VZ2)
 
-proc RGBC(gte: GTE): tuple[red, green, blue, code: uint8] =
+proc RGBC(gte: GTE): PackedRGBC =
   gte.registers[RGBC].rgbc
-proc RGB(gte: GTE): Vec3l = gte.rgb(RGBC)
+proc RGB(gte: GTE): Vec3l = gte.RGBC.rgb
 
 proc `OTZ=`(gte: var GTE, otz: int64) =
-  gte.clampedSet OTZ, otz, 0, 0xffff, 18
+  gte.registers[OTZ].uint16 = gte.clamp(otz, 0u16, 0xffff, 18)
 
 proc IR0(gte: GTE): int64 =
-  gte.registers[IR0].int16
+  gte.registers[IR0].int16.int64
 proc `IR0=`(gte: var GTE, ir: int64) =
-  gte.clampedSet IR0, ir, 0, 0x1000, 12
+  gte.registers[IR0].int16 = gte.clamp(ir, 0i16, 0x1000, 12)
 
-proc IR(gte: GTE): Vec3l =
-  vec3(gte.registers[IR1].int16.int64,
-       gte.registers[IR2].int16.int64,
-       gte.registers[IR3].int16.int64)
+proc IR1(gte: GTE): int64 = gte.registers[IR1].int16.int64
+proc IR2(gte: GTE): int64 = gte.registers[IR2].int16.int64
+proc IR3(gte: GTE): int64 = gte.registers[IR3].int16.int64
+
+proc IR(gte: GTE): Vec3l = vec3(gte.IR1, gte.IR2, gte.IR3)
 proc `IR=`(gte: var GTE, ir: Vec3l) =
-  let lo: int64 = if gte.lm: 0 else: -0x8000
-  gte.clampedSet IR1, ir[0], lo, 0x7fff, 24
-  gte.clampedSet IR2, ir[1], lo, 0x7fff, 23
-  gte.clampedSet IR3, ir[2], lo, 0x7fff, 22
+  let lo: int16 = if gte.lm: 0 else: -0x8000
+  gte.registers[IR1].int16 = gte.clamp(ir[0], lo, 0x7fff, 24)
+  gte.registers[IR2].int16 = gte.clamp(ir[1], lo, 0x7fff, 23)
+  gte.registers[IR3].int16 = gte.clamp(ir[2], lo, 0x7fff, 22)
 
 proc S0(gte: GTE): Vec3l = gte.vec3u(SXY0, SZ0)
 proc S1(gte: GTE): Vec3l = gte.vec3u(SXY1, SZ1)
@@ -218,27 +166,20 @@ proc SZ2(gte: GTE): int64 = gte.registers[SZ2].uint16.int64
 proc SZ3(gte: GTE): int64 = gte.registers[SZ3].uint16.int64
 
 proc `SX2=`(gte: var GTE, val: int64) =
-  let x = gte.clamp(val, -0x400, 0x3ff, 14)
-  gte.registers[SXY2].int16s.low = x.int16
+  gte.registers[SXY2].int16s.low =
+    gte.clamp[:int16](val, -0x400, 0x3ff, 14)
 
 proc `SY2=`(gte: var GTE, val: int64) =
-  let y = gte.clamp(val, -0x400, 0x3ff, 13)
-  gte.registers[SXY2].int16s.high = y.int16
+  gte.registers[SXY2].int16s.high =
+    gte.clamp[:int16](val, -0x400, 0x3ff, 13)
 
 proc `SZ3=`(gte: var GTE, val: int64) =
-  let z = gte.clamp(val, 0, 0xffff, 18)
-  gte.registers[SZ3].uint16 = z.uint16
+  gte.registers[SZ3].uint16 =
+    gte.clamp[:uint16](val, 0, 0xffff, 18)
 
-proc pushS(gte: var GTE) =
-  gte.registers[SXY0] = gte.registers[SXY1]
-  gte.registers[SXY1] = gte.registers[SXY2]
-  gte.registers[SZ0] = gte.registers[SZ1]
-  gte.registers[SZ1] = gte.registers[SZ2]
-  gte.registers[SZ2] = gte.registers[SZ3]
-
-proc RGB0(gte: GTE): Vec3l = gte.rgb(RGB0)
-proc RGB1(gte: GTE): Vec3l {.used.} = gte.rgb(RGB1)
-proc RGB2(gte: GTE): Vec3l = gte.rgb(RGB2)
+proc RGB0(gte: GTE): Vec3l = gte.registers[RGB0].rgbc.rgb
+proc RGB1(gte: GTE): Vec3l {.used.} = gte.registers[RGB1].rgbc.rgb
+proc RGB2(gte: GTE): Vec3l = gte.registers[RGB2].rgbc.rgb
 proc `RGB2=`(gte: var GTE, rgb: Vec3l) =
   gte.registers[RGB2].rgbc =
     (red: rgb[0].clamp(0, 255).uint8,
@@ -249,48 +190,146 @@ proc `RGB2=`(gte: var GTE, rgb: Vec3l) =
   if rgb[1] < 0 or rgb[1] > 255: gte.registers[FLAG].uint32.setBit 20
   if rgb[2] < 0 or rgb[2] > 255: gte.registers[FLAG].uint32.setBit 19
 
-proc pushRGB(gte: var GTE) =
-  gte.registers[RGB0] = gte.registers[RGB1]
-  gte.registers[RGB1] = gte.registers[RGB2]
-
-proc MAC0(gte: GTE): int64 = gte.registers[MAC0].int32
-proc `MAC0=`(gte: var GTE, val: int64) =
-  gte[MAC0] = val.truncate
+proc MAC0(gte: GTE): int64 = gte.registers[MAC0].int32.int64
+proc `MAC0=`(gte: var GTE, val: int64): int64 {.discardable.} =
+  ## Returns the unclamped value of MAC0
+  gte.registers[MAC0].uint32 = cast[uint32](val)
   if val >= 2i64^31:   gte.registers[FLAG].uint32.setBit 16
   if val < -(2i64^31): gte.registers[FLAG].uint32.setBit 15
+  val
 
 proc MAC(gte: GTE): Vec3l = gte.vec3(MAC1, MAC2, MAC3)
-proc `MAC=`(gte: var GTE, mac: Vec3l) =
-  gte[MAC1] = mac[0].truncate
-  gte[MAC2] = mac[1].truncate
-  gte[MAC3] = mac[2].truncate
+proc `MAC=`(gte: var GTE, mac: Vec3l): Vec3l {.discardable.} =
+  ## Returns the unclamped value of MAC
+  gte.registers[MAC1].uint32 = cast[uint32](mac[0])
+  gte.registers[MAC2].uint32 = cast[uint32](mac[1])
+  gte.registers[MAC3].uint32 = cast[uint32](mac[2])
   if mac[0] >= 2i64^43:   gte.registers[FLAG].uint32.setBit 30
   if mac[1] >= 2i64^43:   gte.registers[FLAG].uint32.setBit 29
   if mac[2] >= 2i64^43:   gte.registers[FLAG].uint32.setBit 28
   if mac[0] < -(2i64^43): gte.registers[FLAG].uint32.setBit 27
   if mac[1] < -(2i64^43): gte.registers[FLAG].uint32.setBit 26
   if mac[2] < -(2i64^43): gte.registers[FLAG].uint32.setBit 25
+  mac
 
 proc RTM(gte: GTE): Mat3x3l = gte.mat3x3(RT1, RT5)
 proc TR(gte: GTE): Vec3l = gte.vec3(TRX, TRY, TRZ)
-proc LLM(gte: GTE): Mat3x3l = gte.mat3x3(L1, L5)
+proc LLM(gte: GTE): Mat3x3l = gte.mat3x3(LL1, LL5)
 proc BC(gte: GTE): Vec3l = gte.vec3(RBC, GBC, BBC)
 proc LCM(gte: GTE): Mat3x3l = gte.mat3x3(LC1, LC5)
 proc FC(gte: GTE): Vec3l = gte.vec3(RFC, GFC, BFC)
-proc OFX(gte: GTE): int64 = gte.registers[OFX].int32
-proc OFY(gte: GTE): int64 = gte.registers[OFY].int32
+proc OFX(gte: GTE): int64 = gte.registers[OFX].int32.int64
+proc OFY(gte: GTE): int64 = gte.registers[OFY].int32.int64
 proc H(gte: GTE): int64 = gte.registers[H].uint16.int64
-proc DQA(gte: GTE): int64 = gte.registers[DQA].int16
-proc DQB(gte: GTE): int64 = gte.registers[DQB].int32
-proc ZSF3(gte: GTE): int64 = gte.registers[ZSF3].int16
-proc ZSF4(gte: GTE): int64 = gte.registers[ZSF4].int16
+proc DQA(gte: GTE): int64 = gte.registers[DQA].int16.int64
+proc DQB(gte: GTE): int64 = gte.registers[DQB].int32.int64
+proc ZSF3(gte: GTE): int64 = gte.registers[ZSF3].int16.int64
+proc ZSF4(gte: GTE): int64 = gte.registers[ZSF4].int16.int64
 
-proc `IRandMAC=`(gte: var GTE, val: Vec3l) =
-    gte.IR = val
-    gte.MAC = val
+######################################################################
+# Register access from the MIPS
+
+func dataReg*(r: 0..31): Register =
+  ## Convert a MFC2/MTC2 register number to a COP2 register number.
+  Register(r)
+
+func controlReg*(r: 0..31): Register =
+  ## Convert a CFC2/CTC2 register number to a COP2 register number.
+  Register(r.int+32)
+
+# Bitfield for IRGB/ORGB
+uint32.bitfield red5, uint32, 0, 5
+uint32.bitfield green5, uint32, 5, 5
+uint32.bitfield blue5, uint32, 10, 5
+
+func `[]`*(gte: GTE, reg: Register): uint32 =
+  ## Read a register, as with MFC2/CFC2.
+  if reg == SXYP:
+    # Mirror of SXY2
+    result = gte.registers[SXY2].uint32
+  elif reg in {IRGB, ORGB}:
+    # Computed from IR1-IR3
+    result.red5 =   (gte.IR1 div 0x80).clamp(0, 0x1f).uint32
+    result.green5 = (gte.IR2 div 0x80).clamp(0, 0x1f).uint32
+    result.blue5 =  (gte.IR3 div 0x80).clamp(0, 0x1f).uint32
+  else:
+    result = gte.registers[reg].uint32
+
+  # Take care of registers that aren't the full 32 bits
+  case reg
+  of VZ0, VZ1, VZ2, IR0, IR1, IR2, IR3, RT5, LL5, LC5, H, DQA, ZSF3, ZSF4:
+    # 16-bit sign-extended
+    result = signExtendFrom(result.signed, 16).unsigned
+  of OTZ, SZ0, SZ1, SZ2, SZ3:
+    # 16-bit zero-extended
+    result = result and 0xffff
+  of FLAG:
+    # Certain bits are fixed
+    result = result and 0x7ffff000u32
+    if (result and 0x7f87e000u32) != 0:
+      result = result or 0x80000000u32
+  else:
+    discard
+
+proc `[]=`*(gte: var GTE, reg: Register, value: uint32) =
+  ## Write to a register, as with MTC2/CTC2.
+  trace fmt"Setting register {reg}={reg.int} to {value:x}"
+
+  # Take care of registers with special behaviour on write
+  case reg
+  of ORGB, LZCR:
+    # Read-only registers
+    return
+  of SXYP:
+    # Mirror of SXY2 plus FIFO
+    gte.registers[SXY0] = gte.registers[SXY1]
+    gte.registers[SXY1] = gte.registers[SXY2]
+    gte.registers[SXY2].uint32 = value
+  of IRGB:
+    # Colour conversion
+    gte.registers[IR1].uint32 = value.red5.uint32 * 0x80
+    gte.registers[IR2].uint32 = value.green5.uint32 * 0x80
+    gte.registers[IR3].uint32 = value.blue5.uint32 * 0x80
+  of LZCS:
+    # Count leading zeroes
+    if value.signed == 0 or value.signed == -1:
+      gte.registers[LZCR].uint32 = 32
+    elif value.signed >= 0:
+      gte.registers[LZCR].uint32 = countLeadingZeroBits(value).uint32
+    else:
+      gte.registers[LZCR].uint32 = countLeadingZeroBits(not value).uint32
+  else:
+    discard
+
+  gte.registers[SXYP].uint32 = value
+
+######################################################################
+# Executing GTE opcodes.
+
+proc `shl`(v: Vec3l, amount: int): Vec3l =
+  for i in 0..2:
+    result[i] = v[i] shl amount
+
+proc `shr`(v: Vec3l, amount: int): Vec3l =
+  for i in 0..2:
+    result[i] = v[i] shr amount
+
+proc pushS(gte: var GTE) =
+  ## Make room for a new entry in the S FIFO.
+  gte.registers[SXY0] = gte.registers[SXY1]
+  gte.registers[SXY1] = gte.registers[SXY2]
+  gte.registers[SZ0] = gte.registers[SZ1]
+  gte.registers[SZ1] = gte.registers[SZ2]
+  gte.registers[SZ2] = gte.registers[SZ3]
+
+proc pushRGB(gte: var GTE) =
+  ## Make room for a new entry in the RGB FIFO.
+  gte.registers[RGB0] = gte.registers[RGB1]
+  gte.registers[RGB1] = gte.registers[RGB2]
 
 type
   Opcode {.pure.} = enum
+    ## Opcode numbers.
     RTPS = 0x01, NCLIP = 0x06, OP = 0x0C, DPCS = 0x10, INTPL = 0x11,
     MVMVA = 0x12, NCDS = 0x13, CDP = 0x14, NCDT = 0x16, NCCS = 0x1B,
     CC = 0x1C, NCS = 0x1E, NCT = 0x20, SQR = 0x28, DCPL = 0x29,
@@ -298,6 +337,7 @@ type
     GPL = 0x3E, NCCT = 0x3F
 
 proc execute*(gte: var GTE, op: word) =
+  ## Execute a GTE operation.
   word.bitfield opcode, int, 0, 6
   word.bitfield lm, bool, 10, 1
   word.bitfield sf, bool, 19, 1
@@ -305,7 +345,8 @@ proc execute*(gte: var GTE, op: word) =
   word.bitfield multiplyVector, int, 15, 2
   word.bitfield translationVector, int, 13, 2
 
-  trace fmt"GTE op {op.opcode:x}"
+  debug fmt"GTE op {op.opcode:x}"
+  debug fmt"before: {gte}"
   gte[FLAG] = 0
   gte.lm = op.lm
   gte.sf = op.sf
@@ -322,7 +363,7 @@ proc execute*(gte: var GTE, op: word) =
   of RTPS.int, RTPT.int:
     gte.lm = false
     template rtp(v: untyped) =
-      gte.IRandMac = (gte.TR * 0x1000 + gte.RTM*gte.v).sf
+      gte.IR = (gte.MAC = (gte.TR * 0x1000 + gte.RTM*gte.v).sf)
       gte.pushS
       gte.SZ3 = gte.MAC[2].invsf
       var divisor =
@@ -389,8 +430,8 @@ proc execute*(gte: var GTE, op: word) =
     let depth = op.opcode in [NCDS.int, NCDT.int]
 
     template nc(v: untyped) =
-      gte.IRandMAC = (gte.LLM * gte.V0).sf
-      gte.IRandMAC = (gte.BC * 0x1000 + gte.LCM * gte.IR).sf
+      gte.IR = (gte.MAC = (gte.LLM * gte.V0).sf)
+      gte.IR = (gte.MAC = (gte.BC * 0x1000 + gte.LCM * gte.IR).sf)
       if cc or depth:
         gte.MAC = (gte.RGB * gte.IR) * 16
       if depth:
@@ -406,7 +447,7 @@ proc execute*(gte: var GTE, op: word) =
       nc V1
       nc V2
   of CC.int, CDP.int:
-    gte.IRandMAC = (gte.BC * 0x1000 + gte.LCM * gte.IR).sf
+    gte.IR = (gte.MAC = (gte.BC * 0x1000 + gte.LCM * gte.IR).sf)
     gte.MAC = (gte.RGB * gte.IR) * 16
     if op.opcode == CDP.int:
       gte.MAC = gte.MAC + (gte.FC - gte.MAC)*gte.IR0
@@ -424,8 +465,11 @@ proc execute*(gte: var GTE, op: word) =
         gte.MAC = gte.RGB * (2^16)
       else: # DCPT
         gte.MAC = gte.RGB0 * (2^16)
+      echo fmt"MAC={gte.MAC} FC={gte.FC} IR0={gte.IR0}"
       gte.MAC = gte.MAC + (gte.FC - gte.MAC)*gte.IR0
+      echo fmt"MAC={gte.MAC}"
       gte.MAC = gte.MAC.sf
+      echo fmt"MAC={gte.MAC}"
       gte.pushRGB
       gte.RGB2 = gte.MAC / 16
       gte.IR = gte.MAC
@@ -444,4 +488,6 @@ proc execute*(gte: var GTE, op: word) =
     gte.IR = gte.MAC
   else:
     warn fmt"Unrecognised GTE op {op.opcode:x}"
+
+  debug fmt"after: {gte}"
 
