@@ -249,6 +249,8 @@ addressSpace.io16 0x1f801daeu32, SPU,
 dma.channels[2].read = gpuReadDMA
 dma.channels[2].write = gpuWriteDMA
 dma.channels[3].read = cdromReadDMA
+# SPU DMA is noisy so ignore it
+dma.channels[4].write = proc (val: word) = discard
 
 type EXE {.packed.} = object
   id: array[8, char]

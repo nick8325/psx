@@ -62,7 +62,7 @@ const
   vramHeight* = 512
 
 var
-  region* {.saved.}: Region = NTSC ## The game's region. Updated by the BIOS.
+  region* {.saved.}: Region = PAL ## The game's region. Updated by the BIOS.
 
 type
   MemoryRegion* {.pure.} = enum
