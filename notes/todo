@@ -10,6 +10,7 @@ curve., add a final point to it.
 Fix edge cases with GTE (ps1-tests tests)
 Reimplement CDROM with proper timing
 Find out why only some BIOSes are able to boot a CD
+Find out why only some BIOSes are able to boot an EXE
 Implement on-disk save states
 Add a debugger
 Fix graphical glitch in memory card browser
