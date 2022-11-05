@@ -328,7 +328,7 @@ proc pushRGB(gte: var GTE) =
 template pushRGBfromMAC(gte: var GTE) =
   ## Transfer a computed colour from MAC to the RGB FIFO.
   gte.pushRGB
-  gte.RGB2 = gte.accMAC / 16
+  gte.RGB2 = gte.accMAC shr 4
   gte.IR = gte.accMAC
 
 proc perspectiveDivisor(gte: var GTE): int64 =
@@ -358,7 +358,6 @@ proc perspectiveDivisor(gte: var GTE): int64 =
     let u = max(0, (0x40000 div (i+0x100) + 1) div 2 - 0x101) + 0x101
     assert 0x101 <= u and u <= 0x200
     d = (0x2000080 - d*u) shr 8
-    assert 0x10000 >= d and d >= 0xff01
     d = (0x80 + d*u) shr 8
     assert 0x20000 >= d and d >= 0x10000
     result = min(0x1ffff, ((n*d) + 0x8000) shr 16)
@@ -383,7 +382,9 @@ proc execute*(gte: var GTE, op: word) =
 
   trace fmt"GTE op {op.opcode:x}"
   trace fmt"before: {gte}"
-  gte[FLAG] = 0
+  gte.registers[FLAG].uint32 = 0
+  gte.accMAC0 = gte.MAC0
+  gte.accMAC = gte.MAC
 
   let shift =
     if op.sf: 12
@@ -392,13 +393,17 @@ proc execute*(gte: var GTE, op: word) =
   template `IR=`(gte: var GTE, ir: Vec3l) =
     gte.setIR op.lm, ir
 
-  template viaMAC0(val: int64, shift: int = 0): int64 =
+  template viaMAC0(val: int64): int64 =
     gte.MAC0 = val
-    gte.accMAC0 shr shift
+    gte.MAC0
 
-  template viaMAC(val: Vec3l, shift: int = 0): Vec3l =
+  template viaMAC(val: Vec3l, shift: int = shift): Vec3l =
+    # Note: default shift value comes from op.sf
+
+    # Overflow checks work on the preshifted value
     gte.MAC = val
-    gte.accMAC shr shift
+    gte.MAC = gte.accMAC shr shift
+    gte.accMAC
 
   template interpolateColours(source: Vec3l, depth: bool) =
     gte.MAC = source
@@ -411,13 +416,13 @@ proc execute*(gte: var GTE, op: word) =
   case op.opcode
   of RTPS.int, RTPT.int:
     template perspectiveTransform(v: Vec3l) =
-      gte.setIR false, viaMAC((gte.TR * 0x1000 + gte.RTM*v) shr shift)
+      gte.setIR false, viaMAC((gte.TR * 0x1000 + gte.RTM*v))
       gte.pushS
       gte.SZ3 = gte.accMAC[2] shr (12 - shift)
       let divisor = gte.perspectiveDivisor
-      gte.SX2 = viaMAC0(divisor*gte.IR1 + gte.OFX, shift=16)
-      gte.SY2 = viaMAC0(divisor*gte.IR2 + gte.OFY, shift=16)
-      gte.IR0 = viaMAC0(divisor*gte.DQA + gte.DQB, shift=12)
+      gte.SX2 = viaMAC0(divisor*gte.IR1 + gte.OFX) shr 16
+      gte.SY2 = viaMAC0(divisor*gte.IR2 + gte.OFY) shr 16
+      gte.IR0 = viaMAC0(divisor*gte.DQA + gte.DQB) shr 12
 
     if op.opcode == RTPT.int:
       perspectiveTransform gte.V0
@@ -447,7 +452,7 @@ proc execute*(gte: var GTE, op: word) =
       of 2: gte.FC
       of 3: Vec3l()
       else: raise newException(AssertionDefect, "unreachable")
-    gte.IR = viaMAC((t * 0x1000 + m * v) shr shift)
+    gte.IR = viaMAC((t * 0x1000 + m * v))
 
   of DCPL.int, DPCS.int, DPCT.int, INTPL.int:
     if op.opcode == DCPL.int:
@@ -461,13 +466,13 @@ proc execute*(gte: var GTE, op: word) =
         interpolateColours(gte.RGB0 shl 16, true)
 
   of SQR.int:
-    gte.IR = viaMAC((gte.IR * gte.IR) shr shift)
+    gte.IR = viaMAC((gte.IR * gte.IR))
 
   of NCS.int, NCT.int, NCCS.int, NCCT.int, NCDS.int, NCDT.int:
     type Mode = enum Plain, Colour, Depth
     template normalColour(v: Vec3l, mode: Mode) =
-      gte.IR = viaMAC((gte.LLM * v) shr shift)
-      gte.IR = viaMAC((gte.BC shl 12 + gte.LCM * gte.IR) shr shift)
+      gte.IR = viaMAC((gte.LLM * v))
+      gte.IR = viaMAC((gte.BC shl 12 + gte.LCM * gte.IR))
       if mode >= Colour:
         interpolateColours((gte.RGB * gte.IR) shl 4, mode == Depth)
       else:
@@ -491,8 +496,8 @@ proc execute*(gte: var GTE, op: word) =
     else: raise newException(AssertionDefect, "unreachable")
 
   of CC.int, CDP.int:
-    gte.IR = viaMAC((gte.BC shl 12 + gte.LCM * gte.IR) shr shift)
-    interpolateColours((gte.RGB * gte.IR) * 16, op.opcode == CDP.int)
+    gte.IR = viaMAC((gte.BC shl 12 + gte.LCM * gte.IR))
+    interpolateColours((gte.RGB * gte.IR) shl 4, op.opcode == CDP.int)
 
   of NCLIP.int:
     gte.MAC0 =
@@ -500,27 +505,27 @@ proc execute*(gte: var GTE, op: word) =
        gte.S0[0]*gte.S2[1] - gte.S1[0]*gte.S0[1] - gte.S2[0]*gte.S1[1])
 
   of AVSZ3.int:
-    gte.OTZ = viaMAC0(gte.ZSF3*(gte.SZ1+gte.SZ2+gte.SZ3), shift=12)
+    gte.OTZ = viaMAC0(gte.ZSF3*(gte.SZ1+gte.SZ2+gte.SZ3)) shr 12
 
   of AVSZ4.int:
-    gte.OTZ = viaMAC0(gte.ZSF4*(gte.SZ0+gte.SZ1+gte.SZ2+gte.SZ3), shift=12)
+    gte.OTZ = viaMAC0(gte.ZSF4*(gte.SZ0+gte.SZ1+gte.SZ2+gte.SZ3)) shr 12
 
   of OP.int:
     gte.IR =
       viaMAC(
       vec3(gte.IR3*gte.RTM[1,1] - gte.IR2*gte.RTM[2,2],
            gte.IR1*gte.RTM[2,2] - gte.IR3*gte.RTM[0,0],
-           gte.IR2*gte.RTM[0,0] - gte.IR1*gte.RTM[1,1]) shr shift)
+           gte.IR2*gte.RTM[0,0] - gte.IR1*gte.RTM[1,1]))
 
   of GPF.int, GPL.int:
     if op.opcode == GPF.int:
       gte.MAC = Vec3l()
     else: # GPL
       gte.MAC = gte.MAC shl shift
-    gte.MAC = (gte.IR * gte.IR0 + gte.accMAC) shr shift
+    gte.MAC = (gte.IR * gte.IR0 + gte.accMAC)
+    gte.MAC = gte.accMAC shr shift
     gte.pushRGBfromMAC
   else:
     warn fmt"Unrecognised GTE op {op.opcode:x}"
 
   trace fmt"after: {gte}"
-
