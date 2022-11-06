@@ -79,7 +79,6 @@ proc interruptPending: bool =
 
 proc checkInterrupts =
   trace fmt"{interrupts} {commandStart} {enabledInterrupts:08x} {smen}"
-  irqs.set(2, false)
   irqs.set(2, interruptPending())
 
 proc dumpCDROM*: string =

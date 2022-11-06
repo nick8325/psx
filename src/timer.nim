@@ -59,7 +59,7 @@ TimerMode.bitfield irqAtMax, bool, 5, 1
 TimerMode.bitfield repeat, bool, 6, 1
 TimerMode.bitfield toggleIRQ, bool, 7, 1
 TimerMode.bitfield clockSourceBits, int, 8, 2
-TimerMode.bitfield irq, bool, 10, 1
+TimerMode.bitfield notIRQ, bool, 10, 1
 TimerMode.bitfield reachedTarget, bool, 11, 1
 TimerMode.bitfield reachedMax, bool, 12, 1
 
@@ -69,7 +69,7 @@ var
 for i, timer in timers.mpairs:
   timer.id = i
   timer.time = -1
-  timer.mode.irq = true
+  timer.mode.notIRQ = true
 timers[1].mode.clockSourceBits = 1
 
 type
@@ -270,11 +270,8 @@ proc nextTime(timerIn: Timer, limit: int64 = nextVBlankDelta() - 1): int64 =
 proc setIRQ(timer: var Timer, irq: bool) =
   ## Set the IRQ field for the given timer.
 
-  timer.mode.irq = irq
+  timer.mode.notIRQ = not irq
   irqs.set(timer.id + 4, irq)
-
-for timer in timers.mitems:
-  timer.setIRQ(true)
 
 proc triggerIRQ(timer: var Timer) =
   ## Trigger an IRQ for the given timer.
@@ -285,10 +282,10 @@ proc triggerIRQ(timer: var Timer) =
   timer.irqTriggeredNow = true
 
   if timer.mode.toggleIRQ:
-    setIRQ(timer, false)
     setIRQ(timer, true)
+    setIRQ(timer, false)
   else:
-    setIRQ(timer, not timer.mode.irq)
+    setIRQ(timer, timer.mode.notIRQ)
 
 proc catchUp(timer: var Timer) =
   ## Update the timer state to what it should be now.
@@ -336,7 +333,7 @@ for timer in timers.mitems:
 proc setMode*(timer: var Timer, mode: word) =
   catchUp(timer)
   word(timer.mode) = mode and 0x1fff
-  timer.mode.irq = true
+  timer.mode.notIRQ = true
   timer.irqTriggered = false
   timer.counter = 0
   debug fmt"Timer {timer.id} mode changed to {timer.mode.word:x}"
@@ -347,7 +344,6 @@ proc mode*(timer: var Timer): word =
   result = timer.mode.word
   timer.mode.reachedTarget = false
   timer.mode.reachedMax = false
-  setIRQ(timer, true)
   schedule(timer)
   debug fmt"Timer {timer.id} mode read as {timer.mode.word:x}"
 
