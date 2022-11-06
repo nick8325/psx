@@ -14,3 +14,4 @@ Find out why only some BIOSes are able to boot an EXE
 Implement on-disk save states
 Add a debugger
 Fix graphical glitch in memory card browser
+Find out why the system is running at half speed (investigate timers etc)
