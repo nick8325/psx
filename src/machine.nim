@@ -26,11 +26,11 @@ addressSpace.mapRegion(ram,          0x00400000u32, true,     false, RAM)
 addressSpace.mapRegion(ram,          0x00600000u32, true,     false, RAM)
 addressSpace.mapRegion(expansion,    0x1f000000u32, true,     true,  Expansion1)
 addressSpace.mapRegion(scratchpad,   0x1f800000u32, true,     false, Scratchpad)
-addressSpace.mapRegion(ioPorts,      0x1f801000u32, true,     true,  GPU) # WRONG!
+addressSpace.mapRegion(ioPorts,      0x1f801000u32, true,     true,  BuiltIn) # will be overridden in individual handlers
 addressSpace.mapRegion(expansion,    0x1f802000u32, true,     true,  Expansion2)
 addressSpace.mapRegion(bios,         0x1fc00000u32, false,    false, BIOS)
 # TODO: allow enabling/disabling scratchpad
-addressSpace.mapRegion(cacheControl, 0xfffe0000u32, true,     false, ScratchPad)
+addressSpace.mapRegion(cacheControl, 0xfffe0000u32, true,     false, BuiltIn)
 
 # Expansion 1/2 base address
 addressSpace.rawWrite[:word](0x1f801000u32, 0x1f000000u32)

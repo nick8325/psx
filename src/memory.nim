@@ -151,11 +151,32 @@ proc mapRegion*(memory: var Memory, arr: var openArray[byte], address: word,
     mapRegion(memory, arr, address + 0x80000000u32, writable, io, region)
     mapRegion(memory, arr, address + 0xa0000000u32, writable, io, region)
 
-proc fetch*(memory: Memory, address: word): word {.inline.} =
+proc latency[T](region: MemoryRegion): int64 =
+  case T.sizeOf
+  of 1: memoryDelay8[region]
+  of 2: memoryDelay16[region]
+  of 4: memoryDelay32[region]
+  else: raise new AssertionDefect
+
+proc latency*[T](memory: Memory, address: word): int64 {.inline.} =
+  ## Computes the latency in clocks of reading the given address.
+  ## Raises a MachineError if the address is invalid.
+
+  let resolved = memory.resolve[:T](address, Load)
+  latency[T](resolved.region)
+
+proc fetch*(memory: Memory, address: word, time: var int64): word {.inline.} =
   ## Fetch a word of memory as an instruction.
   ## Raises a MachineError if the address is invalid.
 
-  memory.resolve[:word](address, Fetch).pointer[]
+  let resolved = memory.resolve[:word](address, Fetch)
+
+  # Delay if we are running from uncached memory
+  # TODO: add a smaller delay if running from cached memory
+  if address >= 0xa0000000u32:
+    time += latency[word](resolved.region)
+
+  resolved.pointer[]
 
 proc rawRead*[T](memory: Memory, address: word): T {.inline.} =
   ## Read data from memory, without invoking any I/O handlers.
@@ -245,38 +266,18 @@ proc handleIO[T](memory: Memory, address: word, kind: IOKind, region: var Memory
     let kindStr = toLowerAscii $kind
     warn fmt"Unknown I/O, address {address:08x}, value {value:08x} ({T.sizeof}-byte {kindStr})"
 
-proc latency*[T](memory: Memory, address: word): int64 {.inline.} =
-  ## Computes the latency in clocks of reading the given address.
-  ## Raises a MachineError if the address is invalid.
-
-  let resolved = memory.resolve[:T](address, Load)
-  var region = resolved.region
-
-  case T.sizeOf
-  of 1: memoryDelay8[region]
-  of 2: memoryDelay16[region]
-  of 4: memoryDelay32[region]
-  else: raise new AssertionDefect
-
 proc read*[T](memory: Memory, address: word, time: var int64): T {.inline.} =
   ## Read data from memory.
   ## Raises a MachineError if the address is invalid.
 
   let resolved = memory.resolve[:T](address, Load)
   var region = resolved.region
+
   if resolved.io: memory.handleIO[:T](address, Read, region)
-
-  let delay =
-    case T.sizeOf
-    of 1: memoryDelay8[region]
-    of 2: memoryDelay16[region]
-    of 4: memoryDelay32[region]
-    else: raise new AssertionDefect
-
-  time += delay
+  time += latency[T](region)
   resolved.pointer[]
 
-proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
+proc write*[T](memory: Memory, address: word, value: T, time: var int64): void {.inline.} =
   ## Write data to memory.
   ## Raises a MachineError if the address is invalid.
 
@@ -284,7 +285,11 @@ proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
   if resolved.writable:
     resolved.pointer[] = value
     var region = resolved.region
-    if resolved.io: memory.handleIO[:T](address, Write, region)
+    if resolved.io:
+      memory.handleIO[:T](address, Write, region)
+      # I/O writes are unbuffered
+      # TODO: handle write buffer overflow
+      time += latency[T](region)
 
 var
   addressSpace*: Memory ## The PSX address space.

@@ -210,17 +210,17 @@ proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word {.inline.} 
 
   return address # memory.nim does memory mirroring
 
-proc fetch*(cpu: CPU): word {.inline.} =
+proc fetch*(cpu: CPU, time: var int64): word {.inline.} =
   ## Fetch the next instruction.
-  addressSpace.fetch(cpu.resolveAddress(cpu.pc, Fetch))
+  addressSpace.fetch(cpu.resolveAddress(cpu.pc, Fetch), time)
 
 proc read*[T](cpu: CPU, address: word, time: var int64): T {.inline.} =
   ## Read from a given virtual address.
   addressSpace.read[:T](cpu.resolveAddress(address, Load), time)
 
-proc write*[T](cpu: CPU, address: word, val: T) {.inline.} =
+proc write*[T](cpu: CPU, address: word, val: T, time: var int64) {.inline.} =
   ## Write to a given virtual address.
-  addressSpace.write[:T](cpu.resolveAddress(address, Store), val)
+  addressSpace.write[:T](cpu.resolveAddress(address, Store), val, time)
 
 # Instruction decoding and execution.
 
@@ -469,11 +469,12 @@ proc format*(instr: word): string =
   of None: $op
 
 proc `$`*(cpu: CPU): string =
+  var dummyTime: int64
   let instruction =
-    try: fmt"{cpu.fetch:x}"
+    try: fmt"{cpu.fetch(dummyTime):x}"
     except MachineError: "(invalid PC)"
   let instructionStr =
-    try: cpu.fetch.format
+    try: cpu.fetch(dummyTime).format
     except MachineError: "(unknown opcode)"
   result = fmt "{instruction} {instructionStr}: PC={cpu.pc:x} "
   for i, x in cpu.registers:
@@ -692,23 +693,23 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, time)
     rt.delayedSet(cpu.delayedGet(rt).replaceRight(value, address and 3))
-  of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt])
-  of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
-  of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
+  of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt], time)
+  of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]), time)
+  of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]), time)
   of SWL:
     var dummyTime: int64 # On an actual MIPS this doesn't do a load
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, dummyTime)
       newValue = value.replaceRight(cpu[rt], 3-(address and 3))
-    cpu.write[:word](address and not 3u32, newValue)
+    cpu.write[:word](address and not 3u32, newValue, dummyTime)
   of SWR:
     var dummyTime: int64 # On an actual MIPS this doesn't do a load
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, dummyTime)
       newValue = value.replaceLeft(cpu[rt], 3-(address and 3))
-    cpu.write[:word](address and not 3u32, newValue)
+    cpu.write[:word](address and not 3u32, newValue, dummyTime)
   of BEQ: branchIf(cpu[rs] == cpu[rt])
   of BNE: branchIf(cpu[rs] != cpu[rt])
   of BGEZ: branchIf(cpu[rs].signed >= 0)
@@ -754,7 +755,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     cpu.gte[rt.int.dataReg] = cpu.read[:word](cpu[rs] + imm.signExt, time)
   of SWC2:
     checkCOPAccessible(2)
-    cpu.write[:word](cpu[rs] + imm.signExt, cpu.gte[rt.int.dataReg])
+    cpu.write[:word](cpu[rs] + imm.signExt, cpu.gte[rt.int.dataReg], time)
 
   cpu.lastPC = cpu.pc
   cpu.pc = cpu.nextPC
@@ -810,8 +811,9 @@ proc handleException(cpu: var CPU, error: MachineError) =
     cpu.cop0.tar = cpu.nextPC
 
   # The COP field is set even on non-COP-related instructions
+  var dummyTime: int64
   let cop =
-    try: cpu.fetch[opcode] and 3
+    try: cpu.fetch(dummyTime)[opcode] and 3
     except MachineError: 0
 
   cpu.cop0.cause =
@@ -838,13 +840,7 @@ proc step*(cpu: var CPU, time: var int64) {.inline.} =
 
     let
       oldCPU = cpu
-      instr = cpu.fetch
-
-    # Delay if we are running from uncached memory
-    # TODO: add a smaller delay when running from cached memory, to
-    # model the effect of cache misses
-    if cpu.pc >= 0x80000000u32 and cpu.pc < 0xa0000000u32:
-      time += addressSpace.latency[:word](cpu.pc)
+      instr = cpu.fetch(time)
 
     # The execute function is in charge of updating pc and nextPC.
     cpu.execute(instr, time)
