@@ -491,7 +491,7 @@ processCommand = consumer(word):
     # Interrupt requested
     effect:
       control.interruptRequested = true
-      irqs.signal 1
+      irqs.set(1, true)
   of 0x20..0x3f:
     # A polygon.
     # The bits of the command word have the following meaning:
@@ -808,6 +808,7 @@ proc gp1*(value: word) =
   of 0x02:
     # Acknowledge interrupt
     control.interruptRequested = false
+    irqs.set(1, false)
   of 0x03:
     # Display enable
     screen.enabled = not (value.testBit 0)
