@@ -220,9 +220,9 @@ proc read*[T](cpu: CPU, address: word, time: var int64): T {.inline.} =
   ## Read from a given virtual address.
   addressSpace.read[:T](cpu.resolveAddress(address, Load), time)
 
-proc write*[T](cpu: CPU, address: word, val: T, time: var int64) {.inline.} =
+proc write*[T](cpu: CPU, address: word, val: T) {.inline.} =
   ## Write to a given virtual address.
-  addressSpace.write[:T](cpu.resolveAddress(address, Store), val, time)
+  addressSpace.write[:T](cpu.resolveAddress(address, Store), val)
 
 # Instruction decoding and execution.
 
@@ -694,23 +694,23 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, time)
     rt.delayedSet(cpu.delayedGet(rt).replaceRight(value, address and 3))
-  of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt], time)
-  of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]), time)
-  of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]), time)
+  of SW: cpu.write[:word](cpu[rs] + imm.signExt, cpu[rt])
+  of SB: cpu.write[:uint8](cpu[rs] + imm.signExt, cast[uint8](cpu[rt]))
+  of SH: cpu.write[:uint16](cpu[rs] + imm.signExt, cast[uint16](cpu[rt]))
   of SWL:
     var dummyTime: int64 # On an actual MIPS this doesn't do a load
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, dummyTime)
       newValue = value.replaceRight(cpu[rt], 3-(address and 3))
-    cpu.write[:word](address and not 3u32, newValue, dummyTime)
+    cpu.write[:word](address and not 3u32, newValue)
   of SWR:
     var dummyTime: int64 # On an actual MIPS this doesn't do a load
     let
       address = cpu[rs] + imm.signExt
       value = cpu.read[:word](address and not 3u32, dummyTime)
       newValue = value.replaceLeft(cpu[rt], 3-(address and 3))
-    cpu.write[:word](address and not 3u32, newValue, dummyTime)
+    cpu.write[:word](address and not 3u32, newValue)
   of BEQ: branchIf(cpu[rs] == cpu[rt])
   of BNE: branchIf(cpu[rs] != cpu[rt])
   of BGEZ: branchIf(cpu[rs].signed >= 0)
@@ -756,7 +756,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     cpu.gte[rt.int.dataReg] = cpu.read[:word](cpu[rs] + imm.signExt, time)
   of SWC2:
     checkCOPAccessible(2)
-    cpu.write[:word](cpu[rs] + imm.signExt, cpu.gte[rt.int.dataReg], time)
+    cpu.write[:word](cpu[rs] + imm.signExt, cpu.gte[rt.int.dataReg])
 
   cpu.lastPC = cpu.pc
   cpu.pc = cpu.nextPC

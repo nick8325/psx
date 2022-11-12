@@ -277,7 +277,7 @@ proc read*[T](memory: Memory, address: word, time: var int64): T {.inline.} =
   time += latency[T](region)
   resolved.pointer[]
 
-proc write*[T](memory: Memory, address: word, value: T, time: var int64): void {.inline.} =
+proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
   ## Write data to memory.
   ## Raises a MachineError if the address is invalid.
 
@@ -287,9 +287,6 @@ proc write*[T](memory: Memory, address: word, value: T, time: var int64): void {
     var region = resolved.region
     if resolved.io:
       memory.handleIO[:T](address, Write, region)
-      # I/O writes are unbuffered
-      # TODO: handle write buffer overflow
-      time += latency[T](region)
 
 var
   addressSpace*: Memory ## The PSX address space.
