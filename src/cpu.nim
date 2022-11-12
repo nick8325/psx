@@ -212,7 +212,9 @@ proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word {.inline.} 
 
 proc fetch*(cpu: CPU, time: var int64): word {.inline.} =
   ## Fetch the next instruction.
-  addressSpace.fetch(cpu.resolveAddress(cpu.pc, Fetch), time)
+  let initialTime = time
+  result = addressSpace.fetch(cpu.resolveAddress(cpu.pc, Fetch), time)
+  time = max(time, initialTime + cpuClock)
 
 proc read*[T](cpu: CPU, address: word, time: var int64): T {.inline.} =
   ## Read from a given virtual address.
@@ -544,7 +546,6 @@ static:
 
 proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
   ## Decode and execute an instruction.
-  time += cpuClock
   var newPC = cpu.nextPC + 4
   var branchDelay = bdNoBranch
 
