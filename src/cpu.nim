@@ -198,7 +198,7 @@ proc jump*(cpu: var CPU, pc: word) {.inline.} =
 proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word {.inline.} =
   ## Resolve a virtual address to a physical address,
   ## also checking access permissions.
-  if address >= 0x80000000u32 and cpu.cop0.sr[ku[0]]:
+  if unlikely(address >= 0x80000000u32 and cpu.cop0.sr[ku[0]]):
     raise MachineError(error: AddressError, address: address, kind: kind)
 
   # If "isolate cache" bit is set, high bits are discarded and
@@ -316,7 +316,8 @@ proc decode(instr: word): Opcode {.inline.} =
   ## Decode an instruction to find its opcode.
 
   template guard(x: untyped) =
-    if not x: raise MachineError(error: ReservedInstruction, instruction: instr)
+    if unlikely(not x):
+      raise MachineError(error: ReservedInstruction, instruction: instr)
 
   proc ret(instr: word, op: static Opcode): Opcode {.inline.} =
     ## Check for fields which must be zero, depending on instruction type
@@ -492,18 +493,18 @@ func cpuDiff(cpu1: CPU, cpu2: CPU): string {.used.} =
     result &= fmt "COP0.SR={cpu1.cop0.sr:x}->{cpu2.cop0.sr:x} "
 
 proc signedAdd(x, y: word): word {.inline.} =
-  if x.signed > 0 and y.signed > high(iword) - x.signed:
+  if unlikely(x.signed > 0 and y.signed > high(iword) - x.signed):
     raise MachineError(error: ArithmeticOverflow)
-  if x.signed < 0 and y.signed < low(iword) - x.signed:
+  if unlikely(x.signed < 0 and y.signed < low(iword) - x.signed):
     raise MachineError(error: ArithmeticOverflow)
   return x + y
 
 proc signedSub(x, y: word): word {.inline.} =
   # x >= 0 ==> (x-y > iword.high <==> y < x-iword.high)
-  if x.signed >= 0 and y.signed < x.signed - iword.high:
+  if unlikely(x.signed >= 0 and y.signed < x.signed - iword.high):
     raise MachineError(error: ArithmeticOverflow)
   # x < 0 ==> (x-y < iword.low <==> y > x-iword.low)
-  if x.signed < 0 and y.signed > x.signed - iword.low:
+  if unlikely(x.signed < 0 and y.signed > x.signed - iword.low):
     raise MachineError(error: ArithmeticOverflow)
   return x - y
 
@@ -592,18 +593,18 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     newDelayedUpdate = (reg: r, val: v)
     # According to the AmiDog tests, if you load to the same register
     # twice in consecutive instructions, the first load never takes effect
-    if cpu.delayedUpdate.reg == r:
+    if unlikely(cpu.delayedUpdate.reg == r):
       cpu.delayedUpdate = (reg: r0, val: 0u32)
 
   template set(r: Register, v: word) =
     update = (reg: r, val: v)
 
   template checkCOPAccessible(i: 0..3) =
-    if not cpu.cop0.sr[cu.bit i]:
+    if unlikely(not cpu.cop0.sr[cu.bit i]):
       raise MachineError(error: CoprocessorUnusable)
 
   template checkKernelMode() =
-    if cpu.cop0.sr[ku[0]]:
+    if unlikely(cpu.cop0.sr[ku[0]]):
       checkCOPAccessible(0)
 
   case op
@@ -619,10 +620,10 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
       y = cpu[rt].signed
 
     # Info from Nocash PSX
-    if y == 0:
+    if unlikely(y == 0):
       cpu.lo = (if x >= 0: -1 else: 1).unsigned
       cpu.hi = x.unsigned
-    elif x == int32.low and y == -1:
+    elif unlikely(x == int32.low and y == -1):
       cpu.lo = int32.low.unsigned
       cpu.hi = 0
     else:
@@ -634,7 +635,7 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
       x = cpu[rs]
       y = cpu[rt]
 
-    if y == 0:
+    if unlikely(y == 0):
       cpu.lo = word.high
       cpu.hi = x
     else:
@@ -835,7 +836,7 @@ proc handleException(cpu: var CPU, error: MachineError) =
 proc step*(cpu: var CPU, time: var int64) {.inline.} =
   try:
     # Check for IRQs first.
-    if cpu.cop0.sr[ie0] and (cpu.cop0.sr[im] and cpu.cop0.cause[ip]) != 0:
+    if unlikely(cpu.cop0.sr[ie0] and (cpu.cop0.sr[im] and cpu.cop0.cause[ip]) != 0):
       raise MachineError(error: Interrupt)
 
     let

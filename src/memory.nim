@@ -115,7 +115,7 @@ proc resolve[T](memory: Memory, address: word, kind: AccessKind): ResolvedAddres
   ## Resolve a virtual address to a pointer.
   ## Raises a MachineError if the address is invalid.
 
-  if address mod cast[word](sizeof(T)) != 0:
+  if unlikely(address mod cast[word](sizeof(T)) != 0):
     raise MachineError(error: AddressError, address: address, kind: kind)
 
   let
@@ -123,7 +123,7 @@ proc resolve[T](memory: Memory, address: word, kind: AccessKind): ResolvedAddres
     offset = address and 0xfff
     entry = memory.table[page]
 
-  if entry.pointer.isNil:
+  if unlikely(entry.pointer.isNil):
     raise MachineError(error: BusError, address: address, kind: kind)
 
   {.push warning[CastSizes]: off.}
@@ -190,7 +190,7 @@ proc rawWrite*[T](memory: Memory, address: word, value: T): void {.inline.} =
   ## Raises a MachineError if the address is invalid.
 
   let resolved = memory.resolve[:T](address, Store)
-  if resolved.writable:
+  if likely(resolved.writable):
     resolved.pointer[] = value
 
 proc forcedRawWrite*[T](memory: Memory, address: word, value: T): void {.inline.} =
@@ -273,7 +273,7 @@ proc read*[T](memory: Memory, address: word, time: var int64): T {.inline.} =
   let resolved = memory.resolve[:T](address, Load)
   var region = resolved.region
 
-  if resolved.io: memory.handleIO[:T](address, Read, region)
+  if unlikely(resolved.io): memory.handleIO[:T](address, Read, region)
   time += latency[T](region)
   resolved.pointer[]
 
@@ -282,10 +282,10 @@ proc write*[T](memory: Memory, address: word, value: T): void {.inline.} =
   ## Raises a MachineError if the address is invalid.
 
   let resolved = memory.resolve[:T](address, Store)
-  if resolved.writable:
+  if likely(resolved.writable):
     resolved.pointer[] = value
     var region = resolved.region
-    if resolved.io:
+    if unlikely(resolved.io):
       memory.handleIO[:T](address, Write, region)
 
 var

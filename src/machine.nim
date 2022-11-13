@@ -288,11 +288,11 @@ proc runSystem*(clocks: int64) =
   ## Run the system.
 
   let stop = events.now + clocks
-  while events.now < stop:
+  while likely(events.now < stop):
     let now = events.now
     var time = now
 
-    if cpu.cpu.pc == 0xbfc06ff0u32 or cpu.cpu.pc == 0x1fc06ff0u32:
+    if unlikely(cpu.cpu.pc == 0xbfc06ff0u32 or cpu.cpu.pc == 0x1fc06ff0u32):
       info "Kernel done"
       if header.id == wantedID:
         info "Switching to loaded EXE"
