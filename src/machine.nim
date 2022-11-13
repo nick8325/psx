@@ -73,7 +73,9 @@ proc delay(region: RegionDelay, common: CommonDelay, size: int): int =
 
     accesses = divRoundUp(size, if region.sixteenBits: 2 else: 1)
 
-  cpuClock * (first + (accesses-1) * seq)
+  result = cpuClock * (first + (accesses-1) * seq)
+  # One clock cycle of delay is hidden by the CPU
+  result = max(0, result - cpuClock)
 
 var
   regionDelays {.saved.}: array[6, RegionDelay]
