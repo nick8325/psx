@@ -1,7 +1,7 @@
 import sdl2, sdl2/gfx
-import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom
+import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom, timer, cpu
 import std/os
-import std/[strformat, monotimes, times, options]
+import std/[strformat, monotimes, times, options, heapqueue, tables, algorithm]
 
 discard sdl2.init(INIT_EVERYTHING)
 
@@ -76,6 +76,26 @@ var state: State = save()
 
 var lastFrameTime = getMonoTime()
 
+events.every(proc: int64 = clockRate, "histogram") do():
+  var heap: HeapQueue[tuple[count: int, pc: word]]
+  var total: int = 0
+  for pc, count in histogram.pairs:
+    total += count
+    heap.push((count: count, pc: pc))
+    if heap.len > 20:
+      discard heap.pop()
+  histogram.clear()
+  var sorted: seq[tuple[count: int, pc: word]]
+  while heap.len > 0:
+    sorted.add heap.pop()
+  sorted.reverse()
+
+#  echo "Histogram:"
+#  for pair in sorted:
+#    let freq = float(pair.count) / float(total)
+#    echo fmt"  {pair.pc:8x}: {freq*100:.2f}% ({pair.count} times)"
+#  echo ""
+
 while runGame:
   while pollEvent(evt):
     if evt.kind == QuitEvent:
@@ -104,6 +124,9 @@ while runGame:
 
       of K_W:
         fastForward = not fastForward
+
+      of K_T:
+        timerDebug = not timerDebug
 
       else:
         echo "unknown key"

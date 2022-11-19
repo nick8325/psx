@@ -368,3 +368,10 @@ proc target*(timer: var Timer): word =
   catchUp(timer)
   debug fmt"Timer {timer.id} target read as {timer.target:x}"
   timer.target.word
+
+var timerDebug* = false
+onVSync("timer status") do():
+  if timerDebug:
+    for i in TimerId.low..TimerId.high:
+      let timer = timers[i]
+      info fmt"Timer {timer.id}: mode {timer.mode.word:x} target {timer.target:x} counter {timer.counter:x}"

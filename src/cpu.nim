@@ -832,8 +832,12 @@ proc handleException(cpu: var CPU, error: MachineError) =
   cpu.jump(if cpu.cop0.sr[bev]: 0xbfc00180u32 else: 0x80000080u32)
   trace fmt"{cpu}"
 
+var
+  histogram*: CountTable[word]
+
 # TODO: this violates aliasing rules - irq.nim modifies the global CPU.
 proc step*(cpu: var CPU, time: var int64) {.inline.} =
+#  histogram.inc(cpu.pc) # too slow to enable by default
   try:
     # Check for IRQs first.
     if unlikely(cpu.cop0.sr[ie0] and (cpu.cop0.sr[im] and cpu.cop0.cause[ip]) != 0):
