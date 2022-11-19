@@ -39,8 +39,8 @@ proc signal*(irqs: var IRQs, irq: range[0..10]) =
   ## Activate an input IRQ pin for an instant.
 
   debug fmt"Signal IRQ {irq}, {cpu.cpu}"
-  irqs.stat.setBit int(irq)
-  irqs.setCPUIRQ()
+  irqs.set(irq, true)
+  irqs.set(irq, false)
 
 proc status*(irqs: IRQs): word =
   trace fmt"IRQ status {irqs.stat:x}"
