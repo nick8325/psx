@@ -147,7 +147,7 @@ proc send(card: var MemoryCard, val: byte): tuple[done: bool, reply: seq[uint8]]
     card.state = Initial
     result = (done: true, reply: @[0x47])
 
-  info fmt"MC: in={val:2x} out={result.reply[0]:2x} done={result.done} state={oldState}->{card.state}"
+  debug fmt"MC: in={val:2x} out={result.reply[0]:2x} done={result.done} state={oldState}->{card.state}"
 
 pads[0][0x01] = (val: byte) => controller.send(val)
 pads[0][0x81] = (val: byte) => memoryCard.send(val)

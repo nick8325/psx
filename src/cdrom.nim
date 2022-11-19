@@ -4,7 +4,7 @@ import utils, irq, eventqueue, basics, savestates
 import std/[bitops, strformat, deques, options, tables]
 
 const loggerComponent = logCDROM
-logCDROM.level = lvlDebug
+#logCDROM.level = lvlDebug
 
 const
   sectorSize = 2352
