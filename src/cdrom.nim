@@ -195,7 +195,7 @@ proc command*(value: uint8) =
   of 0x15:
     debug "SeekL"
     respond 3, [stat()]
-    events.after(40000000*cpuClock, "CDROM delay") do(): respond 2, [stat()]
+    events.after(4000000*cpuClock, "CDROM delay") do(): respond 2, [stat()]
   of 0x19:
     debug "Test"
     var param: uint8
@@ -209,7 +209,7 @@ proc command*(value: uint8) =
   of 0x1a:
     debug "GetID"
     respond 3, [stat()]
-    events.after(4000000*cpuClock, "CDROM delay") do(): respond 2, [stat(), 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x45] # SCEE
+    events.after(400000*cpuClock, "CDROM delay") do(): respond 2, [stat(), 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x45] # SCEE
   of 0x13:
     debug "GetTN"
     respond 3, [stat(), 1, 1]
@@ -232,7 +232,7 @@ proc command*(value: uint8) =
     if not parameters.readFIFO(mode): return
     debug fmt"Mode is {mode:x}"
     if mode notin {0x80, 0}: warn "Unknown mode"
-    events.after(4000000*cpuClock, "CDROM delay") do(): respond 3, [stat()]
+    events.after(400000*cpuClock, "CDROM delay") do(): respond 3, [stat()]
   of 0x6:
     debug "ReadN"
     respond 3, [stat()]
@@ -241,7 +241,7 @@ proc command*(value: uint8) =
   of 0x1e:
     debug "ReadTOC"
     respond 3, [stat()]
-    events.after(40000000*cpuClock, "CDROM delay") do():
+    events.after(4000000*cpuClock, "CDROM delay") do():
       respond 2, [stat()]
   of 0x9:
     debug "Pause"
@@ -317,7 +317,7 @@ proc writeRegister*(address: 1..3, value: uint8) =
       if smen: commandStart = true
       busy = true
       checkInterrupts()
-      events.after(0x10000 * cpuClock, "CDROM delay") do ():
+      events.after(0x1000 * cpuClock, "CDROM delay") do ():
         command(value)
     of 2:
       # Parameter FIFO
