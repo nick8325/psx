@@ -1,5 +1,7 @@
+OPTS?=
+
 all:
-	nim c -d:release src/main
+	nim c -d:release ${OPTS} src/main
 
 run: all
 	src/main
