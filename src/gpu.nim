@@ -367,10 +367,9 @@ proc displayArea*: Rect =
   result.x2 = result.x1 + screenWidth() - 1
   result.y2 = result.y1 + screenHeight() - 1
 
-proc visibleLines*: Option[bool] =
+proc renderedLines*: Option[bool] =
   if screen.verticalRes == ResDouble and
-    screen.verticalInterlace and
-    not drawing.drawToDisplayArea:
+    screen.verticalInterlace:
     result = some(screen.frameNumber.testBit(0))
 
 proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: bool): rasteriser.Settings =

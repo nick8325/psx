@@ -142,7 +142,7 @@ while runGame:
   let resized = resizeDisplay()
   let lines =
     if resized: none(bool)
-    else: visibleLines()
+    else: renderedLines()
   let area = displayArea()
 
   for i in 0..<height:
