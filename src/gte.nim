@@ -415,6 +415,25 @@ proc execute*(gte: var GTE, op: word) =
     gte.MAC = gte.accMAC shr shift
     gte.accMAC
 
+  template matMul(mat: Mat3x3l, vec: Vec3l, shift: int = shift): Vec3l =
+    # Matrix-vector multiplication, via MAC
+
+    let col0 = mat[0] * vec[0]
+    let col1 = mat[1] * vec[1]
+    let col2 = mat[2] * vec[2]
+    gte.MAC = col0 + col1
+    viaMAC(gte.accMAC + col2, shift)
+
+  template matMulPlus(mat: Mat3x3l, vec: Vec3l, plus: Vec3l, shift: int = shift): Vec3l =
+    # Matrix-vector multiply-accumulate, via MAC
+
+    let col0 = mat[0] * vec[0] + plus
+    let col1 = mat[1] * vec[1]
+    let col2 = mat[2] * vec[2]
+    gte.MAC = col0
+    gte.MAC = gte.accMAC + col1
+    viaMAC(gte.accMAC + col2, shift)
+
   template interpolateColours(source: Vec3l, depth: bool) =
     gte.MAC = source
     if depth:
@@ -426,7 +445,7 @@ proc execute*(gte: var GTE, op: word) =
   case op.opcode
   of RTPS.int, RTPT.int:
     template perspectiveTransform(v: Vec3l) =
-      gte.setIR false, viaMAC((gte.TR * 0x1000 + gte.RTM*v))
+      gte.setIR false, matMulPlus(gte.RTM, v, gte.TR shl 12)
       gte.pushS
       gte.SZ3 = gte.accMAC[2] shr (12 - shift)
       let divisor = gte.perspectiveDivisor
@@ -462,7 +481,7 @@ proc execute*(gte: var GTE, op: word) =
       of 2: gte.FC
       of 3: Vec3l()
       else: raise newException(AssertionDefect, "unreachable")
-    gte.IR = viaMAC((t * 0x1000 + m * v))
+    gte.IR = matMulPlus(m, v, t shl 12)
 
   of DCPL.int, DPCS.int, DPCT.int, INTPL.int:
     if op.opcode == DCPL.int:
@@ -481,8 +500,8 @@ proc execute*(gte: var GTE, op: word) =
   of NCS.int, NCT.int, NCCS.int, NCCT.int, NCDS.int, NCDT.int:
     type Mode = enum Plain, Colour, Depth
     template normalColour(v: Vec3l, mode: Mode) =
-      gte.IR = viaMAC((gte.LLM * v))
-      gte.IR = viaMAC((gte.BC shl 12 + gte.LCM * gte.IR))
+      gte.IR = matMul(gte.LLM, v)
+      gte.IR = matMulPlus(gte.LCM, gte.IR, gte.BC shl 12)
       if mode >= Colour:
         interpolateColours((gte.RGB * gte.IR) shl 4, mode == Depth)
       else:
@@ -506,7 +525,7 @@ proc execute*(gte: var GTE, op: word) =
     else: raise newException(AssertionDefect, "unreachable")
 
   of CC.int, CDP.int:
-    gte.IR = viaMAC((gte.BC shl 12 + gte.LCM * gte.IR))
+    gte.IR = matMulPlus(gte.LCM, gte.IR, gte.BC shl 12)
     interpolateColours((gte.RGB * gte.IR) shl 4, op.opcode == CDP.int)
 
   of NCLIP.int:
