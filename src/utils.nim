@@ -105,28 +105,24 @@ type
     pos*: int
     width*: int
 
-func signExtendFrom*[T](x: T, bits: int): T {.inline.} =
-  let
-    mask = (-1.T) shl (bits-1)
-  if x.testBit (bits-1):
-    x or mask
-  else:
-    x and not mask
+proc extendFrom*[T](x: T, bits: int): T {.inline.} =
+  let amount = T.sizeof * 8 - bits
+  (x shl amount) shr amount
 
 static:
-  assert signExtendFrom(0x8f, 8) == -113
-  assert signExtendFrom(0x7f, 8) == 127
-  assert signExtendFrom(2047, 11) == -1
-  assert signExtendFrom(0x18f, 8) == -113
-  assert signExtendFrom(0x8000i32, 16) == -0x8000
-  assert signExtendFrom(0x7ffffi32, 16) == -1
-  assert signExtendFrom(0x7fffffffi32, 16) == -1
+  assert extendFrom(0x8f, 8) == -113
+  assert extendFrom(0x7f, 8) == 127
+  assert extendFrom(2047, 11) == -1
+  assert extendFrom(0x18f, 8) == -113
+  assert extendFrom(0x8000i32, 16) == -0x8000
+  assert extendFrom(0x7ffffi32, 16) == -1
+  assert extendFrom(0x7fffffffi32, 16) == -1
 
 func unsign[T, U](slice: SignedBitSlice[T, U]): BitSlice[T, U] {.inline.} =
   BitSlice[T, U](pos: slice.pos, width: slice.width)
 
 func `[]`*[T, U](value: U, slice: SignedBitSlice[T, U]): T {.inline.} =
-  value[slice.unsign].signExtendFrom(slice.width)
+  value[slice.unsign].extendFrom(slice.width)
 
 func toSlice*[T, U](slice: SignedBitSlice[T, U]): Slice[int] {.inline.} =
   slice.unsign.toSlice
@@ -199,6 +195,9 @@ template bitfield*(U: typedesc, name: untyped, T: typedesc, thePos: int, theWidt
 
 func clampedConvert*[T](x: int): T {.inline.} =
   x.clamp(T.low.int, T.high.int).T
+
+func clampedConvert*[T](x: int64): T {.inline.} =
+  x.clamp(T.low.int64, T.high.int64).T
 
 type
   Consumer*[T] = object

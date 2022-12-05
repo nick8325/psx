@@ -63,6 +63,10 @@ func gteDiff(gte1, gte2: GTE): string {.used.} =
     if gte1.accMAC[i] != gte2.accMAC[i]:
         result &= fmt "accMAC{i}={gte1.accMAC[i]:x}->{gte2.accMAC[i]:x} "
 
+func signExtendFrom(vec: Vec3l, bit: int): Vec3l =
+  for i in 0..2:
+    result[i] = vec[i].extendFrom(bit)
+
 ######################################################################
 # High-level access to the state.
 
@@ -151,8 +155,7 @@ proc RGB(gte: GTE): Vec3l = gte.RGBC.rgb
 proc `OTZ=`(gte: var GTE, otz: int64) =
   gte.registers[OTZ].uint16 = gte.clamp(otz, 0u16, 0xffff, 18)
 
-proc IR0(gte: GTE): int64 =
-  gte.registers[IR0].int16.int64
+proc IR0(gte: GTE): int64 = gte.registers[IR0].int16.int64
 proc `IR0=`(gte: var GTE, ir: int64) =
   gte.registers[IR0].int16 = gte.clamp(ir, 0i16, 0x1000, 12)
 
@@ -161,11 +164,17 @@ proc IR2(gte: GTE): int64 = gte.registers[IR2].int16.int64
 proc IR3(gte: GTE): int64 = gte.registers[IR3].int16.int64
 
 proc IR(gte: GTE): Vec3l = vec3(gte.IR1, gte.IR2, gte.IR3)
-proc setIR(gte: var GTE, lm: bool, ir: Vec3l) =
+proc setIR(gte: var GTE, lm: bool, ir: Vec3l, rtpsBug: bool = false) =
   let lo: int16 = if lm: 0 else: -0x8000
   gte.registers[IR1].int16 = gte.clamp(ir[0], lo, 0x7fff, 24)
   gte.registers[IR2].int16 = gte.clamp(ir[1], lo, 0x7fff, 23)
-  gte.registers[IR3].int16 = gte.clamp(ir[2], lo, 0x7fff, 22)
+  if rtpsBug:
+    # Handle the bug with IR3 saturation in RTPS/RTPT
+    # (see Nocash "When using RTP with sf=0...")
+    gte.registers[IR3].int16 = clamp(ir[2], lo, 0x7fff).int16
+    discard gte.clamp(ir[2] shr 12, -0x8000, 0x7fff, 22)
+  else:
+    gte.registers[IR3].int16 = gte.clamp(ir[2], lo, 0x7fff, 22)
 
 proc S0(gte: GTE): Vec3l = gte.vec3u(SXY0, SZ0)
 proc S1(gte: GTE): Vec3l = gte.vec3u(SXY1, SZ1)
@@ -208,9 +217,7 @@ proc `MAC0=`(gte: var GTE, val: int64) =
 
 proc MAC(gte: GTE): Vec3l = gte.vec3(MAC1, MAC2, MAC3)
 proc `MAC=`(gte: var GTE, mac: Vec3l) =
-  gte.accMAC = mac
-  for i in 0..2:
-    gte.accMAC[i] = gte.accMAC[i].signExtendFrom(44)
+  gte.accMAC = mac.signExtendFrom(44)
   gte.registers[MAC1].uint32 = cast[uint32](mac[0])
   gte.registers[MAC2].uint32 = cast[uint32](mac[1])
   gte.registers[MAC3].uint32 = cast[uint32](mac[2])
@@ -268,7 +275,7 @@ func `[]`*(gte: GTE, reg: Register): uint32 =
   case reg
   of VZ0, VZ1, VZ2, IR0, IR1, IR2, IR3, RT5, LL5, LC5, H, DQA, ZSF3, ZSF4:
     # 16-bit sign-extended
-    result = signExtendFrom(result.signed, 16).unsigned
+    result = extendFrom(result.signed, 16).unsigned
   of OTZ, SZ0, SZ1, SZ2, SZ3:
     # 16-bit zero-extended
     result = result and 0xffff
@@ -413,7 +420,7 @@ proc execute*(gte: var GTE, op: word) =
     # Overflow checks work on the preshifted value
     gte.MAC = val
     gte.MAC = gte.accMAC shr shift
-    gte.accMAC
+    gte.MAC
 
   template matMul(mat: Mat3x3l, vec: Vec3l, shift: int = shift): Vec3l =
     # Matrix-vector multiplication, via MAC
@@ -436,29 +443,34 @@ proc execute*(gte: var GTE, op: word) =
 
   template interpolateColours(source: Vec3l, depth: bool) =
     gte.MAC = source
+    let origMAC = gte.accMAC
+
     if depth:
-      gte.setIR false, (gte.FC shl 12 - gte.MAC) shr shift
-      gte.MAC = (gte.IR * gte.IR0 + gte.accMAC)
-    gte.MAC = gte.accMAC shr shift
+      gte.setIR false, viaMAC(gte.FC shl 12 - origMAC)
+      gte.IR = viaMAC(gte.IR * gte.IR0 + origMAC)
+    else:
+      gte.MAC = gte.accMAC shr shift
     gte.pushRGBfromMAC
 
   case op.opcode
   of RTPS.int, RTPT.int:
-    template perspectiveTransform(v: Vec3l) =
-      gte.setIR false, matMulPlus(gte.RTM, v, gte.TR shl 12)
+    template perspectiveTransform(v: Vec3l, last: bool) =
+      gte.setIR op.lm, matMulPlus(gte.RTM, v, gte.TR shl 12),
+        rtpsBug = not op.sf
+
       gte.pushS
       gte.SZ3 = gte.accMAC[2] shr (12 - shift)
       let divisor = gte.perspectiveDivisor
       gte.SX2 = viaMAC0(divisor*gte.IR1 + gte.OFX) shr 16
       gte.SY2 = viaMAC0(divisor*gte.IR2 + gte.OFY) shr 16
-      gte.IR0 = viaMAC0(divisor*gte.DQA + gte.DQB) shr 12
+      if last: gte.IR0 = viaMAC0(divisor*gte.DQA + gte.DQB) shr 12
 
     if op.opcode == RTPT.int:
-      perspectiveTransform gte.V0
-      perspectiveTransform gte.V1
-      perspectiveTransform gte.V2
+      perspectiveTransform gte.V0, false
+      perspectiveTransform gte.V1, false
+      perspectiveTransform gte.V2, true
     else:
-      perspectiveTransform gte.V0
+      perspectiveTransform gte.V0, true
 
   of MVMVA.int:
     let m =
@@ -466,7 +478,16 @@ proc execute*(gte: var GTE, op: word) =
       of 0: gte.RTM
       of 1: gte.LLM
       of 2: gte.LCM
-      else: Mat3x3l() # use whatever
+      else:
+        # m=3 is not allowed, but using it produces the following
+        # "garbage matrix" as Nocash calls it
+        block:
+          let funny = gte.RGBC.red.int64 shl 4 # From Duckstation
+          mat3x3[int64](
+            vec3[int64](-funny,  gte.RTM[2,0], gte.RTM[1,1]),
+            vec3[int64](funny,   gte.RTM[2,0], gte.RTM[1,1]),
+            vec3[int64](gte.IR0, gte.RTM[2,0], gte.RTM[1,1])
+          )
     let v =
       case op.multiplyVector
       of 0: gte.V0
@@ -481,7 +502,12 @@ proc execute*(gte: var GTE, op: word) =
       of 2: gte.FC
       of 3: Vec3l()
       else: raise newException(AssertionDefect, "unreachable")
-    gte.IR = matMulPlus(m, v, t shl 12)
+    if op.translationVector == 2:
+      # Buggy matrix multiplcation - from Duckstation
+      gte.setIR false, viaMAC(t shl 12 + m[0] * v[0])
+      gte.IR = viaMAC(m[1] * v[1] + m[2] * v[2])
+    else:
+      gte.IR = matMulPlus(m, v, t shl 12)
 
   of DCPL.int, DPCS.int, DPCT.int, INTPL.int:
     if op.opcode == DCPL.int:
