@@ -42,6 +42,8 @@ type
     registers: array[Register, RegisterVal]
     ## Higher-accuracy versions of MAC1-MAC3.
     accMAC: Vec3l
+    ## Values of sf and lm for the current instruction.
+    sf, lm: bool
 
 static:
   assert Register.high.int == 63
@@ -53,6 +55,7 @@ proc `$`*(gte: GTE): string =
       result &= fmt"{reg.int}/{reg}: {gte.registers[reg].uint32:x} "
   for i in 0..2:
     result &= fmt" accMAC{i}={gte.accMAC[i]:x}"
+  result &= fmt" sf={gte.sf} lm={gte.lm}"
 
 func gteDiff(gte1, gte2: GTE): string {.used.} =
   ## Show the difference between two GTE states.
@@ -62,8 +65,13 @@ func gteDiff(gte1, gte2: GTE): string {.used.} =
   for i in 0..2:
     if gte1.accMAC[i] != gte2.accMAC[i]:
         result &= fmt "accMAC{i}={gte1.accMAC[i]:x}->{gte2.accMAC[i]:x} "
+  if gte1.sf != gte2.sf:
+    result &= fmt "sf={gte1.sf}->{gte2.sf} "
+  if gte1.lm != gte2.lm:
+    result &= fmt "lm={gte1.lm}->{gte2.lm} "
 
 func signExtendFrom(vec: Vec3l, bit: int): Vec3l =
+  ## Sign-extend a vector of shorter integers to 64-bit integers.
   for i in 0..2:
     result[i] = vec[i].extendFrom(bit)
 
@@ -148,8 +156,7 @@ proc V0(gte: GTE): Vec3l = gte.vec3s(VXY0, VZ0)
 proc V1(gte: GTE): Vec3l = gte.vec3s(VXY1, VZ1)
 proc V2(gte: GTE): Vec3l = gte.vec3s(VXY2, VZ2)
 
-proc RGBC(gte: GTE): PackedRGBC =
-  gte.registers[RGBC].rgbc
+proc RGBC(gte: GTE): PackedRGBC = gte.registers[RGBC].rgbc
 proc RGB(gte: GTE): Vec3l = gte.RGBC.rgb
 
 proc `OTZ=`(gte: var GTE, otz: int64) =
@@ -164,7 +171,7 @@ proc IR2(gte: GTE): int64 = gte.registers[IR2].int16.int64
 proc IR3(gte: GTE): int64 = gte.registers[IR3].int16.int64
 
 proc IR(gte: GTE): Vec3l = vec3(gte.IR1, gte.IR2, gte.IR3)
-proc setIR(gte: var GTE, lm: bool, ir: Vec3l, rtpsBug: bool = false) =
+proc setIR(gte: var GTE, ir: Vec3l, lm: bool = gte.lm, rtpsBug: bool = false) =
   let lo: int16 = if lm: 0 else: -0x8000
   gte.registers[IR1].int16 = gte.clamp(ir[0], lo, 0x7fff, 24)
   gte.registers[IR2].int16 = gte.clamp(ir[1], lo, 0x7fff, 23)
@@ -175,6 +182,7 @@ proc setIR(gte: var GTE, lm: bool, ir: Vec3l, rtpsBug: bool = false) =
     discard gte.clamp(ir[2] shr 12, -0x8000, 0x7fff, 22)
   else:
     gte.registers[IR3].int16 = gte.clamp(ir[2], lo, 0x7fff, 22)
+proc `IR=`(gte: var GTE, ir: Vec3l) = gte.setIR ir
 
 proc S0(gte: GTE): Vec3l = gte.vec3u(SXY0, SZ0)
 proc S1(gte: GTE): Vec3l = gte.vec3u(SXY1, SZ1)
@@ -330,6 +338,40 @@ proc `shr`(v: Vec3l, amount: int): Vec3l =
   for i in 0..2:
     result[i] = v[i] shr amount
 
+proc viaMAC0(gte: var GTE, val: int64): int64 =
+  ## Compute a value, also storing it in MAC0.
+  gte.MAC0 = val
+  val
+
+func shift(gte: GTE): int =
+  ## How much should most shift operations shift by?
+  if gte.sf: 12 else: 0
+
+proc viaMAC(gte: var GTE, val: Vec3l): Vec3l =
+  ## Compute a value, also storing it in MAC.
+  ## The value is shifted if gte.sf is set.
+
+  # Overflow checks work on the preshifted value
+  gte.MAC = val
+  gte.MAC = gte.accMAC shr gte.shift
+  gte.MAC
+
+proc matMulPlus(gte: var GTE, mat: Mat3x3l, vec: Vec3l, plus: Vec3l): Vec3l =
+  ## Matrix-vector multiply-accumulate, via MAC.
+  ## Similar to gte.viaMAC(mat*vec + plus), but handles overflows
+  ## in a way faithful to the PSX hardware.
+  let col0 = mat[0] * vec[0] + plus
+  let col1 = mat[1] * vec[1]
+  let col2 = mat[2] * vec[2]
+  # col0+col1+col2, but with more possibilities for overflow
+  gte.MAC = col0
+  gte.MAC = gte.accMAC + col1
+  gte.viaMAC(gte.accMAC + col2)
+
+proc matMul(gte: var GTE, mat: Mat3x3l, vec: Vec3l): Vec3l =
+  ## Matrix-vector multiplication, via MAC.
+  gte.matMulPlus(mat, vec, Vec3l())
+
 proc pushS(gte: var GTE) =
   ## Make room for a new entry in the S FIFO.
   gte.registers[SXY0] = gte.registers[SXY1]
@@ -343,11 +385,21 @@ proc pushRGB(gte: var GTE) =
   gte.registers[RGB0] = gte.registers[RGB1]
   gte.registers[RGB1] = gte.registers[RGB2]
 
-template pushRGBfromMAC(gte: var GTE) =
+proc pushRGBfromMAC(gte: var GTE) =
   ## Transfer a computed colour from MAC to the RGB FIFO.
   gte.pushRGB
   gte.RGB2 = gte.MAC shr 4
   gte.IR = gte.MAC
+
+proc interpolateColours(gte: var GTE, source: Vec3l, depth: bool) =
+  ## Colour interpolation, used by several different instructions.
+  if depth:
+    gte.setIR gte.viaMAC(gte.FC shl 12 - source), lm=false
+    gte.IR = gte.viaMAC(gte.IR * gte.IR0 + source)
+  else:
+    gte.MAC = source shr gte.shift
+
+  gte.pushRGBfromMAC
 
 proc perspectiveDivisor(gte: var GTE): int64 =
   ## Compute an approximation of ((H*0x20000/SZ3)+1)/2.
@@ -398,72 +450,26 @@ proc execute*(gte: var GTE, op: word) =
   word.bitfield multiplyVector, int, 15, 2
   word.bitfield translationVector, int, 13, 2
 
-  trace fmt"GTE op {op.opcode:x}"
-  trace fmt"before: {gte}"
+  trace fmt"GTE op {op.opcode:x}, {gte}"
   gte.registers[FLAG].uint32 = 0
   gte.accMAC = gte.MAC
-
-  let shift =
-    if op.sf: 12
-    else: 0
-
-  template `IR=`(gte: var GTE, ir: Vec3l) =
-    gte.setIR op.lm, ir
-
-  template viaMAC0(val: int64): int64 =
-    gte.MAC0 = val
-    val
-
-  template viaMAC(val: Vec3l, shift: int = shift): Vec3l =
-    # Note: default shift value comes from op.sf
-
-    # Overflow checks work on the preshifted value
-    gte.MAC = val
-    gte.MAC = gte.accMAC shr shift
-    gte.MAC
-
-  template matMul(mat: Mat3x3l, vec: Vec3l, shift: int = shift): Vec3l =
-    # Matrix-vector multiplication, via MAC
-
-    let col0 = mat[0] * vec[0]
-    let col1 = mat[1] * vec[1]
-    let col2 = mat[2] * vec[2]
-    gte.MAC = col0 + col1
-    viaMAC(gte.accMAC + col2, shift)
-
-  template matMulPlus(mat: Mat3x3l, vec: Vec3l, plus: Vec3l, shift: int = shift): Vec3l =
-    # Matrix-vector multiply-accumulate, via MAC
-
-    let col0 = mat[0] * vec[0] + plus
-    let col1 = mat[1] * vec[1]
-    let col2 = mat[2] * vec[2]
-    gte.MAC = col0
-    gte.MAC = gte.accMAC + col1
-    viaMAC(gte.accMAC + col2, shift)
-
-  template interpolateColours(source: Vec3l, depth: bool) =
-    gte.MAC = source
-    let origMAC = gte.accMAC
-
-    if depth:
-      gte.setIR false, viaMAC(gte.FC shl 12 - origMAC)
-      gte.IR = viaMAC(gte.IR * gte.IR0 + origMAC)
-    else:
-      gte.MAC = gte.accMAC shr shift
-    gte.pushRGBfromMAC
+  gte.sf = op.sf
+  gte.lm = op.lm
+  #let before = gte
 
   case op.opcode
   of RTPS.int, RTPT.int:
     template perspectiveTransform(v: Vec3l, last: bool) =
-      gte.setIR op.lm, matMulPlus(gte.RTM, v, gte.TR shl 12),
+      gte.setIR gte.matMulPlus(gte.RTM, v, gte.TR shl 12),
         rtpsBug = not op.sf
 
       gte.pushS
-      gte.SZ3 = gte.accMAC[2] shr (12 - shift)
+      gte.SZ3 = gte.accMAC[2] shr (12 - gte.shift)
       let divisor = gte.perspectiveDivisor
-      gte.SX2 = viaMAC0(divisor*gte.IR1 + gte.OFX) shr 16
-      gte.SY2 = viaMAC0(divisor*gte.IR2 + gte.OFY) shr 16
-      if last: gte.IR0 = viaMAC0(divisor*gte.DQA + gte.DQB) shr 12
+      gte.SX2 = gte.viaMAC0(divisor*gte.IR1 + gte.OFX) shr 16
+      gte.SY2 = gte.viaMAC0(divisor*gte.IR2 + gte.OFY) shr 16
+      if last:
+        gte.IR0 = gte.viaMAC0(divisor*gte.DQA + gte.DQB) shr 12
 
     if op.opcode == RTPT.int:
       perspectiveTransform gte.V0, false
@@ -504,32 +510,32 @@ proc execute*(gte: var GTE, op: word) =
       else: raise newException(AssertionDefect, "unreachable")
     if op.translationVector == 2:
       # Buggy matrix multiplcation - from Duckstation
-      gte.setIR false, viaMAC(t shl 12 + m[0] * v[0])
-      gte.IR = viaMAC(m[1] * v[1] + m[2] * v[2])
+      gte.setIR gte.viaMAC(t shl 12 + m[0] * v[0]), lm=false
+      gte.IR = gte.viaMAC(m[1] * v[1] + m[2] * v[2])
     else:
-      gte.IR = matMulPlus(m, v, t shl 12)
+      gte.IR = gte.matMulPlus(m, v, t shl 12)
 
   of DCPL.int, DPCS.int, DPCT.int, INTPL.int:
     if op.opcode == DCPL.int:
-      interpolateColours((gte.RGB * gte.IR) shl 4, true)
+      gte.interpolateColours((gte.RGB * gte.IR) shl 4, true)
     elif op.opcode == INTPL.int:
-      interpolateColours(gte.IR shl 12, true)
+      gte.interpolateColours(gte.IR shl 12, true)
     elif op.opcode == DPCS.int:
-      interpolateColours(gte.RGB shl 16, true)
+      gte.interpolateColours(gte.RGB shl 16, true)
     else: # DCPT
       for i in 0..2:
-        interpolateColours(gte.RGB0 shl 16, true)
+        gte.interpolateColours(gte.RGB0 shl 16, true)
 
   of SQR.int:
-    gte.IR = viaMAC((gte.IR * gte.IR))
+    gte.IR = gte.viaMAC((gte.IR * gte.IR))
 
   of NCS.int, NCT.int, NCCS.int, NCCT.int, NCDS.int, NCDT.int:
     type Mode = enum Plain, Colour, Depth
     template normalColour(v: Vec3l, mode: Mode) =
-      gte.IR = matMul(gte.LLM, v)
-      gte.IR = matMulPlus(gte.LCM, gte.IR, gte.BC shl 12)
+      gte.IR = gte.matMul(gte.LLM, v)
+      gte.IR = gte.matMulPlus(gte.LCM, gte.IR, gte.BC shl 12)
       if mode >= Colour:
-        interpolateColours((gte.RGB * gte.IR) shl 4, mode == Depth)
+        gte.interpolateColours((gte.RGB * gte.IR) shl 4, mode == Depth)
       else:
         gte.pushRGBfromMAC
 
@@ -551,8 +557,8 @@ proc execute*(gte: var GTE, op: word) =
     else: raise newException(AssertionDefect, "unreachable")
 
   of CC.int, CDP.int:
-    gte.IR = matMulPlus(gte.LCM, gte.IR, gte.BC shl 12)
-    interpolateColours((gte.RGB * gte.IR) shl 4, op.opcode == CDP.int)
+    gte.IR = gte.matMulPlus(gte.LCM, gte.IR, gte.BC shl 12)
+    gte.interpolateColours((gte.RGB * gte.IR) shl 4, op.opcode == CDP.int)
 
   of NCLIP.int:
     gte.MAC0 =
@@ -560,14 +566,14 @@ proc execute*(gte: var GTE, op: word) =
        gte.S0[0]*gte.S2[1] - gte.S1[0]*gte.S0[1] - gte.S2[0]*gte.S1[1])
 
   of AVSZ3.int:
-    gte.OTZ = viaMAC0(gte.ZSF3*(gte.SZ1+gte.SZ2+gte.SZ3)) shr 12
+    gte.OTZ = gte.viaMAC0(gte.ZSF3*(gte.SZ1+gte.SZ2+gte.SZ3)) shr 12
 
   of AVSZ4.int:
-    gte.OTZ = viaMAC0(gte.ZSF4*(gte.SZ0+gte.SZ1+gte.SZ2+gte.SZ3)) shr 12
+    gte.OTZ = gte.viaMAC0(gte.ZSF4*(gte.SZ0+gte.SZ1+gte.SZ2+gte.SZ3)) shr 12
 
   of OP.int:
     gte.IR =
-      viaMAC(
+      gte.viaMAC(
       vec3(gte.IR3*gte.RTM[1,1] - gte.IR2*gte.RTM[2,2],
            gte.IR1*gte.RTM[2,2] - gte.IR3*gte.RTM[0,0],
            gte.IR2*gte.RTM[0,0] - gte.IR1*gte.RTM[1,1]))
@@ -576,10 +582,10 @@ proc execute*(gte: var GTE, op: word) =
     if op.opcode == GPF.int:
       gte.MAC = Vec3l()
     else: # GPL
-      gte.MAC = gte.MAC shl shift
-    discard viaMAC(gte.IR * gte.IR0 + gte.accMAC)
+      gte.MAC = gte.MAC shl gte.shift
+    discard gte.viaMAC(gte.IR * gte.IR0 + gte.accMAC)
     gte.pushRGBfromMAC
   else:
     warn fmt"Unrecognised GTE op {op.opcode:x}"
 
-  trace fmt"after: {gte}"
+  #trace gteDiff(before, gte)
