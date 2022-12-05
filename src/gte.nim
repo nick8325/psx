@@ -40,8 +40,7 @@ type
     # We also ignore the values of IRGB and ORGB - these are computed
     # from IR1-IR3.
     registers: array[Register, RegisterVal]
-    ## Higher-accuracy versions of MAC0-MAC3.
-    accMAC0: int64
+    ## Higher-accuracy versions of MAC1-MAC3.
     accMAC: Vec3l
 
 static:
@@ -51,7 +50,18 @@ static:
 proc `$`*(gte: GTE): string =
   for reg in Register:
     if reg notin {SXYP, IRGB, ORGB}:
-      result &= fmt"{reg}: {gte.registers[reg].uint32:x} "
+      result &= fmt"{reg.int}/{reg}: {gte.registers[reg].uint32:x} "
+  for i in 0..2:
+    result &= fmt" accMAC{i}={gte.accMAC[i]:x}"
+
+func gteDiff(gte1, gte2: GTE): string {.used.} =
+  ## Show the difference between two GTE states.
+  for r, x in gte1.registers:
+    if x != gte2.registers[r]:
+      result &= fmt "{r}={x.uint32:x}->{gte2.registers[r].uint32:x} "
+  for i in 0..2:
+    if gte1.accMAC[i] != gte2.accMAC[i]:
+        result &= fmt "accMAC{i}={gte1.accMAC[i]:x}->{gte2.accMAC[i]:x} "
 
 ######################################################################
 # High-level access to the state.
@@ -192,7 +202,6 @@ proc `RGB2=`(gte: var GTE, rgb: Vec3l) =
 
 proc MAC0(gte: GTE): int64 {.used.} = gte.registers[MAC0].int32.int64
 proc `MAC0=`(gte: var GTE, val: int64) =
-  gte.accMAC0 = val
   gte.registers[MAC0].uint32 = cast[uint32](val)
   if val >= 2i64^31:   gte.registers[FLAG].uint32.setBit 16
   if val < -(2i64^31): gte.registers[FLAG].uint32.setBit 15
@@ -200,6 +209,8 @@ proc `MAC0=`(gte: var GTE, val: int64) =
 proc MAC(gte: GTE): Vec3l = gte.vec3(MAC1, MAC2, MAC3)
 proc `MAC=`(gte: var GTE, mac: Vec3l) =
   gte.accMAC = mac
+  for i in 0..2:
+    gte.accMAC[i] = gte.accMAC[i].signExtendFrom(44)
   gte.registers[MAC1].uint32 = cast[uint32](mac[0])
   gte.registers[MAC2].uint32 = cast[uint32](mac[1])
   gte.registers[MAC3].uint32 = cast[uint32](mac[2])
@@ -328,8 +339,8 @@ proc pushRGB(gte: var GTE) =
 template pushRGBfromMAC(gte: var GTE) =
   ## Transfer a computed colour from MAC to the RGB FIFO.
   gte.pushRGB
-  gte.RGB2 = gte.accMAC shr 4
-  gte.IR = gte.accMAC
+  gte.RGB2 = gte.MAC shr 4
+  gte.IR = gte.MAC
 
 proc perspectiveDivisor(gte: var GTE): int64 =
   ## Compute an approximation of ((H*0x20000/SZ3)+1)/2.
@@ -383,7 +394,6 @@ proc execute*(gte: var GTE, op: word) =
   trace fmt"GTE op {op.opcode:x}"
   trace fmt"before: {gte}"
   gte.registers[FLAG].uint32 = 0
-  gte.accMAC0 = gte.MAC0
   gte.accMAC = gte.MAC
 
   let shift =
@@ -395,7 +405,7 @@ proc execute*(gte: var GTE, op: word) =
 
   template viaMAC0(val: int64): int64 =
     gte.MAC0 = val
-    gte.MAC0
+    val
 
   template viaMAC(val: Vec3l, shift: int = shift): Vec3l =
     # Note: default shift value comes from op.sf
@@ -522,8 +532,7 @@ proc execute*(gte: var GTE, op: word) =
       gte.MAC = Vec3l()
     else: # GPL
       gte.MAC = gte.MAC shl shift
-    gte.MAC = (gte.IR * gte.IR0 + gte.accMAC)
-    gte.MAC = gte.accMAC shr shift
+    discard viaMAC(gte.IR * gte.IR0 + gte.accMAC)
     gte.pushRGBfromMAC
   else:
     warn fmt"Unrecognised GTE op {op.opcode:x}"
