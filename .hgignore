@@ -5,5 +5,7 @@ nolibgs_hello_worlds
 zig-cache
 zig-out
 *.bin
+*.cue
+*.mcr
 *.orig
 perf.data
