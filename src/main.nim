@@ -63,7 +63,7 @@ discard window.setGammaRamp(addr ramp[0], addr ramp[0], addr ramp[0])
 var prevClocks: MonoTime = getMonoTime()
 events.every(proc: int64 = clockRate, "rate") do():
   let clocks: MonoTime = getMonoTime()
-  echo fmt"{(clocks.ticks-prevClocks.ticks).float/1000000000}s to simulate one second"
+  #echo fmt"{(clocks.ticks-prevClocks.ticks).float/1000000000}s to simulate one second"
   prevClocks = clocks
 
 events.every(proc: int64 = clockRate, "dump ram") do():
