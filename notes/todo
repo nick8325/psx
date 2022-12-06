@@ -1,17 +1,21 @@
-Allow devices to pause (coroutine library)
-Add device timings
-GPU: skip polygons that are too big
-Have explicit state - e.g. GPU has a FIFO - so that we can
-always resume the system just from the state
-GPU: current approach to drawing polylines draws corner points
-multiple times. Instead, skip the final point of each line when
-drawing. Then in the GPU, if the polyline doesn't form a closed
-curve., add a final point to it.
-Fix edge cases with GTE (ps1-tests tests)
-Reimplement CDROM with proper timing
-Find out why only some BIOSes are able to boot a CD
-Find out why only some BIOSes are able to boot an EXE
-Implement on-disk save states
-Add a debugger
-Fix graphical glitch in memory card browser
-Find out why the system is running at half speed (investigate timers etc)
+Accuracy:
+
+* Allow devices to pause (coroutine library)
+* Add device timings including GTE
+* GPU: skip polygons that are too big
+* GPU: current approach to drawing polylines draws corner points multiple times. Instead, skip the final point of each line when drawing. Then in the GPU, if the polyline doesn't form a closed curve., add a final point to it.
+* Reimplement CDROM with proper timing
+* Pixels are not necessarily square - draw them properly
+
+Bugs:
+
+* (current?) Find out why only some BIOSes are able to boot a CD
+* (current?) Find out why only some BIOSes are able to boot an EXE
+* Fix graphical glitch in memory card browser
+* Crash Bandicoot: why is it running at half speed? (Come back to this after audio is done)
+* Ridge Racer: why is the ground not drawn properly?
+
+Features:
+
+* Implement on-disk save states
+* Add a debugger
