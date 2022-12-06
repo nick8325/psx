@@ -75,6 +75,10 @@ func signExtendFrom(vec: Vec3l, bit: int): Vec3l =
   for i in 0..2:
     result[i] = vec[i].extendFrom(bit)
 
+func shift(gte: GTE): int =
+  ## Convert sf field to a shift amount
+  if gte.sf: 12 else: 0
+
 ######################################################################
 # High-level access to the state.
 
@@ -171,15 +175,22 @@ proc IR2(gte: GTE): int64 = gte.registers[IR2].int16.int64
 proc IR3(gte: GTE): int64 = gte.registers[IR3].int16.int64
 
 proc IR(gte: GTE): Vec3l = vec3(gte.IR1, gte.IR2, gte.IR3)
-proc setIR(gte: var GTE, ir: Vec3l, lm: bool = gte.lm, rtpsBug: bool = false) =
+proc setIR(gte: var GTE, ir: Vec3l, lm: bool = gte.lm, rtps: bool = false) =
   let lo: int16 = if lm: 0 else: -0x8000
   gte.registers[IR1].int16 = gte.clamp(ir[0], lo, 0x7fff, 24)
   gte.registers[IR2].int16 = gte.clamp(ir[1], lo, 0x7fff, 23)
-  if rtpsBug:
-    # Handle the bug with IR3 saturation in RTPS/RTPT
-    # (see Nocash "When using RTP with sf=0...")
+  if rtps:
+    # RTPS/RTPT handle IR3 overflow buggily - see Nocash "When using RTP with
+    # sf=0...", and Duckstation gte.cpp RTPS implementation. The bug is:
+    # the hardware computes the overflow bit *as if* lm=false and sf=true,
+    # ignoring the lm and sf bits in the instruction word. That is, it always
+    # looks at MAC3 >> 12, and always uses 0x8000 as lower bound.
+
+    # Set value without setting overflow bit
     gte.registers[IR3].int16 = clamp(ir[2], lo, 0x7fff).int16
-    discard gte.clamp(ir[2] shr 12, -0x8000, 0x7fff, 22)
+    # Test for overflow in the buggy way - the "12-gte.shift" is because if
+    # gte.sf is true, the values in MAC are already shifted
+    discard gte.clamp(gte.accMAC[2] shr (12-gte.shift), -0x8000, 0x7fff, 22)
   else:
     gte.registers[IR3].int16 = gte.clamp(ir[2], lo, 0x7fff, 22)
 proc `IR=`(gte: var GTE, ir: Vec3l) = gte.setIR ir
@@ -343,10 +354,6 @@ proc viaMAC0(gte: var GTE, val: int64): int64 =
   gte.MAC0 = val
   val
 
-func shift(gte: GTE): int =
-  ## How much should most shift operations shift by?
-  if gte.sf: 12 else: 0
-
 proc viaMAC(gte: var GTE, val: Vec3l): Vec3l =
   ## Compute a value, also storing it in MAC.
   ## The value is shifted if gte.sf is set.
@@ -460,8 +467,7 @@ proc execute*(gte: var GTE, op: word) =
   case op.opcode
   of RTPS.int, RTPT.int:
     template perspectiveTransform(v: Vec3l, last: bool) =
-      gte.setIR gte.matMulPlus(gte.RTM, v, gte.TR shl 12),
-        rtpsBug = not op.sf
+      gte.setIR gte.matMulPLus(gte.RTM, v, gte.TR shl 12), rtps=true
 
       gte.pushS
       gte.SZ3 = gte.accMAC[2] shr (12 - gte.shift)
