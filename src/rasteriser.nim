@@ -644,8 +644,7 @@ proc draw*(settings: Settings, line: Line) =
       if p.x == line.stop.point.x: break
       err += dy
       p.x += sx
-    else:
-      assert 2*err <= dx
+    if 2*err <= dx:
       if p.y == line.stop.point.y: break
       err += dx
       p.y += sy
