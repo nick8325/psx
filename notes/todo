@@ -12,6 +12,8 @@ Bugs:
 * Fix graphical glitch in memory card browser
 * Crash Bandicoot: why is it running at half speed? (Come back to this after audio is done)
 * Ridge Racer: why is the ground not drawn properly?
+* GPU: why are games flickering? Effect doesn't appear when viewing raw VRAM,
+  so may be something to do with double buffering
 
 Features:
 
