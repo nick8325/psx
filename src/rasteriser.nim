@@ -1,7 +1,7 @@
 ## The backend of the GPU - converts drawing commands into a framebuffer.
 
 import utils, basics, savestates
-import std/[options, strformat, sugar, algorithm]
+import std/[options, strformat, sugar, algorithm, math]
 {.push warning[User]: off.}
 import glm
 {.pop.}
@@ -312,12 +312,12 @@ func makeInterpolator(inputs: array[3, Point], outputs: array[3, Point]): PointI
     y: inputs.makeInterpolator [outputs[0].y, outputs[1].y, outputs[2].y])
 
 func interpolate(i: ColourInterpolator, p: Point): Colour =
-  (red: i.red.interpolate(p).int.clamp(0, 255),
-   green: i.green.interpolate(p).int.clamp(0, 255),
-   blue: i.blue.interpolate(p).int.clamp(0, 255))
+  (red: i.red.interpolate(p).round.int.clamp(0, 255),
+   green: i.green.interpolate(p).round.int.clamp(0, 255),
+   blue: i.blue.interpolate(p).round.int.clamp(0, 255))
 
 func interpolate(i: PointInterpolator, p: Point): Point =
-  (x: i.x.interpolate(p).int, y: i.y.interpolate(p).int)
+  (x: i.x.interpolate(p).round.int, y: i.y.interpolate(p).round.int)
 
 # Similar to the above but for linear interpolation.
 type LineInterpolator = tuple[x0, y0, z0, dzdx, dzdy: float]
@@ -362,9 +362,9 @@ func makeLineInterpolator(inputs: array[2, Point], outputs: array[2, Colour]): C
     blue: inputs.makeLineInterpolator [outputs[0].blue, outputs[1].blue])
 
 func interpolate(i: ColourLineInterpolator, p: Point): Colour =
-  (red: i.red.interpolate(p).int.clamp(0, 255),
-   green: i.green.interpolate(p).int.clamp(0, 255),
-   blue: i.blue.interpolate(p).int.clamp(0, 255))
+  (red: i.red.interpolate(p).round.int.clamp(0, 255),
+   green: i.green.interpolate(p).round.int.clamp(0, 255),
+   blue: i.blue.interpolate(p).round.int.clamp(0, 255))
 
 proc getPixel[N: static int](texture: Texture[N]; x, y: int): Pixel =
   ## Look up a pixel coordinate in a texture.
