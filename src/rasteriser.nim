@@ -240,10 +240,6 @@ proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
   var pixel = pixel
   if settings.setMaskBit: pixel.mask = true
 
-  # Disable transparency if pixel is non-transparent
-  var settings = settings
-  if not pixel.mask: settings.transparency = Opaque
-
   # Handle transparency
   template blend(c1, c2: int): int =
     var result =
@@ -407,6 +403,10 @@ func mix(p: Pixel, c: Colour): Pixel =
 
 proc putTexturePixel(x, y: int; textureColour: Pixel; settings: Settings) =
   ## Put a pixel that came from a texture.
+
+  # Disable transparency if pixel is non-transparent
+  var settings = settings
+  if not textureColour.mask: settings.transparency = Opaque
 
   # Black is transparent
   if textureColour.uint16 != 0:
