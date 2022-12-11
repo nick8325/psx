@@ -794,6 +794,9 @@ processCommand = consumer(word):
           val = val or (getHalfword(x, y).word shl 16)
           effect: resultQueue.addLast val
           even = true
+    # Handle copy of an odd number of words
+    if not even:
+      effect: resultQueue.addLast val
   else:
     effect:
       warn fmt"Unrecognised GP0 command {value[command]:02x}"
