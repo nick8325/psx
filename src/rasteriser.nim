@@ -407,6 +407,20 @@ proc putTexturePixel(x, y: int; textureColour: Pixel; settings: Settings) =
       if not textureColour.mask: newSettings.transparency = Opaque
       putPixel(x, y, textureColour, newSettings)
 
+# Checking for primitives that are too big.
+# Nocash explains: "The maximum distance between two vertices is 1023
+# horizontally, and 511 vertically. Polygons and lines that are exceeding that
+# dimensions are NOT rendered."
+
+func tooBig(p1, p2: Point): bool =
+  abs(p1.x - p2.x) >= 1024 or abs(p1.y - p2.y) >= 512
+
+func tooBig(r: Rect): bool =
+  tooBig((x: r.x1, y: r.y1), (x: r.x2, y: r.y2))
+
+func tooBig(ps: array[3, Point]): bool =
+  tooBig(ps[0], ps[1]) or tooBig(ps[1], ps[2]) or tooBig(ps[0], ps[2])
+
 # Triangle drawing.
 
 iterator lineKeepingLeft(p1, p2: Point): (Point, bool) =
@@ -464,6 +478,8 @@ proc draw*(settings: Settings, tri: Triangle) =
   debug fmt"draw {tri}"
 
   var vs = tri.vertices
+
+  if tooBig(vs): return
 
   # Put the topmost point at vs[0], using leftmost to break ties
   vs.sort cmpKey[Point]((p: Point) => (p.y, p.x))
@@ -575,6 +591,8 @@ proc draw*(settings: Settings, rect: Rectangle) =
 
   debug fmt"draw {rect}"
 
+  if tooBig(rect.rect): return
+
   for y in rect.rect.y1..<rect.rect.y2:
     for x in rect.rect.x1..<rect.rect.x2:
       let tx =
@@ -597,6 +615,8 @@ proc draw*(settings: Settings, line: Line) =
   ## (This is important to prevent points being drawn twice in polylines!)
 
   debug fmt"draw {line}"
+
+  if tooBig(line.start.point, line.stop.point): return
 
   if line.start == line.stop: return
   let interpolator =
