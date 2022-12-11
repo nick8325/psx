@@ -434,11 +434,12 @@ proc readyToSendVRAM: bool =
   resultQueue.len > 0
 
 proc readyToReceiveDMA: bool =
-  # TODO is this right?
-  not readyToSendVRAM()
+  # TODO make this more accurate
+  true
 
 proc readyToReceiveCommand: bool =
-  readyToReceiveDMA()
+  # TODO make this more accurate
+  true
 
 let
   command = BitSlice[int, word](pos: 24, width: 8)
