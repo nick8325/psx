@@ -742,14 +742,23 @@ processCommand = consumer(word):
     var settings = rasteriserSettings(transparent = false,
                                       dither = false, crop = false, interlace = false)
     effect:
+      template put(i, j: int) =
+        let x1 = (src.x + i) mod vramWidth
+        let y1 = (src.y + j) mod vramHeight
+        let x2 = (dest.x + i) mod vramWidth
+        let y2 = (dest.y + j) mod vramHeight
+        putPixel(x2, y2, getPixel(x1, y1), settings)
+
       # This detail comes from Nocash PSX
       for j in 0..<(if size.y == 0: vramHeight else: size.y):
-        for i in 0..<(if size.x == 0: vramWidth else: size.x):
-          let x1 = (src.x + i) mod vramWidth
-          let y1 = (src.y + j) mod vramHeight
-          let x2 = (dest.x + i) mod vramWidth
-          let y2 = (dest.y + j) mod vramHeight
-          putPixel(x2, y2, getPixel(x1, y1), settings)
+        # Copy in reverse if src.x < dst.x - taken from Duckstation
+        let x_max = if size.x == 0: vramWidth else: size.x
+        if src.x < dest.x or (src.x + size.x - 1) mod vramWidth < (dest.x + size.x - 1) mod vramWidth:
+          for i in countdown(x_max-1, 0):
+            put(i, j)
+        else:
+          for i in countup(0, x_max-1):
+            put(i, j)
 
   of 0xa0..0xbf:
     # Copy rectangle to VRAM
