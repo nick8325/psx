@@ -2,7 +2,6 @@ Accuracy:
 
 * Allow devices to pause (coroutine library)
 * Add device timings including GTE
-* GPU: current approach to drawing polylines draws corner points multiple times. Instead, skip the final point of each line when drawing. Then in the GPU, if the polyline doesn't form a closed curve., add a final point to it.
 * Reimplement CDROM with proper timing
 * Pixels are not necessarily square - draw them properly
 
