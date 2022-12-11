@@ -108,16 +108,6 @@ Palette.bitfield y, int, 6, 9
 func unpack(p: Palette): Point =
   (x: p.x16 * 16, y: p.y)
 
-func colourMode(depth: TextureColourDepth, palette: Point): TextureColourMode =
-  case depth
-  of FourBit: TextureColourMode(depth: FourBit, palette: palette)
-  of EightBit: TextureColourMode(depth: EightBit, palette: palette)
-  of FifteenBit: TextureColourMode(depth: FifteenBit)
-
-func colourMode(page: TexPage, palette: Point): TextureColourMode =
-  # depth=3 apparently is treated as 15-bit
-  page.colours.clampedConvert[:TextureColourDepth].colourMode(palette)
-
 type
   # Texture settings
   TextureSettings = object
@@ -126,6 +116,7 @@ type
     # In 8-pixel steps
     window: TextureWindow            # GP0(E2h)
     colourDepth: TextureColourDepth  # GPUSTAT 7-8
+    rawColourDepth: int              # GPUSTAT 7-8, unclamped value
     enabled: bool                    # GPUSTAT 15
     allowDisable: bool               # GP1(09h)
     flip: tuple[x: bool, y: bool]    # GP0(E1h).12-13
@@ -372,8 +363,9 @@ proc renderedLines*: Option[bool] =
     screen.verticalInterlace:
     result = some(screen.frameNumber.testBit(0))
 
-proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: bool,
-                        transparency: TransparencyMode = drawing.transparency): rasteriser.Settings =
+# Helper functions
+
+proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: bool): rasteriser.Settings =
   if crop:
     result.drawingArea =
       (x1: drawing.drawingAreaTopLeft.x,
@@ -392,12 +384,46 @@ proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: 
       result.skipLines = some(screen.frameNumber.testBit(0) and not screen.vblank)
 
   result.transparency =
-    if transparent: transparency
+    if transparent: drawing.transparency
     else: Opaque
 
   result.dither = dither and drawing.dither
   result.setMaskBit = drawing.setMaskBit
   result.skipMaskedPixels = drawing.skipMaskedPixels
+
+proc load(page: TexPage, loadMore: bool) =
+  ## Load settings from a texpage.
+  textures.base.x64 = page.baseX64
+  textures.base.y256 = page.baseY256
+  drawing.transparency = page.transparency
+  # Reserved = 15-bit
+  textures.colourDepth = page.colours.clampedConvert[:TextureColourDepth]
+  textures.rawColourDepth = page.colours
+  textures.enabled = not (textures.allowDisable and page.textureDisable)
+
+  if loadMore:
+    # These are only loaded by GP0(E1h),
+    # not by textured polygon commands.
+    drawing.dither = page.dither
+    drawing.drawToDisplayArea = page.drawToDisplayArea
+    textures.flip.x = page.flipX
+    textures.flip.y = page.flipY
+
+proc colourMode(palette: Point): TextureColourMode =
+  ## Return a TextureColourMode for the given colour depth and palette.
+  case textures.colourDepth
+  of FourBit: TextureColourMode(depth: FourBit, palette: palette)
+  of EightBit: TextureColourMode(depth: EightBit, palette: palette)
+  of FifteenBit: TextureColourMode(depth: FifteenBit)
+
+proc makeTexture[N: static int](coords: array[N, Point], palette: Point): Texture[N] =
+  ## Create a texture using the current texture settings.
+  Texture[N](
+    page: (x: textures.base.x64 * 64, y: textures.base.y256 * 256),
+    windowMask: textures.window.mask.unpack,
+    windowOffset: textures.window.offset.unpack,
+    coords: coords,
+    colourMode: colourMode(palette))
 
 # I/O interface
 
@@ -440,7 +466,7 @@ proc gpustat*: word =
     word(textures.base.x64) or
     word(textures.base.y256) shl 4 or
     word(drawing.transparency) shl 5 or
-    word(textures.colourDepth) shl 7 or
+    word(textures.rawColourDepth) shl 7 or
     word(drawing.dither) shl 9 or
     word(drawing.drawToDisplayArea) shl 10 or
     word(drawing.setMaskBit) shl 11 or
@@ -524,7 +550,6 @@ processCommand = consumer(word):
       vertices: array[4, Point]
       colours: array[4, rasteriser.Colour]
       texcoords: array[4, Point]
-      texpage: TexPage
       palette: Point
 
     colours[0] = Colour(value[rest]).unpack
@@ -539,7 +564,7 @@ processCommand = consumer(word):
         texcoords[i] = TexCoord(arg[word2]).unpack
         case i
         of 0: palette = Palette(arg[word1]).unpack
-        of 1: texpage = TexPage(arg[word1])
+        of 1: TexPage(arg[word1]).load(loadMore = false)
         else: discard
 
     effect:
@@ -548,12 +573,7 @@ processCommand = consumer(word):
         let
           vs = [vertices[i], vertices[i+1], vertices[i+2]]
           cs = [colours[i], colours[i+1], colours[i+2]]
-          texture = Texture[3](
-            page: texpage.base,
-            windowMask: textures.window.mask.unpack,
-            windowOffset: textures.window.offset.unpack,
-            coords: [texcoords[i], texcoords[i+1], texcoords[i+2]],
-            colourMode: texpage.colourMode(palette))
+          texture = makeTexture([texcoords[i], texcoords[i+1], texcoords[i+2]], palette)
 
           shadingMode =
             if textured and textures.enabled:
@@ -561,8 +581,7 @@ processCommand = consumer(word):
             else: Colours
 
         var settings = rasteriserSettings(transparent = transparent,
-                                          dither = shaded, crop = true, interlace = true,
-                                          transparency = texpage.transparency)
+                                          dither = shaded, crop = true, interlace = true)
         settings.draw Triangle(vertices: vs, shadingMode: shadingMode,
                                 colours: cs, texture: texture)
 
@@ -675,12 +694,7 @@ processCommand = consumer(word):
 
     let
       rect = (x1: pos.x, y1: pos.y, x2: pos.x + width, y2: pos.y + height)
-      texture = Texture[1](
-        page: (x: textures.base.x64 * 64, y: textures.base.y256 * 256),
-        windowMask: textures.window.mask.unpack,
-        windowOffset: textures.window.offset.unpack,
-        coords: [texcoord],
-        colourMode: textures.colourDepth.colourMode(palette))
+      texture = makeTexture([texcoord], palette)
 
       shadingMode =
         if textured and textures.enabled:
@@ -698,16 +712,7 @@ processCommand = consumer(word):
     # Texpage
     effect:
       let page = value[rest].TexPage
-      textures.base.x64 = page.baseX64
-      textures.base.y256 = page.baseY256
-      drawing.transparency = page.transparency
-      # Reserved = 15-bit
-      textures.colourDepth = page.colours.clampedConvert[:TextureColourDepth]
-      drawing.dither = page.dither
-      drawing.drawToDisplayArea = page.drawToDisplayArea
-      textures.enabled = not page.textureDisable
-      textures.flip.x = page.flipX
-      textures.flip.y = page.flipY
+      page.load(loadMore = true)
 
   of 0xe2:
     effect: textures.window = value[rest].TextureWindow
