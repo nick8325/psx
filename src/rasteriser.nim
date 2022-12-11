@@ -237,8 +237,12 @@ proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
     return
 
   # Force mask bit if requested
-  var finalPixel = pixel
-  if settings.setMaskBit: finalPixel.mask = true
+  var pixel = pixel
+  if settings.setMaskBit: pixel.mask = true
+
+  # Disable transparency if pixel is non-transparent
+  var settings = settings
+  if not pixel.mask: settings.transparency = Opaque
 
   # Handle transparency
   template blend(c1, c2: int): int =
@@ -253,14 +257,14 @@ proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
     result
 
   # Write pixel with possible transparency
-  finalPixel.red = blend(oldPixel.red, pixel.red)
-  finalPixel.green = blend(oldPixel.green, pixel.green)
-  finalPixel.blue = blend(oldPixel.blue, pixel.blue)
+  pixel.red = blend(oldPixel.red, pixel.red)
+  pixel.green = blend(oldPixel.green, pixel.green)
+  pixel.blue = blend(oldPixel.blue, pixel.blue)
 
   # We interpret "dither" as "draw in full 24-bit colour"
-  if not settings.dither: finalPixel = finalPixel.toPixel16.toPixel
+  if not settings.dither: pixel = pixel.toPixel16.toPixel
 
-  vram[y and (vramHeight-1)][x and (vramWidth-1)] = finalPixel
+  vram[y and (vramHeight-1)][x and (vramWidth-1)] = pixel
 
 proc putPixel*(x, y: int, c: Colour, settings: Settings) {.inline.} =
   ## Put a pixel to the VRAM.
@@ -388,24 +392,25 @@ proc getPixel[N: static int](texture: Texture[N]; x, y: int): Pixel =
 
 func mix(c1, c2: Colour): Colour =
   ## Mix two colours the same way as a shaded texture does it.
-  result.red = (c1.red * c2.red) div 128
-  result.green = (c1.green * c2.green) div 128
-  result.blue = (c1.blue * c2.blue) div 128
+  result.red = clamp((c1.red * c2.red) div 128, 0, 255)
+  result.green = clamp((c1.green * c2.green) div 128, 0, 255)
+  result.blue = clamp((c1.blue * c2.blue) div 128, 0, 255)
 
 func mix(p: Pixel, c: Colour): Pixel =
   ## Mix a Gouraud-shaded colour into a texture-shaded pixel.
 
-  p.toColour.mix(c).toPixel(p.mask)
+  # Black is transparent
+  if p.uint16 == 0:
+    Pixel(0)
+  else:
+    p.toColour.mix(c).toPixel(p.mask)
 
 proc putTexturePixel(x, y: int; textureColour: Pixel; settings: Settings) =
   ## Put a pixel that came from a texture.
 
   # Black is transparent
   if textureColour.uint16 != 0:
-      # Bit 1 unset means always opaque
-      var newSettings = settings
-      if not textureColour.mask: newSettings.transparency = Opaque
-      putPixel(x, y, textureColour, newSettings)
+    putPixel(x, y, textureColour, settings)
 
 # Checking for primitives that are too big.
 # Nocash explains: "The maximum distance between two vertices is 1023
@@ -581,9 +586,6 @@ proc draw*(settings: Settings, tri: Triangle) =
       of Both:
         let colour = shader.interpolate p
         let coord = textureMapper.interpolate p
-        # TODO: this is wrong!
-        # Mixing may convert a non-zero texture pixel to zero,
-        # resulting in it being interpreted as transparent
         putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y).mix(colour), settings)
 
 proc draw*(settings: Settings, rect: Rectangle) =
@@ -652,6 +654,10 @@ proc fill*(settings: Settings; x, y, w, h: int; c: Colour) =
   ## Fill a rectangle with a solid colour.
 
   debug fmt"fill ({x},{y}) size ({w},{h}) colour {c}"
+
+  var settings = settings
+  settings.setMaskBit = false
+  settings.skipMaskedPixels = false
 
   for j in y..<y+h:
     for i in x..<x+w:

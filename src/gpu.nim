@@ -372,7 +372,8 @@ proc renderedLines*: Option[bool] =
     screen.verticalInterlace:
     result = some(screen.frameNumber.testBit(0))
 
-proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: bool): rasteriser.Settings =
+proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: bool,
+                        transparency: TransparencyMode = drawing.transparency): rasteriser.Settings =
   if crop:
     result.drawingArea =
       (x1: drawing.drawingAreaTopLeft.x,
@@ -391,7 +392,7 @@ proc rasteriserSettings(transparent: bool, dither: bool, crop: bool, interlace: 
       result.skipLines = some(screen.frameNumber.testBit(0) and not screen.vblank)
 
   result.transparency =
-    if transparent: drawing.transparency
+    if transparent: transparency
     else: Opaque
 
   result.dither = dither and drawing.dither
@@ -559,8 +560,9 @@ processCommand = consumer(word):
               if rawTextures: Textures else: Both
             else: Colours
 
-        let settings = rasteriserSettings(transparent = transparent,
-                                          dither = shaded, crop = true, interlace = true)
+        var settings = rasteriserSettings(transparent = transparent,
+                                          dither = shaded, crop = true, interlace = true,
+                                          transparency = texpage.transparency)
         settings.draw Triangle(vertices: vs, shadingMode: shadingMode,
                                 colours: cs, texture: texture)
 
@@ -737,8 +739,11 @@ processCommand = consumer(word):
       # This detail comes from Nocash PSX
       for j in 0..<(if size.y == 0: vramHeight else: size.y):
         for i in 0..<(if size.x == 0: vramWidth else: size.x):
-          let pixel = getPixel(src.x + i, src.y + j)
-          putPixel(dest.x + i, dest.y + j, pixel, settings)
+          let x1 = (src.x + i) mod vramWidth
+          let y1 = (src.y + j) mod vramHeight
+          let x2 = (dest.x + i) mod vramWidth
+          let y2 = (dest.y + j) mod vramHeight
+          putPixel(x2, y2, getPixel(x1, y1), settings)
 
   of 0xa0..0xbf:
     # Copy rectangle to VRAM
@@ -752,14 +757,16 @@ processCommand = consumer(word):
       arg: word = 0
       even = true
     # This detail comes from Nocash PSX
-    for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
-      for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
+    for j in 0..<(if size.y == 0: vramHeight else: size.y):
+      for i in 0..<(if size.x == 0: vramWidth else: size.x):
+        let x = (coord.x + i) mod vramWidth
+        let y = (coord.y + j) mod vramHeight
         if even:
           arg = take()
-          effect: putHalfword(i, j, arg[word2], settings)
+          effect: putHalfword(x, y, arg[word2], settings)
           even = false
         else:
-          effect: putHalfword(i, j, arg[word1], settings)
+          effect: putHalfword(x, y, arg[word1], settings)
           even = true
   of 0xc0..0xdf:
     # Copy rectangle to CPU
@@ -770,13 +777,15 @@ processCommand = consumer(word):
     var
       val: word = 0
       even = true
-    for j in coord.y..<coord.y+(if size.y == 0: vramHeight else: size.y):
-      for i in coord.x..<coord.x+(if size.x == 0: vramWidth else: size.x):
+    for j in 0..<(if size.y == 0: vramHeight else: size.y):
+      for i in 0..<(if size.x == 0: vramWidth else: size.x):
+        let x = (coord.x + i) mod vramWidth
+        let y = (coord.y + j) mod vramHeight
         if even:
-          val = getHalfword(i, j).word
+          val = getHalfword(x, y).word
           even = false
         else:
-          val = val or (getHalfword(i, j).word shl 16)
+          val = val or (getHalfword(x, y).word shl 16)
           effect: resultQueue.addLast val
           even = true
   else:
