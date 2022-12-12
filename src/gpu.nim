@@ -849,10 +849,16 @@ proc gp1*(value: word) =
     screen.displayAreaStart = value[rest].PackedScreenCoord
   of 0x06:
     # Horizontal display range
+    let oldSettings = screenSettings()
     screen.horizontalRange = (start: value[half2], stop: value[half1])
+    let newSettings = screenSettings()
+    if oldSettings != newSettings: info newSettings
   of 0x07:
     # Vertical display range
+    let oldSettings = screenSettings()
     screen.verticalRange = (start: value.PackedCoord.x, stop: value.PackedCoord.y)
+    let newSettings = screenSettings()
+    if oldSettings != newSettings: info newSettings
   of 0x08:
     # Display mode
     let oldSettings = screenSettings()
