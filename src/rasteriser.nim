@@ -407,7 +407,7 @@ func mix(p: Pixel, c: Colour): Pixel =
   ## Mix a Gouraud-shaded colour into a texture-shaded pixel.
 
   # Black is transparent
-  if p.uint16 == 0:
+  if p.uint32 == 0:
     Pixel(0)
   else:
     p.toColour.mix(c).toPixel(p.mask)
@@ -420,7 +420,7 @@ proc putTexturePixel(x, y: int; textureColour: Pixel; settings: Settings) =
   if not textureColour.mask: settings.transparency = Opaque
 
   # Black is transparent
-  if textureColour.uint16 != 0:
+  if textureColour.uint32 != 0:
     putPixel(x, y, textureColour, settings)
 
 # Checking for primitives that are too big.
