@@ -16,6 +16,10 @@ let
   surface = createRGBSurfaceFrom(addr vram, 1024, 512, 32, 4*1024, 0xff, 0xff00u32, 0xff0000u32, 0)
 
 var
+  pixel: Pixel
+  pixelSurface = createRGBSurfaceFrom(addr pixel, 1, 1, 32, 4, 0xff, 0xff00u32, 0xff0000u32, 0)
+
+var
   width, height: int
   display: SurfacePtr = nil
   showVRam: bool = false
@@ -150,9 +154,17 @@ while runGame:
       if lines.isNone(): true
       else: lines.get.int == i mod 2
     if shouldDraw:
-      var srcRect = rect(area.x1.cint, (area.y1 + i).cint, width.cint, 1)
-      var destRect = rect(0, i.cint, width.cint, 1)
-      surface.blitSurface addr(srcRect), display, addr(destRect)
+      if displayAreaDepth() == Depth15 or showVram:
+        var srcRect = rect(area.x1.cint, (area.y1 + i).cint, width.cint, 1)
+        var destRect = rect(0, i.cint, width.cint, 1)
+        surface.blitSurface addr(srcRect), display, addr(destRect)
+      else:
+        # 24-bit - we can't easily blit, but have to copy one by one
+        for j in 0..<width:
+          pixel = getPixel24(area.x1, j, area.y1 + i)
+          var srcRect = rect(0, 0, width.cint, 1)
+          var destRect = rect(j.cint, i.cint, 1, 1)
+          pixelSurface.blitSurface addr(srcRect), display, addr(destRect)
 
   let time = getMonoTime()
   if (time - lastFrameTime).inNanoseconds >= 1000000000 div refreshRate[region].cint:

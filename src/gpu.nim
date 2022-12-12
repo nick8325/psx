@@ -15,7 +15,7 @@ type
   VerticalRes {.pure.} = enum
     ResNormal = 0,
     ResDouble = 1
-  ColourDepth {.pure.} = enum
+  ColourDepth* {.pure.} = enum
     Depth15 = 0,
     Depth24 = 1
   DMADirection {.pure.} = enum
@@ -357,6 +357,9 @@ proc displayArea*: Rect =
   result.y1 = screen.displayAreaStart.y
   result.x2 = result.x1 + screenWidth() - 1
   result.y2 = result.y1 + screenHeight() - 1
+
+proc displayAreaDepth*: ColourDepth =
+  screen.displayAreaDepth
 
 proc renderedLines*: Option[bool] =
   if screen.verticalRes == ResDouble and

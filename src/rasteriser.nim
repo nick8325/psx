@@ -208,6 +208,17 @@ proc getNybble*(x, y: int): int {.inline.} =
   of 3: return (val shr 12) and 0xf
   else: assert false
 
+proc getPixel24*(x0, x, y: int): Pixel {.inline.} =
+  ## Read 24-bit pixel data from the VRAM.
+  ## x0 is the starting x-coordinate in words,
+  ## x is an offset in 24-bit units.
+
+  let val1 = getByte(x0*2 + x*3, y)
+  let val2 = getByte(x0*2 + x*3+1, y)
+  let val3 = getByte(x0*2 + x*3+2, y)
+  let val = val1 + (val2 shl 8) + (val3 shl 16)
+  val.Pixel
+
 proc putPixel*(x, y: int, pixel: Pixel, settings: Settings) {.inline.} =
   ## Put a pixel to the VRAM. Handles:
   ## * Mask bit
