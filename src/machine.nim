@@ -289,6 +289,9 @@ proc runSystem*(clocks: int64) =
 
   let stop = events.now + clocks
   while likely(events.now < stop):
+    if paused:
+      return
+
     let now = events.now
     var time = now
 

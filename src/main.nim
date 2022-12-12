@@ -132,6 +132,9 @@ while runGame:
       of K_T:
         timerDebug = not timerDebug
 
+      of K_SPACE:
+        paused = false
+
       else:
         echo "unknown key"
 

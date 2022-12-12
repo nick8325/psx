@@ -79,3 +79,7 @@ var
      BIOS: 0, SPU: 0, CDROM: 0, Expansion1: 0, Expansion2: 0, Expansion3: 0]
   memoryDelay16* {.saved.}: array[MemoryRegion, int] = memoryDelay8
   memoryDelay32* {.saved.}: array[MemoryRegion, int] = memoryDelay8
+
+var
+  ## Is the machine currently paused?
+  paused* = false
