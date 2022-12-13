@@ -467,7 +467,7 @@ proc execute*(gte: var GTE, op: word) =
   case op.opcode
   of RTPS.int, RTPT.int:
     template perspectiveTransform(v: Vec3l, last: bool) =
-      gte.setIR gte.matMulPLus(gte.RTM, v, gte.TR shl 12), rtps=true
+      gte.setIR gte.matMulPlus(gte.RTM, v, gte.TR shl 12), rtps=true
 
       gte.pushS
       gte.SZ3 = gte.accMAC[2] shr (12 - gte.shift)
@@ -521,16 +521,18 @@ proc execute*(gte: var GTE, op: word) =
     else:
       gte.IR = gte.matMulPlus(m, v, t shl 12)
 
-  of DCPL.int, DPCS.int, DPCT.int, INTPL.int:
-    if op.opcode == DCPL.int:
-      gte.interpolateColours((gte.RGB * gte.IR) shl 4, true)
-    elif op.opcode == INTPL.int:
-      gte.interpolateColours(gte.IR shl 12, true)
-    elif op.opcode == DPCS.int:
-      gte.interpolateColours(gte.RGB shl 16, true)
-    else: # DCPT
-      for i in 0..2:
-        gte.interpolateColours(gte.RGB0 shl 16, true)
+  of DCPL.int:
+    gte.interpolateColours((gte.RGB * gte.IR) shl 4, true)
+
+  of INTPL.int:
+    gte.interpolateColours(gte.IR shl 12, true)
+
+  of DPCS.int:
+    gte.interpolateColours(gte.RGB shl 16, true)
+
+  of DPCT.int:
+    for i in 0..2:
+      gte.interpolateColours(gte.RGB0 shl 16, true)
 
   of SQR.int:
     gte.IR = gte.viaMAC((gte.IR * gte.IR))
@@ -591,6 +593,7 @@ proc execute*(gte: var GTE, op: word) =
       gte.MAC = gte.MAC shl gte.shift
     discard gte.viaMAC(gte.IR * gte.IR0 + gte.accMAC)
     gte.pushRGBfromMAC
+
   else:
     warn fmt"Unrecognised GTE op {op.opcode:x}"
 
