@@ -492,7 +492,7 @@ iterator lineKeepingLeft(p1, p2: Point): (Point, bool) =
 proc draw*(settings: Settings, tri: Triangle) =
   ## Draw a triangle.
 
-  debug fmt"draw {tri}"
+  debug fmt"draw {tri}, transparency={settings.transparency}"
 
   var vs = tri.vertices
 
