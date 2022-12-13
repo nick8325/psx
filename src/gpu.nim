@@ -414,6 +414,9 @@ proc load(page: TexPage, loadMore: bool) =
     textures.flip.x = page.flipX
     textures.flip.y = page.flipY
 
+  trace fmt"Texture settings = {textures}"
+  trace fmt"Drawing settings = {drawing}"
+
 proc colourMode(palette: Point): TextureColourMode =
   ## Return a TextureColourMode for the given colour depth and palette.
   case textures.colourDepth
@@ -523,6 +526,7 @@ processCommand = consumer(word):
   of 0x1f:
     # Interrupt requested
     effect:
+      trace "Interrupt requested"
       control.interruptRequested = true
       irqs.set(1, true)
   of 0x20..0x3f:
@@ -723,21 +727,26 @@ processCommand = consumer(word):
 
   of 0xe2:
     effect: textures.window = value[rest].TextureWindow
+    trace fmt"Texture window mask = {textures.window.mask.unpack()}, offset = {textures.window.offset.unpack()}"
 
   of 0xe3:
     effect: drawing.drawingAreaTopLeft = value[rest].PackedScreenCoord
+    trace fmt"Set drawing area top left to {drawing.drawingAreaTopLeft.unpack()}"
 
   of 0xe4:
     effect: drawing.drawingAreaBottomRight = value[rest].PackedScreenCoord
+    trace fmt"Set drawing area bottom right to {drawing.drawingAreaBottomRight.unpack()}"
 
   of 0xe5:
     effect: drawing.drawingAreaOffset = value[rest].PackedSignedCoord
+    trace fmt"Set drawing area offset to {drawing.drawingAreaOffset.unpack()}"
 
   of 0xe6:
     # Mask bit settings
     effect:
       drawing.setMaskBit = value.testBit 0
       drawing.skipMaskedPixels = value.testBit 1
+    trace fmt"setMaskBit = {drawing.setMaskBit}, skipMaskedPixels = {drawing.skipMaskedPixels}"
 
   of 0x80..0x9f:
     # Copy VRAM to VRAM
