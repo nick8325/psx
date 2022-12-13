@@ -201,13 +201,6 @@ proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word {.inline.} 
   if unlikely(address >= 0x80000000u32 and cpu.cop0.sr[ku[0]]):
     raise MachineError(error: AddressError, address: address, kind: kind)
 
-  # If "isolate cache" bit is set, high bits are discarded and
-  # low bits are used to index into scratchpad (only for data,
-  # not code).
-  if kind != Fetch and cpu.cop0.sr[isc]:
-    # TODO: allow scratchpad to be disabled too
-    return (address and 0x3ff) + 0x1f800000
-
   return address # memory.nim does memory mirroring
 
 proc fetch*(cpu: CPU, time: var int64): word {.inline.} =
@@ -220,7 +213,9 @@ proc read*[T](cpu: CPU, address: word, time: var int64): T {.inline.} =
 
 proc write*[T](cpu: CPU, address: word, val: T) {.inline.} =
   ## Write to a given virtual address.
-  addressSpace.write[:T](cpu.resolveAddress(address, Store), val)
+  # When cache is isolated, writes go to icache, which we ignore
+  if not cpu.cop0.sr[isc]:
+    addressSpace.write[:T](cpu.resolveAddress(address, Store), val)
 
 # Instruction decoding and execution.
 
