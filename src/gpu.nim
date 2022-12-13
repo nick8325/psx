@@ -3,6 +3,8 @@
 import basics, utils, irq, eventqueue, rasteriser, savestates
 import std/[bitops, strformat, deques, options]
 
+var pauseOnPrimitive* = false
+
 const loggerComponent = logGPU
 
 type
@@ -454,6 +456,7 @@ let
 
 # TODO: Measure on a real console how GPUSTAT changes throughout the frame
 
+var sleepUntil = 0i64
 proc gpustat*: word =
   let bit13 =
     if screen.verticalInterlace: not screen.frameNumber.testBit(0)
@@ -814,9 +817,17 @@ processCommand = consumer(word):
       warn fmt"Unrecognised GP0 command {value[command]:02x}"
     while true: discard take()
 
+  if pauseOnPrimitive:
+    paused = true
+    sleepUntil = events.now + 10
+    echo "pausing"
+
 proc gp0*(value: word) =
   trace fmt"GP0 {value:08x}"
-  processCommand.give(value)
+  if sleepUntil > events.now:
+    events.at(sleepUntil, "gp0") do(): gp0(value)
+  else:
+    processCommand.give(value)
 
 proc gp1*(value: word) =
   debug fmt"GP1 {value:08x}"

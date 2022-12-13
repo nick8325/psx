@@ -135,6 +135,10 @@ while runGame:
       of K_SPACE:
         paused = false
 
+      of K_P:
+        pauseOnPrimitive = not pauseOnPrimitive
+        paused = false
+
       else:
         echo "unknown key"
 
