@@ -180,7 +180,8 @@ while runGame:
     discard render.setLogicalSize(if showVRam: 1024 else: width, if showVRam: 512 else: height)
     render.setDrawColor 0, 0, 0, 255
     render.clear
-    render.copy texture, nil, nil
+    if displayEnabled() or showVRam:
+      render.copy texture, nil, nil
     render.present
     texture.destroy
 

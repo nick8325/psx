@@ -363,6 +363,9 @@ proc displayArea*: Rect =
 proc displayAreaDepth*: ColourDepth =
   screen.displayAreaDepth
 
+proc displayEnabled*: bool =
+  screen.enabled
+
 proc renderedLines*: Option[bool] =
   if screen.verticalRes == ResDouble and
     screen.verticalInterlace:
