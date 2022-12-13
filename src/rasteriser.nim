@@ -7,6 +7,7 @@ import glm
 {.pop.}
 
 const loggerComponent = logRasteriser
+const wireframe = false
 
 # Type definitions for the rendering primitives.
 
@@ -587,17 +588,20 @@ proc draw*(settings: Settings, tri: Triangle) =
     for x in mins[y]..maxs[y]:
       let p = (x: x, y: y)
 
-      case tri.shadingMode
-      of Colours:
-        let colour = shader.interpolate p
-        putPixel(x, y, colour, settings)
-      of Textures:
-        let coord = textureMapper.interpolate p
-        putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y), settings)
-      of Both:
-        let colour = shader.interpolate p
-        let coord = textureMapper.interpolate p
-        putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y).mix(colour), settings)
+      if wireframe and (x == mins[y] or x == maxs[y]):
+        putPixel(x, y, Pixel(0xffffffu32), settings)
+      else:
+        case tri.shadingMode
+        of Colours:
+          let colour = shader.interpolate p
+          putPixel(x, y, colour, settings)
+        of Textures:
+          let coord = textureMapper.interpolate p
+          putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y), settings)
+        of Both:
+          let colour = shader.interpolate p
+          let coord = textureMapper.interpolate p
+          putTexturePixel(x, y, getPixel(tri.texture, coord.x, coord.y).mix(colour), settings)
 
 proc draw*(settings: Settings, rect: Rectangle) =
   ## Draw a rectangle.
@@ -615,13 +619,17 @@ proc draw*(settings: Settings, rect: Rectangle) =
         if rect.flipY: rect.texture.coords[0].y - y + rect.rect.y1
         else: rect.texture.coords[0].y + y - rect.rect.y1
 
-      case rect.shadingMode
-      of Colours:
-        putPixel(x, y, rect.colour, settings)
-      of Textures:
-        putTexturePixel(x, y, getPixel(rect.texture, tx, ty), settings)
-      of Both:
-        putTexturePixel(x, y, getPixel(rect.texture, tx, ty).mix(rect.colour), settings)
+      if wireframe and (x == rect.rect.x1 or x == rect.rect.x2-1 or
+                        y == rect.rect.y1 or y == rect.rect.y2-1):
+        putPixel(x, y, Pixel(0xffffff), settings)
+      else:
+        case rect.shadingMode
+        of Colours:
+          putPixel(x, y, rect.colour, settings)
+        of Textures:
+          putTexturePixel(x, y, getPixel(rect.texture, tx, ty), settings)
+        of Both:
+          putTexturePixel(x, y, getPixel(rect.texture, tx, ty).mix(rect.colour), settings)
 
 proc draw*(settings: Settings, line: Line) =
   ## Draw a line. The last point on the line is not drawn.
