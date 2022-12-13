@@ -383,8 +383,8 @@ proc getPixel[N: static int](texture: Texture[N]; x, y: int): Pixel =
   let mask = texture.windowMask
   let offset = texture.windowOffset
 
-  let xt = ((x and 0xff) and not (mask.x * 8)) or ((offset.x and mask.x)*8)
-  let yt = ((y and 0xff) and not (mask.y * 8)) or ((offset.y and mask.y)*8)
+  let xt = ((x and 0xff) and not mask.x) or (offset.x and mask.x)
+  let yt = ((y and 0xff) and not mask.y) or (offset.y and mask.y)
 
   case texture.colourMode.depth:
   of FifteenBit: getPixel(texture.page.x + xt, texture.page.y + yt)
