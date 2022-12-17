@@ -46,6 +46,7 @@ var
   # Various FIFOs
   parameters {.saved.} = initDeque[uint8]()
   data {.saved.} = initDeque[uint8]()
+  buffer {.saved.} = initDeque[seq[uint8]]()
   response {.saved.} = initDeque[uint8]()
 
   # First argument: CD out Left/Right, second argument: SPU in Left/Right
@@ -157,12 +158,14 @@ proc scheduleRead* =
         limit = 2048
       let start = (seekPos - leadIn) * sectorSize + offset
       debug fmt"Reading sector of {limit} bytes from sector {seekPos}, position {start}"
+      var sector: seq[uint8]
       for i in 0..<limit:
-        data.addLast (cdfile[start + i].uint8)
+        sector.add (cdfile[start + i].uint8)
+      buffer.addLast sector
       #var msg = "Data: "
       #for x in data: msg &= fmt"{x:02x}"
       #debug msg
-      debug fmt"Data FIFO has length {data.len}"
+      #debug fmt"Data FIFO has length {data.len}"
       respond 1, [stat()]
       seekPos += 1
       scheduleRead()
@@ -288,10 +291,7 @@ proc readRegister*(address: 1..3): uint8 =
     discard readFIFO(response, result)
   of 2:
     # Data FIFO
-    if bfrd:
-      discard readFIFO(data, result)
-    else:
-      warn "Reading data FIFO when BFRD=0"
+    discard readFIFO(data, result)
   of 3:
     case index
     of 0, 2:
@@ -326,6 +326,13 @@ proc writeRegister*(address: 1..3, value: uint8) =
       # Request register
       smen = smen or value.testBit 5
       bfrd = value.testBit 7
+      if bfrd:
+        if len(buffer) > 0:
+          data = buffer.popFirst().toDeque()
+        else:
+          warn "Setting BFRD when sector buffer empty"
+      else:
+        data.clear
   of 1:
     case address
     of 1:
