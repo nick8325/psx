@@ -234,7 +234,7 @@ proc command*(value: uint8) =
     debug "Setmode"
     if not parameters.readFIFO(mode): return
     debug fmt"Mode is {mode:x}"
-    if mode notin {0x80, 0}: warn "Unknown mode"
+    if (mode and 0x1f) != 0: warn fmt "Unknown mode {mode:x}"
     events.after(400000*cpuClock, "CDROM delay") do(): respond 3, [stat()]
   of 0x6:
     debug "ReadN"
