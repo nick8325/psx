@@ -116,7 +116,7 @@ addressSpace.io8 0x1f802081, BuiltIn, nil,
   (val: uint8) => warn "Debug break"
 
 # UART status
-addressSpace.io8 0x1f802021, Serial, () => 4, nil
+addressSpace.io8 0x1f802021, Serial, () => 4u8, nil
 # UART TX
 addressSpace.io8 0x1f802023, Serial, nil,
   proc(val: uint8) =
@@ -128,7 +128,7 @@ for address in 0x1f802024u32..0x1f80202fu32:
   addressSpace.ignore8 address, Serial
 
 # Nocash halt until interrupt
-addressSpace.io8 0x1f802066, BuiltIn, () => 0, nil
+addressSpace.io8 0x1f802066, BuiltIn, () => 0u8, nil
 
 # CD-ROM DATA FIFO
 addressSpace.io16 0x1f801802, CDROM, cdrom.readData16, nil
@@ -208,7 +208,7 @@ addressSpace.io32 0x1f801810, GPU, gpuread, gp0
 addressSpace.io32 0x1f801814, GPU, gpustat, gp1
 
 # PCSX-Redux MIPS API
-addressSpace.io32 0x1f802080, BuiltIn, () => 0x58534350, nil
+addressSpace.io32 0x1f802080, BuiltIn, () => 0x58534350u32, nil
 addressSpace.io32 0x1f802084, BuiltIn, nil,
   proc(val: uint32) =
     var msg: string

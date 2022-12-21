@@ -10,51 +10,51 @@ type
   # page descriptors. A page descriptor is a pointer to a page-aligned block
   # of memory, but we also store information about the page in the low bits.
   # An unmapped page is represented as 0.
-  Page = distinct ByteAddress ## A page descriptor.
+  Page = distinct uint ## A page descriptor.
 
 const
   pageSize = 0x1000
-  flagsMask: ByteAddress = pageSize-1
+  flagsMask: uint = pageSize-1
   addressMask = not flagsMask
-  writableBit: ByteAddress = 1 shl 11
-  ioBit: ByteAddress = 1 shl 10
-  regionBits: ByteAddress = min(writableBit, ioBit)-1
+  writableBit: uint = 1 shl 11
+  ioBit: uint = 1 shl 10
+  regionBits: uint = min(writableBit, ioBit)-1
 
 const
   invalidPage {.used.}: Page = Page(0)
 
 static:
   # Check everything fits in the low bits of the page descriptor
-  assert MemoryRegion.low.ByteAddress >= 0 and MemoryRegion.high.ByteAddress <= regionBits
+  assert MemoryRegion.low.uint >= 0 and MemoryRegion.high.uint <= regionBits
   assert ((writableBit or ioBit or regionBits) and addressMask) == 0
 
 func initPage(page: ptr array[pageSize, byte], writable: bool, io: bool, region: MemoryRegion): Page =
   ## Create a page descriptor from a page-aligned piece of memory.
 
-  let address = cast[ByteAddress](page)
+  let address = cast[uint](page)
   assert (address and flagsMask) == 0
-  Page(address or (if writable: writableBit else: 0) or (if io: ioBit else: 0) or region.ByteAddress)
+  Page(address or (if writable: writableBit else: 0) or (if io: ioBit else: 0) or region.uint)
 
 func pointer(page: Page): ptr array[pageSize, byte] {.inline.} =
   ## Get the pointer from a page descriptor (or null).
 
   # This gives null if the page is invalid
-  cast[ptr array[pageSize, byte]](ByteAddress(page) and addressMask)
+  cast[ptr array[pageSize, byte]](uint(page) and addressMask)
 
 func writable(page: Page): bool {.inline.} =
   ## Is a page writable?
 
-  (ByteAddress(page) and writableBit) != 0
+  (uint(page) and writableBit) != 0
 
 func io(page: Page): bool {.inline.} =
   ## Does a page represent memory-mapped I/O?
 
-  (ByteAddress(page) and ioBit) != 0
+  (uint(page) and ioBit) != 0
 
 func region(page: Page): MemoryRegion {.inline.} =
   ## What memory region does a given page belong to?
 
-  MemoryRegion(ByteAddress(page) and regionBits)
+  MemoryRegion(uint(page) and regionBits)
 
 type
   IOKind* {.pure.} = enum
@@ -89,11 +89,11 @@ proc io32*(memory: var Memory, address: word, region: MemoryRegion, read: proc()
   memory.io32[address] = IOHandler[uint32](region: region, read: read, write: write)
 
 proc ignore8*(memory: var Memory, address: word, region: MemoryRegion) =
-  io8(memory, address, region, () => 0, proc(val: uint8) = discard)
+  io8(memory, address, region, () => 0u8, proc(val: uint8) = discard)
 proc ignore16*(memory: var Memory, address: word, region: MemoryRegion) =
-  io16(memory, address, region, () => 0, proc(val: uint16) = discard)
+  io16(memory, address, region, () => 0u16, proc(val: uint16) = discard)
 proc ignore32*(memory: var Memory, address: word, region: MemoryRegion) =
-  io32(memory, address, region, () => 0, proc(val: uint32) = discard)
+  io32(memory, address, region, () => 0u32, proc(val: uint32) = discard)
 proc cell8*(memory: var Memory, address: word, region: MemoryRegion) =
   let cell = uint8.new
   io8 memory, address, region, () => cell[],
@@ -127,7 +127,7 @@ proc resolve[T](memory: Memory, address: word, kind: AccessKind): ResolvedAddres
     raise MachineError(error: BusError, address: address, kind: kind)
 
   {.push warning[CastSizes]: off.}
-  let pointer = cast[ptr T](cast[ByteAddress](entry.pointer) +% cast[ByteAddress](offset))
+  let pointer = cast[ptr T](cast[uint](entry.pointer) + cast[uint](offset))
   {.pop.}
 
   return (pointer: pointer, writable: entry.writable, io: entry.io(), region: entry.region())

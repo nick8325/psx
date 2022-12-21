@@ -24,7 +24,7 @@ func `$`*(x: CoRegister): string =
 func `<=`(r1, r2: Register): bool {. borrow .} # needed for iterator to work
 
 type
-  COP0 {.requiresInit.} = object
+  COP0 = object
     ## COP0 status. All fields are COP0 registers.
     sr: word
     cause: word
@@ -131,7 +131,7 @@ proc enterKernel(cop0: var COP0) =
   cop0.sr[ie[0]] = false
 
 type
-  CPU* {.requiresInit.} = object
+  CPU* = object
     ## CPU state.
     pc*: word ## Current PC.
     nextPC: word ## Next PC. Used to implement branch delay slot.
