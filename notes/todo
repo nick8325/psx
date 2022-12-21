@@ -19,3 +19,4 @@ Features:
 
 * Implement on-disk save states
 * Add a debugger
+* Use Nim effect system to check use of 'effect:' in GPU coroutine thingy
