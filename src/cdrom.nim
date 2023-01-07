@@ -2,6 +2,7 @@
 
 import utils, irq, eventqueue, basics, savestates
 import std/[bitops, strformat, deques, options, tables]
+import cdrom/image
 
 const loggerComponent = logCDROM
 #logCDROM.level = lvlDebug
@@ -10,8 +11,7 @@ const
   sectorSize = 2352
 
 let
-  cdfile = readFile "test.bin"
-  lengthInFrames = len(cdfile) div sectorSize
+  cd = readCUE "test.cue"
 
 const
   framesPerSec = 75
@@ -32,9 +32,6 @@ proc bcd(x: uint8): uint8 =
 proc unBCD(x: uint8): uint8 =
   assert (x mod 16) < 10
   return (x div 16) * 10 + (x mod 16)
-
-const
-  leadIn = toFrame(0, 2, 0)
 
 type
   Channel {.pure.} = enum Left, Right
@@ -156,11 +153,8 @@ proc scheduleRead* =
         # Non-raw read
         offset = 0x18
         limit = 2048
-      let start = (seekPos - leadIn) * sectorSize + offset
-      debug fmt"Reading sector of {limit} bytes from sector {seekPos}, position {start}"
-      var sector: seq[uint8]
-      for i in 0..<limit:
-        sector.add (cdfile[start + i].uint8)
+      debug fmt"Reading sector of {limit} bytes from sector {seekPos}, offset {offset}"
+      let sector = cd.read(seekPos)[offset ..< offset+limit]
       buffer.addLast sector
       #var msg = "Data: "
       #for x in data: msg &= fmt"{x:02x}"
@@ -215,21 +209,21 @@ proc command*(value: uint8) =
     events.after(400000*cpuClock, "CDROM delay") do(): respond 2, [stat(), 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x45] # SCEE
   of 0x13:
     debug "GetTN"
-    respond 3, [stat(), 1, 1]
+    respond 3, [stat(), 1, cd.trackCount.uint8.bcd]
   of 0x14:
     debug "GetTD"
     var param: uint8
     if not parameters.readFIFO(param): return
-    case param
-    of 0:
-      let time = lengthInFrames.toTime
+    let track = param.unBCD.int
+    if track == 0:
+      let time = cd.sectors.toTime
       respond 3, [stat(), time.min.uint8.bcd, time.sec.uint8.bcd]
-    of 1:
-      let time = lengthInFrames.toTime
+    elif track >= 1 and track <= cd.trackCount:
+      let time = cd.trackStart(track).toTime
       respond 3, [stat(), time.min.uint8.bcd, time.sec.uint8.bcd]
     else:
-      warn fmt "Unknown track number {param}"
-      respond 5, []
+      warn fmt "Unknown track number {track}"
+      respond 5, [0x10u8]
   of 0xe:
     debug "Setmode"
     if not parameters.readFIFO(mode): return
