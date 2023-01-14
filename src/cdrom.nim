@@ -5,7 +5,7 @@ import std/[bitops, strformat, deques, options]
 import cdrom/image
 
 const loggerComponent = logCDROM
-#logCDROM.level = lvlDebug
+logCDROM.level = lvlDebug
 
 let
   cd = readCUE "test.cue"
@@ -151,13 +151,18 @@ proc scheduleRead* =
         offset = 0x18
         limit = 2048
       debug fmt"Reading sector of {limit} bytes from sector {seekPos}, offset {offset}"
-      let sector = cd.read(seekPos)[offset ..< offset+limit]
-      buffer.addLast sector
+      let rawSector = cd.read(seekPos)
       #var msg = "Data: "
       #for x in data: msg &= fmt"{x:02x}"
       #debug msg
       #debug fmt"Data FIFO has length {data.len}"
-      respond 1, [stat()]
+      if rawSector[0x12].testBit(2) and rawSector[0x12].testBit(6) and (mode.testBit(3) or mode.testBit(6)):
+        debug fmt"Skipping sector with subheader byte 3 {rawSector[0x12]:x}"
+      else:
+        debug fmt"Accepting sector with subheader byte 3 {rawSector[0x12]:x}"
+        let sector = cd.read(seekPos)[offset ..< offset+limit]
+        buffer.addLast sector
+        respond 1, [stat()]
       seekPos += 1
       scheduleRead()
 
@@ -248,6 +253,12 @@ proc command*(value: uint8) =
     reading = false
     events.after(400000*cpuClock, "CDROM delay") do():
       respond 2, [stat()]
+  of 0xb:
+    debug "Mute"
+    respond 3, [stat()]
+  of 0xc:
+    debug "Demute"
+    respond 3, [stat()]
   of 0xa:
     debug "Init"
     respond 3, [stat()]
