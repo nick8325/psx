@@ -1,0 +1,231 @@
+11/12/2021--02/01/2022:
+First attempts at writing a MIPS implementation in Zig.
+
+02/01/2022--08/01/2022:
+Change from Zig to Nim, more work on the CPU.
+
+08/01/2022:
+I/O, IRQ chip.
+
+09/01/2022:
+Event loop, IRQ 0 (VBLANK).
+
+15/01/2022:
+A basic version of the DMA chip.
+
+15/01/2022--16/01/2022:
+The GPU -- decoding commands, GPUSTAT, etc. No rasterisation yet.
+
+18/01/2022:
+Use coroutines to model hardware buffers.
+
+19/01/2022--20/01/2022:
+Help, how do I draw triangles? (no commits)
+Remember about the Graphics Programming Black Book and read some of it.
+
+21/01/2022:
+First graphics! Only solid rectangles though.
+
+22/01/2022:
+Triangle rasterisation!
+
+23/01/2022:
+Gouraud shading! Texture mapping! 24-bit colours!
+The first screen of the BIOS renders!
+
+24/01/2022:
+The BIOS doesn't get as far as the second screen.
+Add dummy implementations of CD-ROM and timers, but they don't help.
+
+28/01/2022:
+Some tracing and mucking around with Ghidra.
+After running GetID, the BIOS hangs while waiting for some event to fire.
+Suspect the event has to do with timers. Must implement them.
+It gets further on SCPH1001. Mystery!
+
+29/01/2022:
+With SCPH1001, it crashes on an unimplemented COP2 instruction. Add a dummy implementation.
+Now it gets to the second screen, albeit drawing a blank screen. Woohoo!
+Add "draw line" command for OpenBIOS, but without rasterisation.
+
+12/02/2022:
+Finally bite the bullet and implement timers. It's tricky -- they have
+a bunch of different programmable modes for when they trigger/pause/reset.
+And the fastest one runs at ~50MHz so you can't just simulate them
+clock-by-clock. Come up with a nice design where the timer figures out
+when the next "event" of interest happens and fast forwards to then.
+
+12/02/2022:
+Well, it turns out the CPU code had a bug which was never triggering IRQs.
+That could explain some things...
+A bit more work, and it gets to the second screen on SCPH1002 as well!
+Seems like it was indeed waiting for a timer to fire.
+
+13/02/2022:
+Drawing the second screen means more bugs to be fixed :)
+Mostly in the rasteriser - all kinds of graphical glitches.
+Fix them one by one, until only one is left: for some objects on the
+screen, only every second line is drawn. The bug surely has to do with
+the interlaced video output, but what is it exactly?
+
+Try to fix the interlaced video bug: Think hard about VBLANK, HBLANK,
+and such things. Improve the accuracy of the corresponding flags in GPUSTAT.
+
+Enable the BIOS's TTY output. Lots of exciting debug messages from 1994!
+
+14/02/2022:
+Make the CD-ROM claim that there's a CD inserted. The BIOS doesn't
+recognise it yet.
+
+Improve handling of load delay slot (the PSX BIOS does some questionable things).
+
+More work on the interlaced video bug. Perhaps it's to do with timings?
+Correctly simulate memory timings. It doesn't seem to help.
+
+16/02/2022:
+Start work on the joypad controller. The BIOS doesn't recognise the
+joypad. Aargh. *bangs head against wall*
+
+Implement line drawing, so that the OpenBIOS splash screen displays.
+
+17/02/2022:
+Implement EXE loading. Using this, run the AmiDog CPU tests, which
+reveal loads of bugs -- mostly undocumented behaviour that I didn't
+implement correctly. Fix them.
+
+21/02/2022:
+I/O handling refactor. More unsuccessful CD-ROM tinkering.
+
+CD still not detected. Joypad still not detected. Interlaced bug still there.
+What is the matter?!
+
+08/05/2022:
+Hook the joypad up to the PC keyboard. The BIOS still doesn't detect
+the joypad, but strangely, the AmiDog tests do.
+
+06/10/2022:
+I totally misread the documentation, and had the timers running at 4MHz,
+when they should run at 50MHz!! 
+
+Fixing that, and modelling memory delays for uncached memory, fixes
+the interlacing bug.
+
+That's the motivation I need. Let's try and fix the stupid Joypad and CD-ROM!
+
+13/10/2022 -- 22/10/2022:
+Implement savestates (in-memory only, not on-disk).
+
+23/10/2022:
+Better CPU accuracy.
+
+23/10/2022:
+The BIOS detects the Joypad!! The problem was some STUPID delays that
+I had in the code, which had no reason to be there.
+Follow it up by implementing memory card support (which uses the same
+bus as the Joypad). Can boot into the BIOS and see all the saved games
+on the memory card :) (graphical glitches tho)
+
+24/10/2022:
+Now that the Joypad works, time to work on the CD-ROM. Get it kind of
+working! Well, it reads something from the CD-ROM, but displays a
+non-standard "licensed by Sony" screen, so something is off.
+Also, that screen is missing stuff, because there's no GTE yet.
+
+28/10/2022:
+Implement the GTE. It's pretty big! It doesn't seem to help yet.
+Try to run some GTE tests, but loading the EXE fails.
+Fix some bugs in the EXE loader.
+
+04/11/2022 -- 05/11/2022:
+Fix lots of GTE bugs, with the help of the tests.
+The PlayStation logo appears!
+
+Why does it show the non-standard "licensed by Sony" screen,
+rather than booting to the game?
+
+05/11/2022:
+For a while, all the AmiDog CPU tests have been passing -- except for
+SWL/SWR. They've been bugging me all this time. Finally get out some
+paper, think really hard and fix them once and for all. It works!
+
+It still doesn't boot to the game.
+
+05/11/2022:
+Realise that all CD-ROM sectors numbers are supposed to be specified
+in BCD, because of course they are. Fix that, and...
+
+...it boots to the proper "licensed by Sony" screen!
+...and then the game boots to its publisher splash screen!
+...and then to the main menu!
+...and then the intro plays!
+...and then it runs, just fine!
+
+The game is Crash Bandicoot. I have some fun playing it.
+It runs at half speed, but well, whatever :D
+
+05/11/2022:
+Now that it can play games, make it display only what's supposed to be
+on the screen, rather than the whole VRAM, by default.
+
+06/11/2022:
+A few accuracy improvements.
+
+05/12/2022 -- 06/12/2022:
+Improve the GTE. Now it passes all the AmiDog and gte-fuzz tests!
+It's a bit tricky, since you have to emulate all kinds of overflow
+conditions correctly. As usual, figure out the difficult bits by
+looking at DuckStation (thank you, DuckStation).
+
+Why bother with 100% accuracy? Well, Ridge Racer is playing with all
+kinds of graphical artifacts. Namely: (1) the road is pitch black;
+(2) the spectators are neon pink. Hoping that fixing the GTE will fix
+this. Spoiler: it doesn't.
+
+11/12/2022 -- 12/12/2022:
+Now I'm running a bunch of GPU tests from the internet. Don't know why
+I didn't try them before. I have a bunch of bugs, but they're not too
+hard to track down. For example: tested if a pixel was black by
+checking uint16(p) == 0, not uint32(p) == 0. Whoops. Fix the bugs
+and... no effect on Ridge Racer.
+
+12/12/2022:
+OK, fixed one of the bugs in Ridge Racer (the neon spectators), with
+the help of one of the GPU tests. My implementation of texture windows
+was messed up.
+
+12/12/2022:
+Can't figure out why these roads are being drawn pitch black.
+Add a wireframe mode, which shows that the triangle positions are sensible.
+Add a key combo to step through one triangle draw at a time, which
+shows that the offending triangles are being drawn with colour #000000,
+i.e. pitch black. Weird.
+
+The PSX has some interesting behaviour with black pixels -- sometimes
+they should be treated as transparent. Maybe I'm handling that wrong?
+If I force all black pixels to be transparent, then it works fine!
+But no, the game is definitely asking to draw opaque black triangles.
+Very strange.
+
+13/12/2022:
+Fixed it. The bug was... in the CPU's data cache emulation! What?!
+
+Well, I was emulating the "isolate cache" bit incorrectly. The upshot
+was, that the BIOS function for clearing the cache, was instead
+clearing the PSX's 4KB scratchpad RAM. Hence the colours for the
+triangles in the road were all #000000, hence the road being pitch black.
+
+Anyway. It's fixed! Woohoo! Play some Ridge Racer. And then some more.
+
+17/12/2022:
+Improve CD-ROM accuracy a bit (misapprehension about how the 8-sector
+data buffer works).
+
+24/12/2022 -- 07/01/2022:
+Up to now, the CD-ROM only supports one .bin file as input, i.e. a
+single-track CD image. But many games use multiple tracks. The
+standard format is .cue+.bin.
+
+Spend half a day writing a CUE file parser. Investigate various parser
+combinator libraries, yacc equivalents, etc. It's all a bit of a pain.
+Finally decide to wrap libcue instead. It works well! So now the CD-ROM
+supports multi-track disks.
