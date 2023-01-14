@@ -9,7 +9,8 @@ const
 type
   Component* = enum
     logCPU, logMemory, logEventQueue, logGPU, logRasteriser,
-    logDMA, logIRQ, logTimer, logCDROM, logMachine, logJoy, logGTE
+    logDMA, logIRQ, logTimer, logCDROM, logMachine, logJoy, logGTE,
+    logMDEC, logSPU
 
 func initialLevel(component: Component): Level {.inline.} =
   lvlInfo
@@ -248,6 +249,9 @@ proc reset*[T](co: var Consumer[T]) =
   co.buffer.setLen(0)
   co.iter = empty
   co.runIter(T.default, false)
+
+proc busy*[T](co: Consumer[T]): bool =
+  co.buffer.len > 0
 
 proc give*[T](co: var Consumer[T], value: T) =
   co.buffer.add(value)
