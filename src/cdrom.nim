@@ -235,6 +235,11 @@ proc command*(value: uint8) =
     respond 3, [stat()]
     reading=true
     scheduleRead()
+  of 0x1b:
+    debug "ReadS"
+    respond 3, [stat()]
+    reading=true
+    scheduleRead()
   of 0x1e:
     debug "ReadTOC"
     respond 3, [stat()]
