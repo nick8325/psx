@@ -1,14 +1,11 @@
 ## The CD-ROM controller.
 
 import utils, irq, eventqueue, basics, savestates
-import std/[bitops, strformat, deques, options, tables]
+import std/[bitops, strformat, deques, options]
 import cdrom/image
 
 const loggerComponent = logCDROM
 #logCDROM.level = lvlDebug
-
-const
-  sectorSize = 2352
 
 let
   cd = readCUE "test.cue"

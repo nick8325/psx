@@ -1,7 +1,8 @@
 import sdl2, sdl2/gfx
 import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom, timer, cpu
 import std/os
-import std/[strformat, monotimes, times, options, heapqueue, tables, algorithm]
+import std/[monotimes, times, options, heapqueue, tables, algorithm]
+#import std/strformat
 
 discard sdl2.init(INIT_EVERYTHING)
 

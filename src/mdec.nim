@@ -1,6 +1,6 @@
 ## Motion decoder chip.
 
-import basics, utils, irq, eventqueue, savestates
+import basics, utils, savestates
 import std/[strformat, deques, bitops]
 
 const loggerComponent = logMDEC
