@@ -229,3 +229,12 @@ Spend half a day writing a CUE file parser. Investigate various parser
 combinator libraries, yacc equivalents, etc. It's all a bit of a pain.
 Finally decide to wrap libcue instead. It works well! So now the CD-ROM
 supports multi-track disks.
+
+14/01/2022:
+I'd like to get Suikoden booting, but it crashes with an AddressError.
+Implemented a dummy MDEC just in case it's an FMV problem, but that
+doesn't help. In fact, it seems to be a faulty DMA - a linked-list DMA
+which eventually points to a list node at address 0.
+
+Perhaps something is being read incorrectly from the CD-ROM?
+Implemented a rough version of ADPCM filtering, but it didn't help.
