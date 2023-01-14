@@ -104,6 +104,7 @@ proc checkInterrupt =
 proc transfer(chan: Channel, startingAddress: word, size: word): word =
   ## Do a basic DMA transfer.
 
+  debug fmt"Transferring {size} words starting at address {startingAddress:x}"
   var address = startingAddress
   for i in 0..<size:
     case chan.channelControl[direction]
@@ -122,7 +123,7 @@ proc checkChannel(n: ChannelNumber, chan: var Channel) =
   # TODO run at a realistic clock rate
   if control[enableChannel[n]] and
      (chan.channelControl[startBusy] or chan.channelControl[startTrigger]):
-    debug fmt"Starting DMA transfer on channel {n}"
+    debug fmt"Starting DMA transfer on channel {n}, mode {chan.channelControl[syncMode]}"
     chan.channelControl[startTrigger] = false
     var address = chan.baseAddress and not 3u32
 
