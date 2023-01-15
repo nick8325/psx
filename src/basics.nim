@@ -61,6 +61,10 @@ const
   vramWidth* = 1024
   vramHeight* = 512
 
+func hz*(val: int): int64 =
+  ## Convert a frequency in Hz to a number of clock ticks.
+  clockRate div val
+
 var
   region* {.saved.}: Region = PAL ## The game's region. Updated by the BIOS.
 

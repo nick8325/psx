@@ -139,7 +139,7 @@ proc stat: uint8 =
   result = result or 0x2
 
 proc scheduleRead* =
-  events.after(400000*cpuClock, "CDROM delay") do():
+  events.after(150.hz, "CDROM delay") do():
     if reading:
       var offset, limit: int
       if (mode and 0x20) != 0:
@@ -194,7 +194,7 @@ proc command*(value: uint8) =
   of 0x15:
     debug "SeekL"
     respond 3, [stat()]
-    events.after(4000000*cpuClock, "CDROM delay") do(): respond 2, [stat()]
+    events.after(10.hz, "CDROM delay") do(): respond 2, [stat()]
   of 0x19:
     debug "Test"
     var param: uint8
@@ -208,7 +208,7 @@ proc command*(value: uint8) =
   of 0x1a:
     debug "GetID"
     respond 3, [stat()]
-    events.after(400000*cpuClock, "CDROM delay") do(): respond 2, [stat(), 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x45] # SCEE
+    events.after(0x4a00*cpuClock, "CDROM delay") do(): respond 2, [stat(), 0x00, 0x20, 0x00, 0x53, 0x43, 0x45, 0x45] # SCEE
   of 0x13:
     debug "GetTN"
     respond 3, [stat(), 1, cd.trackCount.uint8.bcd]
@@ -251,7 +251,7 @@ proc command*(value: uint8) =
     debug "Pause"
     respond 3, [stat()]
     reading = false
-    events.after(400000*cpuClock, "CDROM delay") do():
+    events.after(0x200000*cpuClock, "CDROM delay") do():
       respond 2, [stat()]
   of 0xb:
     debug "Mute"
@@ -262,7 +262,7 @@ proc command*(value: uint8) =
   of 0xa:
     debug "Init"
     respond 3, [stat()]
-    events.after(400000*cpuClock, "CDROM delay") do():
+    events.after(10.hz, "CDROM delay") do():
       mode = 0x20
       reading = false
       seekPos = 0
@@ -324,7 +324,7 @@ proc writeRegister*(address: 1..3, value: uint8) =
       if smen: commandStart = true
       busy = true
       checkInterrupts()
-      events.after(0x1000 * cpuClock, "CDROM delay") do ():
+      events.after(0x4000 * cpuClock, "CDROM delay") do ():
         command(value)
     of 2:
       # Parameter FIFO
