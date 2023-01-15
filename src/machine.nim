@@ -247,6 +247,9 @@ addressSpace.io16 0x1f801daeu32, SPU,
   () => (spucnt and 0x3f) or (if spucnt.testBit 5: 1 shl 7 else: 0),
   nil
 
+onVBlank("fake SPU IRQ") do():
+  irqs.signal 9
+
 # MDEC
 addressSpace.io32 0x1f801820u32, MDEC, mdecResponse, mdecCommand
 addressSpace.io32 0x1f801824u32, MDEC, mdecStatus, mdecControl
