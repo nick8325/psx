@@ -238,3 +238,8 @@ which eventually points to a list node at address 0.
 
 Perhaps something is being read incorrectly from the CD-ROM?
 Implemented a rough version of ADPCM filtering, but it didn't help.
+
+15/01/2022:
+Should really implement a debugger. It's probably sensible to just
+implement a GDB stub - one with reversible execution too.
+None of the existing stubs I've found look usable, unfortunately.
