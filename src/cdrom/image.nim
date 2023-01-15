@@ -108,7 +108,7 @@ type ParseError* = object of CatchableError
 proc readCUE*(cuePath: string): CD =
   ## Read a CUE file.
 
-  let dir = splitFile(cuePath.expandSymlink).dir.absolutePath
+  let dir = splitFile(cuePath.expandFilename).dir
   let contents = cstring(readFile(cuePath))
   let cd = cue_parse_string(contents)
   if cd == nil: raise newException(ParseError, "parse error")
