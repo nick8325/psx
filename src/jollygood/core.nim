@@ -26,24 +26,28 @@ proc step(): float =
   let width = screenWidth()
   let height = screenHeight()
 
-  if not displayEnabled():
+  let shouldDrawFrame =
+    displayEnabled() and width >= 100 and height >= 100
+
+  if not shouldDrawFrame:
     for row in framebuffer[].mitems():
       for pixel in row.mitems():
         pixel = 0
+    render(0, 0, 640, 480)
   else:
     for i in 0..<height:
-      let shouldDraw =
+      let shouldDrawLine =
         if lines.isNone(): true
         else: lines.get.int == i mod 2
-      if shouldDraw:
+      if shouldDrawLine:
         for j in 0..<width:
           let pixel =
             case displayAreaDepth()
             of Depth15: getPixel(area.x1 + j, area.y1 + i)
             of Depth24: getPixel24(area.x1, j, area.y1 + i)
           framebuffer[][i][j] = pixel.uint32
+    render(0, 0, width, height)
 
-  render(0, 0, width, height)
   return (after - before).float / clockRate.float
 
 let
