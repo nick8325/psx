@@ -220,7 +220,7 @@ Anyway. It's fixed! Woohoo! Play some Ridge Racer. And then some more.
 Improve CD-ROM accuracy a bit (misapprehension about how the 8-sector
 data buffer works).
 
-24/12/2022 -- 07/01/2022:
+24/12/2022 -- 07/01/2023:
 Up to now, the CD-ROM only supports one .bin file as input, i.e. a
 single-track CD image. But many games use multiple tracks. The
 standard format is .cue+.bin.
@@ -230,7 +230,7 @@ combinator libraries, yacc equivalents, etc. It's all a bit of a pain.
 Finally decide to wrap libcue instead. It works well! So now the CD-ROM
 supports multi-track disks.
 
-14/01/2022:
+14/01/2023:
 I'd like to get Suikoden booting, but it crashes with an AddressError.
 Implemented a dummy MDEC just in case it's an FMV problem, but that
 doesn't help. In fact, it seems to be a faulty DMA - a linked-list DMA
@@ -239,7 +239,16 @@ which eventually points to a list node at address 0.
 Perhaps something is being read incorrectly from the CD-ROM?
 Implemented a rough version of ADPCM filtering, but it didn't help.
 
-15/01/2022:
+15/01/2023:
 Should really implement a debugger. It's probably sensible to just
 implement a GDB stub - one with reversible execution too.
 None of the existing stubs I've found look usable, unfortunately.
+
+09/02/2023:
+Learnt about a new emulator frontend called Jolly Good. Added some
+code to hook my emulator up to it. Should save me having to write a
+frontend!
+
+GDB stubs seem annoying to write. I think it may make more sense to
+just have some kind of Lua debug REPL. There are some good-looking
+packages for Nim-Lua interoperability.
