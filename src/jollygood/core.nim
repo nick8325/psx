@@ -2,29 +2,95 @@
 import jollygood/binding
 
 import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom, timer, cpu
-import std/options
+import std/[options, strformat]
+
+type
+  DebugButton = enum
+    dbSingleStep,
+    dbSingleStepGPU,
+    dbContinue,
+    dbTriggerIRQs,
+    dbShowVram,
+    dbWireframeGraphics,
+    dbDumpCDROM,
+    dbDebugTimers
+
+const
+  debugButtonNames: array[DebugButton, string] =
+    ["Single step", "Single step GPU", "Continue",
+     "Trigger all IRQs", "Show VRAM",
+     "Wireframe graphics", "Dump CDROM", "Debug timers"]
 
 type
   Framebuffer = ptr array[512, array[1024, uint32]]
 
-
 # TODO: gamma ramp
-# TODO: exe loading
 # TODO: read CD from game info
 # TODO: proper input support
 
+proc loadGame(): bool =
+  discard loadEXE(gameFile.data)
+  true
+
+var
+  showVRam: bool = false
+
 proc step(): float =
+  let debugPressed = inputs[0].buttonPressed
+
+  if debugPressed[dbSingleStep.int]:
+    paused = false
+    pauseOnPrimitive = false
+  defer:
+    if debugPressed[dbSingleStep.int]:
+      paused = true
+
+  if debugPressed[dbSingleStepGPU.int]:
+    paused = false
+    pauseOnPrimitive = true
+
+  if debugPressed[dbContinue.int]:
+    paused = false
+    pauseOnPrimitive = false
+
+  if debugPressed[dbTriggerIRQs.int]:
+    for irq in 0..10:
+      irqs.signal(irq)
+
+  if debugPressed[dbShowVRAM.int]:
+    showVRam = not showVRam
+
+  if debugPressed[dbWireframeGraphics.int]:
+    wireframe = not wireframe
+
+  if debugPressed[dbDumpCDROM.int]:
+    echo dumpCDROM()
+
+  if debugPressed[dbDebugTimers.int]:
+    timerDebug = not timerDebug
+
   let before = events.now()
+  var after: int64
   runSystem(nextVBlankDelta())
   runSystem(vblankClocks())
-  let after = events.now()
+  if paused:
+    after = before + clockRate div 50
+  else:
+    after = events.now()
 
   let framebuffer = cast[Framebuffer](buffer())
 
-  let lines = renderedLines()
-  let area = displayArea()
-  let width = screenWidth()
-  let height = screenHeight()
+  var lines = renderedLines()
+  var area = displayArea()
+  var width = screenWidth()
+  var height = screenHeight()
+
+  if showVram:
+    lines = none(bool)
+    area.x1 = 0
+    area.y1 = 0
+    width = 1024
+    height = 512
 
   let shouldDrawFrame =
     displayEnabled() and width >= 100 and height >= 100
@@ -51,6 +117,13 @@ proc step(): float =
   return (after - before).float / clockRate.float
 
 let
+  debugInput = Input(
+    kind: ikController,
+    name: "debugger",
+    fullName: "Debug controls",
+    axes: @[],
+    buttons: @debugButtonNames)
+
   core = Core(
     name: "psx",
     fullName: "my toy psx emulator",
@@ -66,8 +139,8 @@ let
     audioRate: 44100,
     audioChannels: 2,
 
-    inputs: @[],
-    loadGame: proc(): bool = true,
+    inputs: @[debugInput],
+    loadGame: loadGame,
     step: step)
 
 registerCore core

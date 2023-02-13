@@ -75,7 +75,7 @@ events.every(proc: int64 = clockRate, "dump ram") do():
   dumpRAM("ram")
 
 if paramCount() >= 1:
-  loadEXE(readFile(paramStr(1)))
+  assert loadEXE(readFile(paramStr(1)))
 
 var state: State = save()
 

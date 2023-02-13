@@ -277,12 +277,12 @@ type EXE {.packed.} = object
 const wantedID: array[8, char] = ['P', 'S', '-', 'X', ' ', 'E', 'X', 'E']
 var header {.saved.}: EXE
 
-proc loadEXE*(exe: string) =
+proc loadEXE*(exe: openarray[char]): bool =
   if exe.len > EXE.sizeof:
     header = (cast[ptr EXE](addr(exe[0])))[]
 
     if header.id != wantedID:
-      error "EXE file has wrong header"
+      return false
 
     for i in header.memFillStart ..< header.memFillStart + header.memFillSize:
       addressSpace.rawWrite[:uint8](i, 0)
@@ -291,7 +291,9 @@ proc loadEXE*(exe: string) =
       addressSpace.rawWrite[:uint8](header.loadAddress + i.word - 0x800, exe[i].uint8)
 
   else:
-    error "EXE file too small"
+    return false
+
+  return true
 
 proc runSystem*(clocks: int64) =
   ## Run the system.

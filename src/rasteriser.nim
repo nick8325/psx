@@ -7,7 +7,7 @@ import glm
 {.pop.}
 
 const loggerComponent = logRasteriser
-const wireframe = false
+var wireframe* = false
 
 # Type definitions for the rendering primitives.
 

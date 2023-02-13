@@ -100,7 +100,7 @@ type
       ## The filename without directory
     basename*: string
       ## The filename without directory or extensoion
-    data*: seq[uint8]
+    data*: string
       ## The file contents
 
 var
@@ -114,6 +114,10 @@ type
       ## The values of the analogue axes
     button*: seq[bool]
       ## The values of the buttons
+    buttonPressed*: seq[bool]
+      ## True for buttons which have just been pressed this clock cycle
+    buttonReleased*: seq[bool]
+      ## True for buttons which have just been released this clock cycle
 
 var
   inputs*: seq[InputState]
@@ -136,6 +140,11 @@ proc render*(x, y, w, h: int)
 var
   theCore: Core
   coreLoaded: bool = false
+  coreInfo: jg_coreinfo_t
+  videoInfo: jg_videoinfo_t
+  audioInfo: jg_audioinfo_t
+  inputInfo: seq[jg_inputinfo_t]
+  inputState: seq[ptr jg_inputstate_t]
 
 proc core: Core =
   assert coreLoaded
@@ -214,6 +223,22 @@ proc jg_reset(kind: cint) {.api.} =
 
 proc jg_exec_frame {.api.} =
   trace "jg_exec_frame"
+
+  # Update controller buttons
+  for port in 0..<inputs.len:
+    let state = inputState[port]
+    let axisPtr = cast[ptr UncheckedArray[int16]](state[].axis)
+    let buttonPtr = cast[ptr UncheckedArray[bool]](state[].button)
+    let numAxes = core().inputs[port].axes.len
+    let numButtons = core().inputs[port].buttons.len
+    let axis = axisPtr.toOpenArray(0, numAxes-1).toSeq
+    let button = buttonPtr.toOpenArray(0, numButtons-1).toSeq
+    inputs[port].axis = axis
+    for i in 0 ..< button.len:
+      inputs[port].buttonPressed[i] = button[i] and not inputs[port].button[i]
+      inputs[port].buttonReleased[i] = not button[i] and inputs[port].button[i]
+    inputs[port].button = button
+
   let frameTime = core().step()
   callbackFrametime(1/frameTime)
 
@@ -269,12 +294,6 @@ proc jg_data_push(kind: uint32, port: cint, buf: constpointer, size: csize_t) {.
   trace "jg_data_push"
   discard
 
-var
-  coreInfo: jg_coreinfo_t
-  videoInfo: jg_videoinfo_t
-  audioInfo: jg_audioinfo_t
-  inputInfo: seq[jg_inputinfo_t]
-
 proc jg_get_coreinfo(system: constcstring): ptr jg_coreinfo_t {.api.} =
   trace "jg_get_coreinfo"
   return addr(coreInfo)
@@ -306,14 +325,15 @@ proc jg_setup_audio {.api.} =
 
 proc jg_set_inputstate(state: ptr jg_inputstate_t, port: cint) {.api.} =
   trace "jg_set_inputstate"
-  discard
+  inputState[port] = state
 
 proc toFile(info: jg_fileinfo_t): File =
   result.path = $info.path
   result.name = $info.fname
   result.basename = $info.name
-  let data = cast[ptr UncheckedArray[uint8]](info.data)
-  result.data = data.toOpenArray(0, info.size.int-1).toSeq
+  result.data = newStringOfCap info.size
+  for i in 0 ..< info.size.int:
+    result.data.add cast[cstring](info.data)[i]
 
 proc jg_set_gameinfo(info: jg_fileinfo_t) {.api.} =
   trace "jg_set_gameinfo"
@@ -327,6 +347,7 @@ proc jg_set_paths(paths: jg_pathinfo_t) {.api.} =
   trace "jg_set_paths"
   discard
 
+# TODO: allow freeing a jg_inputinfo_t too
 proc toInputInfo(i: int, input: Input): jg_inputinfo_t =
   result.`type` = input.kind.int.jg_inputtype
   result.index = i.cint
@@ -370,9 +391,14 @@ proc registerCore*(core: Core) =
   audioInfo.spf = 50 # We will make sure not to overfill the buffer
 
   inputInfo = @[]
+  inputs = @[]
   for i in 0..<core.inputs.len:
-    inputInfo.add toInputInfo(i, core.inputs[i])
-  inputs.setLen inputInfo.len
+    let info = toInputInfo(i, core.inputs[i])
+    let axis = newSeq[int16](info.numaxes)
+    let button = newSeq[bool](info.numbuttons)
+    inputInfo.add info
+    inputState.add nil
+    inputs.add InputState(axis: axis, button: button, buttonPressed: button, buttonReleased: button)
 
 proc log*(level: LogLevel, args: string) =
   callbackLog(level.cint, args.cstring)
