@@ -252,3 +252,17 @@ frontend!
 GDB stubs seem annoying to write. I think it may make more sense to
 just have some kind of Lua debug REPL. There are some good-looking
 packages for Nim-Lua interoperability.
+
+26/02/2023:
+Starting work on the SPU. It feels though like some of the work I'm
+doing is getting rather repetitive. For example, lots of boilerplate
+code to connect the SPU hardware registers to the PSX bus. Maybe it's
+time to think more seriously about the emulator architecture - how to
+get things connected in as pain-free way as possible. Here for the
+SPU, a library for making read-/writable registers would help.
+Elsewhere, I think a good way to model delays would be a type of FIFO
+queue, where you can store requests/responses to be handled later, but
+each item would come with a timestamp attached. It would be integrated
+with the event queue so things would be processed when their time
+arrived. Maybe it could also handle bounded FIFOs (and maybe make it
+easy to connect the empty/full status to a hardware register?)
