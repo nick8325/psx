@@ -1,6 +1,6 @@
 ## Hooking up the PSX itself.
 
-import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, joy, utils, savestates, cdrom, mdec
+import basics, memory, eventqueue, irq, dma, gpu, cpu, timer, joy, utils, savestates, cdrom, mdec, spu
 import std/[strformat, sugar, bitops]
 
 const loggerComponent = logMachine
