@@ -235,20 +235,7 @@ for address in countup(0x1f801050u32, 0x1f80105cu32, 4):
 
 # SPU
 for address in countup(0x1f801c00u32, 0x1f801ffeu32, 2):
-  if address != 0x1F801DAEu32 and address != 0x1f801daau32:
-    addressSpace.cell16 address, SPU
-
-var spucnt {.saved.}: uint16 = 0
-addressSpace.io16 0x1f801daau32, SPU,
-  () => spucnt,
-  proc(val: uint16) = spucnt = val
-
-addressSpace.io16 0x1f801daeu32, SPU,
-  () => (spucnt and 0x3f) or (if spucnt.testBit 5: 1 shl 7 else: 0),
-  nil
-
-onVBlank("fake SPU IRQ") do():
-  irqs.signal 9
+  addressSpace.io16 address, SPU, () => spuRead(address), (value: uint16) => spuWrite(address, value)
 
 # MDEC
 addressSpace.io32 0x1f801820u32, MDEC, mdecResponse, mdecCommand
@@ -260,8 +247,8 @@ dma.channels[1].read = mdecReadDMA
 dma.channels[2].read = gpuReadDMA
 dma.channels[2].write = gpuWriteDMA
 dma.channels[3].read = cdromReadDMA
-# SPU DMA is noisy so ignore it
-dma.channels[4].write = proc (val: word) = discard
+dma.channels[4].write = spuWriteDMA
+dma.channels[4].read = spuReadDMA
 
 type EXE {.packed.} = object
   id: array[8, char]

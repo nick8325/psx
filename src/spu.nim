@@ -91,6 +91,12 @@ var
   status: Status
   voices: array[24, Voice]
 
+proc transferAddress: uint32 =
+  transferAddressDiv8.uint32 * 8
+
+proc irqAddress: uint32 =
+  irqAddressDiv8.uint32 * 8
+
 var
   vLOUT, vROUT, mBASE, dAPF1, dAPF2, vIIR, vCOMB1, vCOMB2, vCOMB3, vCOMB4,
     vWALL, vAPF1, vAPF2, mLSAME, mRSAME, mLCOMB1, mRCOMB1, mLCOMB2, mRCOMB2,
@@ -194,7 +200,6 @@ ports[0x18e div 2] = Cell(
         discard
 )
 
-# TODO: voiceBit is 32 bits so this doesn't really work!
 ports[0x19c div 2] = voiceBitLow(reachedLoopEnd)
 ports[0x19e div 2] = voiceBitHigh(reachedLoopEnd)
 ports[0x194 div 2] = voiceBitLow(noise)
@@ -250,3 +255,35 @@ ports[0x1F8 div 2] = rw(mLAPF2)
 ports[0x1FA div 2] = rw(mRAPF2)
 ports[0x1FC div 2] = rw(vLIN)
 ports[0x1FE div 2] = rw(vRIN)
+
+proc spuRead*(address: uint32): uint16 =
+  assert address >= 0x1f801c00u32 and address < 0x1f802000u32
+  assert address mod 2 == 0
+
+  let read = ports[(address - 0x1f801c00u32) div 2].read
+  if read == nil:
+    warn fmt"Read from unknown SPU address {address:x}"
+  else:
+    return read()
+
+proc spuWrite*(address: uint32, value: uint16) =
+  assert address >= 0x1f801c00u32 and address < 0x1f802000u32
+  assert address mod 2 == 0
+
+  let write = ports[(address - 0x1f801c00u32) div 2].write
+  if write == nil:
+    warn fmt"Write of {value:x} to unknown SPU address {address:x}"
+  else:
+    write(value)
+
+proc spuReadDMA*: uint32 =
+  discard
+
+proc spuWriteDMA*(value: uint32) =
+  discard
+
+proc processSPU =
+  discard
+
+events.every(() => 44100.hz, "SPU processing") do():
+  processSPU()
