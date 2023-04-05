@@ -802,12 +802,10 @@ proc handleException(cpu: var CPU, error: MachineError) =
   let branchTaken = (cpu.branchDelay == bdTaken)
 
   if branchDelay:
-    cpu.cop0.epc = cpu.lastPC
+    cpu.cop0.epc = cpu.pc - 4
+    cpu.cop0.tar = cpu.nextPC
   else:
     cpu.cop0.epc = cpu.pc
-
-  if branchTaken:
-    cpu.cop0.tar = cpu.nextPC
 
   # The COP field is set even on non-COP-related instructions
   var dummyTime: int64
