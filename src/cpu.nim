@@ -194,6 +194,9 @@ proc jump*(cpu: var CPU, pc: word) {.inline.} =
   cpu.pc = pc
   cpu.nextPC = pc+4
   cpu.branchDelay = bdNoBranch
+  # Flush the load delay slot.
+  cpu[cpu.delayedUpdate.reg] = cpu.delayedUpdate.val
+  cpu.delayedUpdate = (reg: r0, val: 0)
 
 proc resolveAddress(cpu: CPU, address: word, kind: AccessKind): word {.inline.} =
   ## Resolve a virtual address to a physical address,
