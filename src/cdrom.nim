@@ -174,6 +174,7 @@ proc command*(value: uint8) =
     echo dumpCDROM()
 
   checkInterrupts()
+  commandStart = false
   case value
   of 0x1:
     debug "Getstat"
