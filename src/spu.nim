@@ -61,11 +61,27 @@ proc `[]=`(spuram: var SPURam, address: uint32, val: uint16) =
 type
   Adsr = object
     flags: AdsrFlags
-    volume: uint16
+    volume: int16
+    phase: AdsrPhase
+    waitFor: int
+    stepAfter: int
+
   AdsrFlags = distinct uint32
   Mode = enum mLinear, mExponential
   Direction = enum dIncrease, dDecrease
-  SweepPhase = enum spPositive, spNegative
+
+  AdsrPhase = enum apAttack, apDecay, apSustain, apRelease
+  AdsrSettings = object
+    mode: Mode
+    direction: Direction
+    target: int16
+    shift: int
+    rawStep: int
+
+proc step(settings: AdsrSettings): int =
+  case settings.direction
+  of dIncrease: 7 - settings.rawStep
+  of dDecrease: -8 - settings.rawStep
 
 AdsrFlags.bitfield sustainMode, Mode, 31, 1
 AdsrFlags.bitfield sustainDirection, Direction, 30, 1
@@ -81,11 +97,72 @@ AdsrFlags.bitfield sustainLevel, int, 0, 4
 AdsrFlags.bitfield lower, uint16, 0, 16
 AdsrFlags.bitfield upper, uint16, 16, 16
 
+proc settings(adsr: Adsr): AdsrSettings =
+  case adsr.phase
+  of apAttack:
+    AdsrSettings(
+      mode: adsr.flags.attackMode,
+      direction: dIncrease,
+      target: 0x7fff,
+      shift: adsr.flags.attackShift,
+      rawStep: adsr.flags.attackStep)
+  of apDecay:
+    AdsrSettings(
+      mode: mExponential,
+      direction: dDecrease,
+      target: ((adsr.flags.sustainLevel)+1*0x800).int16,
+      shift: adsr.flags.decayShift,
+      rawStep: 0)
+  of apSustain:
+    AdsrSettings(
+      mode: adsr.flags.sustainMode,
+      direction: adsr.flags.sustainDirection,
+      target:
+        case adsr.flags.sustainDirection
+        of dIncrease: 0x7ffff
+        of dDecrease: 0,
+      shift: adsr.flags.sustainShift,
+      rawStep: adsr.flags.sustainStep)
+  of apRelease:
+    AdsrSettings(
+      mode: adsr.flags.releaseMode,
+      direction: dDecrease,
+      target: 0,
+      shift: adsr.flags.attackShift,
+      rawStep: 0)
+
+proc keyOn(adsr: var Adsr) =
+  adsr.phase = apAttack
+  adsr.volume = 0
+  adsr.waitFor = 0
+  adsr.stepAfter = 0
+
+proc keyOff(adsr: var Adsr) =
+  adsr.phase = apRelease
+  adsr.waitFor = 0
+  adsr.stepAfter = 0
+
+proc cycle(adsr: var Adsr) =
+  if adsr.waitFor == 0:
+    adsr.volume = (adsr.volume.int + adsr.stepAfter).clamp(0, 0x7fff).int16
+    let settings = adsr.settings
+    adsr.waitFor = 1 shl max(0, settings.shift - 11)
+    adsr.stepAfter = settings.step shl max(0, 11 - settings.shift)
+    if settings.mode == mExponential:
+      case settings.direction
+      of dIncrease:
+        if adsr.volume > 0x6000: adsr.waitFor *= 4
+      of dDecrease:
+        adsr.stepAfter = (adsr.stepAfter * adsr.volume.int div 0x8000)
+  else:
+    adsr.waitFor.dec
+
 ######################################################################
 ## Sweep envelope (per-voice).
 
 type
   Sweep = distinct uint16
+  SweepPhase = enum spPositive, spNegative
 
 Sweep.bitfield sweep, bool, 15, 1
 Sweep.bitfield volumeDiv2, int16, 0, 15
@@ -108,6 +185,9 @@ type
     currentVolumeLeft, currentVolumeRight: int16
     reachedLoopEnd: bool
 
+proc keyOn(generator: var SampleGenerator) =
+  generator.currentAddress = generator.startAddress
+
 ######################################################################
 ## A single voice.
 
@@ -118,6 +198,13 @@ type
     sweep: Sweep
     volumeLeft, volumeRight: int16
     currentVolumeLeft, currentVolumeRight: int16
+
+proc keyOn(voice: var Voice) =
+  voice.adsr.keyOn()
+  voice.sampleGenerator.keyOn()
+
+proc keyOff(voice: var Voice) =
+  voice.adsr.keyOff()
 
 var
   voices: array[24, Voice]
@@ -142,7 +229,7 @@ var
   currentVolumeLeft, currentVolumeRight: int16
 
 ######################################################################
-## Control flags.
+## Control flags and DMA.
 
 type
   Control = distinct uint16
@@ -156,7 +243,7 @@ Control.bitfield noiseFrequencyShift, int, 10, 4
 Control.bitfield noiseFrequencyStep, int, 8, 2
 Control.bitfield reverbMasterEnable, bool, 7, 1
 Control.bitfield irqEnable, bool, 6, 1
-Control.bitfield soundRAMTransferMode, TransferMode, 4, 2
+Control.bitfield transferMode, TransferMode, 4, 2
 Control.bitfield externalAudioReverb, bool, 3, 1
 Control.bitfield cdAudioReverb, bool, 2, 1
 Control.bitfield externalAudioEnable, bool, 1, 1
@@ -173,23 +260,43 @@ Status.bitfield spuMode, int, 0, 5
 var
   control: Control
   status: Status
-
-######################################################################
-## SPU DMA.
-
-var
   fifo: Deque[uint16]
-
-var
+  transferAddressDiv8 {.saved.}: uint16
   transferAddress {.saved.}: uint32
 
+proc setControl(val: Control) =
+  control = val
+  if control.transferMode == tmManualWrite:
+    for value in fifo:
+      spuram[transferAddress] = value
+      transferAddress += 2
+    fifo.clear
+    control.transferMode = tmStop
+
+proc updateIRQ =
+  if control.enable and control.irqEnable:
+    status.irq9 = status.irq9 or spuram.watchTriggered
+  else:
+    status.irq9 = false
+  spuram.watchTriggered = false
+  irqs.set 9, status.irq9
+
 proc spuReadDMA*: uint32 =
-  result = spuram.read32(transferAddress)
-  transferAddress += 4
+  if control.transferMode == tmDMARead:
+    result = spuram.read32(transferAddress)
+    transferAddress += 4
+  else:
+    warn fmt"SPU DMA read when transfer mode = {control.transferMode}"
 
 proc spuWriteDMA*(value: uint32) =
-  spuram.write32(transferAddress, value)
-  transferAddress += 4
+  if control.transferMode == tmDMAWrite:
+    spuram.write32(transferAddress, value)
+    transferAddress += 4
+  else:
+    warn fmt"SPU DMA write when transfer mode = {control.transferMode}"
+
+######################################################################
+## Memory map.
 
 type
   Cell = object
@@ -238,7 +345,7 @@ for i in 0..23:
   ports[i*8 + 3] = rw(voices[i].sampleGenerator.startAddress)
   ports[i*8 + 4] = rw(voices[i].adsr.flags.lower)
   ports[i*8 + 5] = rw(voices[i].adsr.flags.upper)
-  ports[i*8 + 6] = rw(voices[i].adsr.volume)
+  ports[i*8 + 6] = ro(voices[i].adsr.volume)
   ports[i*8 + 7] = rw(voices[i].sampleGenerator.repeatAddress)
   ports[i*2 + 0x100] = rw(voices[i].currentVolumeLeft)
   ports[i*2 + 0x101] = rw(voices[i].currentVolumeRight)
@@ -259,8 +366,7 @@ ports[0x188 div 2] = Cell(
   write: proc(val: uint16) =
     for i in 0..15:
       if val.testBit(i):
-        # Start the ADSR envelope, set ADSR volume to 0, and copy start address to repeat address
-        discard
+        voices[i].keyOn()
 )
 
 ports[0x18a div 2] = Cell(
@@ -268,8 +374,7 @@ ports[0x18a div 2] = Cell(
   write: proc(val: uint16) =
     for i in 16..23:
       if val.testBit(i-16):
-        # Start the ADSR envelope, set ADSR volume to 0, and copy start address to repeat address
-        discard
+        voices[i].keyOn()
 )
 
 ports[0x18c div 2] = Cell(
@@ -277,8 +382,7 @@ ports[0x18c div 2] = Cell(
   write: proc(val: uint16) =
     for i in 0..15:
       if val.testBit(i):
-        # key off
-        discard
+        voices[i].keyOff()
 )
 
 ports[0x18e div 2] = Cell(
@@ -286,17 +390,23 @@ ports[0x18e div 2] = Cell(
   write: proc(val: uint16) =
     for i in 16..23:
       if val.testBit(i-16):
-        # key off
-        discard
+        voices[i].keyOff()
 )
 
 # ports[0x19c div 2] = voiceBitLow(reachedLoopEnd)
 # ports[0x19e div 2] = voiceBitHigh(reachedLoopEnd)
 # ports[0x194 div 2] = voiceBitLow(noise)
 # ports[0x196 div 2] = voiceBitHigh(noise)
-ports[0x1aa div 2] = rw(control)
+ports[0x1aa div 2] = Cell(
+  read: proc(): uint16 = control.uint16,
+  write: proc(val: uint16) =
+    setControl(val.Control))
 ports[0x1ae div 2] = ro(status)
-ports[0x1a6 div 2] = rwDiv8(transferAddress)
+ports[0x1a6 div 2] = Cell(
+  read: proc(): uint16 = transferAddressDiv8,
+  write: proc(val: uint16) =
+    transferAddressDiv8 = val
+    transferAddress = val.uint32 * 8)
 ports[0x1a8 div 2] = Cell(
   read: () => 0u16,
   write: (val: uint16) => fifo.addLast(val))
@@ -354,7 +464,9 @@ proc spuRead*(address: uint32): uint16 =
   if read == nil:
     warn fmt"Read from unknown SPU address {address:x}"
   else:
-    return read()
+    result = read()
+
+  updateIRQ()
 
 proc spuWrite*(address: uint32, value: uint16) =
   assert address >= 0x1f801c00u32 and address < 0x1f802000u32
@@ -366,16 +478,11 @@ proc spuWrite*(address: uint32, value: uint16) =
   else:
     write(value)
 
+  updateIRQ()
+
 proc processSPU =
   # TODO
-
-  # Update IRQ flag
-  if control.enable and control.irqEnable:
-    status.irq9 = status.irq9 or spuram.watchTriggered
-  else:
-    status.irq9 = false
-  spuram.watchTriggered = false
-  irqs.set 9, status.irq9
+  updateIRQ()
 
 events.every(() => 44100.hz, "SPU processing") do():
   processSPU()
