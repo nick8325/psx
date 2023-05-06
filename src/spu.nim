@@ -5,50 +5,87 @@ import std/[strformat, deques, sugar, bitops]
 const loggerComponent = logSPU
 logSPU.level = lvlDebug
 
-var
-  spuramRaw {.saved.}: array[0x40000, uint16]
+######################################################################
+## SPU RAM. Reading writing, triggering IRQs.
 
 type
-  Voice = object
-    id: int
-    startAddress: uint16
-    currentAddress: uint16
-    repeatAddress: uint16
-    sampleRate: uint16
-    modulate: bool
-    sweepLeft, sweepRight: Sweep
-    adsr: Adsr
-    adsrVolume: int16
-    volumeLeft, volumeRight: int16
-    currentVolumeLeft, currentVolumeRight: int16
-    reachedLoopEnd: bool
-    noise: bool
-    reverb: bool
+  SPURam = object
+    raw: array[0x80000, uint8]
+    watchAddress: uint32
+    watchTriggered: bool
 
-  Adsr = distinct uint32
-  Sweep = distinct uint16
+var
+  spuram {.saved.}: SPURam
+
+proc checkWatch(spuram: var SPURam, address: uint32) =
+  if (address and not 0x7u32) == (spuram.watchAddress and not 0x7u32):
+    spuram.watchTriggered = true
+
+proc read8(spuram: var SPURam, address: uint32): uint8 =
+  let address = address mod spuram.raw.len.word
+  spuram.checkWatch address
+  spuram.raw[address]
+
+proc write8(spuram: var SPURam, address: uint32, value: uint8) =
+  let address = address mod spuram.raw.len.word
+  spuram.checkWatch address
+  spuram.raw[address] = value
+
+proc read16(spuram: var SPURam, address: uint32): uint16 =
+  let x = spuram.read8(address).uint16
+  let y = spuram.read8(address+1).uint16
+  x + y shl 8
+
+proc write16(spuram: var SPURam, address: uint32, val: uint16) =
+  spuram.write8 address, (val and 0xff).uint8
+  spuram.write8 address+1, (val shr 8).uint8
+
+proc read32(spuram: var SPURam, address: uint32): uint32 =
+  let x = spuram.read16(address).uint32
+  let y = spuram.read16(address+2).uint32
+  x + y shl 16
+
+proc write32(spuram: var SPURam, address: uint32, val: uint32) =
+  spuram.write16 address, (val and 0xffff).uint16
+  spuram.write16 address+2, (val shr 16).uint16
+
+proc `[]`(spuram: var SPURam, address: uint32): uint16 =
+  spuram.read16(address)
+
+proc `[]=`(spuram: var SPURam, address: uint32, val: uint16) =
+  spuram.write16(address, val)
+
+######################################################################
+## ADSR envelope (per-voice).
+
+type
+  Adsr = object
+    flags: AdsrFlags
+    volume: uint16
+  AdsrFlags = distinct uint32
   Mode = enum mLinear, mExponential
   Direction = enum dIncrease, dDecrease
   SweepPhase = enum spPositive, spNegative
 
-  Control = distinct uint16
-  Status = distinct uint16
-  TransferMode = enum tmStop, tmManualWrite, tmDMAWrite, tmDMARead
-  CaptureBufferHalf = enum cbhFirst, cbhSecond
+AdsrFlags.bitfield sustainMode, Mode, 31, 1
+AdsrFlags.bitfield sustainDirection, Direction, 30, 1
+AdsrFlags.bitfield sustainShift, int, 24, 5
+AdsrFlags.bitfield sustainStep, int, 22, 2
+AdsrFlags.bitfield releaseMode, Mode, 21, 1
+AdsrFlags.bitfield releaseShift, int, 16, 5
+AdsrFlags.bitfield attackMode, Mode, 15, 1
+AdsrFlags.bitfield attackShift, int, 10, 5
+AdsrFlags.bitfield attackStep, int, 8, 2
+AdsrFlags.bitfield decayShift, int, 4, 4
+AdsrFlags.bitfield sustainLevel, int, 0, 4
+AdsrFlags.bitfield lower, uint16, 0, 16
+AdsrFlags.bitfield upper, uint16, 16, 16
 
-Adsr.bitfield sustainMode, Mode, 31, 1
-Adsr.bitfield sustainDirection, Direction, 30, 1
-Adsr.bitfield sustainShift, int, 24, 5
-Adsr.bitfield sustainStep, int, 22, 2
-Adsr.bitfield releaseMode, Mode, 21, 1
-Adsr.bitfield releaseShift, int, 16, 5
-Adsr.bitfield attackMode, Mode, 15, 1
-Adsr.bitfield attackShift, int, 10, 5
-Adsr.bitfield attackStep, int, 8, 2
-Adsr.bitfield decayShift, int, 4, 4
-Adsr.bitfield sustainLevel, int, 0, 4
-Adsr.bitfield lower, uint16, 0, 16
-Adsr.bitfield upper, uint16, 16, 16
+######################################################################
+## Sweep envelope (per-voice).
+
+type
+  Sweep = distinct uint16
 
 Sweep.bitfield sweep, bool, 15, 1
 Sweep.bitfield volumeDiv2, int16, 0, 15
@@ -57,6 +94,61 @@ Sweep.bitfield sweepDirection, Direction, 13, 1
 Sweep.bitfield sweepPhase, SweepPhase, 12, 1
 Sweep.bitfield sweepShift, int, 2, 5
 Sweep.bitfield sweepStep, int, 0, 2
+
+######################################################################
+## Sample generator (per-voice).
+
+type
+  SampleGenerator = object
+    startAddress: uint16
+    currentAddress: uint16
+    repeatAddress: uint16
+    sampleRate: uint16
+    volumeLeft, volumeRight: int16
+    currentVolumeLeft, currentVolumeRight: int16
+    reachedLoopEnd: bool
+
+######################################################################
+## A single voice.
+
+type
+  Voice = object
+    sampleGenerator: SampleGenerator
+    adsr: Adsr
+    sweep: Sweep
+    volumeLeft, volumeRight: int16
+    currentVolumeLeft, currentVolumeRight: int16
+
+var
+  voices: array[24, Voice]
+
+######################################################################
+## Reverb.
+
+var
+  vLOUT, vROUT, mBASE, dAPF1, dAPF2, vIIR, vCOMB1, vCOMB2, vCOMB3, vCOMB4,
+    vWALL, vAPF1, vAPF2, mLSAME, mRSAME, mLCOMB1, mRCOMB1, mLCOMB2, mRCOMB2,
+    dLSAME, dRSAME, mLDIFF, mRDIFF, mLCOMB3, mRCOMB3, mLCOMB4, mRCOMB4,
+    dLDIFF, dRDIFF, mLAPF1, mRAPF1, mLAPF2, mRAPF2, vLIN, vRIN: int16
+
+######################################################################
+## Main volume.
+
+var
+  sweepLeft, sweepRight: Sweep # Correct? Or just normal volume?
+  cdVolumeLeft, cdVolumeRight: int16
+  externalInputVolumeLeft, externalInputVolumeRight: int16
+  volumeLeft, volumeRight: int16
+  currentVolumeLeft, currentVolumeRight: int16
+
+######################################################################
+## Control flags.
+
+type
+  Control = distinct uint16
+  Status = distinct uint16
+  TransferMode = enum tmStop, tmManualWrite, tmDMAWrite, tmDMARead
+  CaptureBufferHalf = enum cbhFirst, cbhSecond
 
 Control.bitfield enable, bool, 15, 1
 Control.bitfield unmute, bool, 14, 1
@@ -79,29 +171,25 @@ Status.bitfield irq9, bool, 6, 1
 Status.bitfield spuMode, int, 0, 5
 
 var
-  sweepLeft, sweepRight: Sweep # Correct? Or just normal volume?
-  cdVolumeLeft, cdVolumeRight: int16
-  externalInputVolumeLeft, externalInputVolumeRight: int16
-  volumeLeft, volumeRight: int16
-  currentVolumeLeft, currentVolumeRight: int16
-  transferAddressDiv8: uint16
-  fifo: Deque[uint16]
-  irqAddressDiv8: uint16
   control: Control
   status: Status
-  voices: array[24, Voice]
 
-proc transferAddress: uint32 =
-  transferAddressDiv8.uint32 * 8
-
-proc irqAddress: uint32 =
-  irqAddressDiv8.uint32 * 8
+######################################################################
+## SPU DMA.
 
 var
-  vLOUT, vROUT, mBASE, dAPF1, dAPF2, vIIR, vCOMB1, vCOMB2, vCOMB3, vCOMB4,
-    vWALL, vAPF1, vAPF2, mLSAME, mRSAME, mLCOMB1, mRCOMB1, mLCOMB2, mRCOMB2,
-    dLSAME, dRSAME, mLDIFF, mRDIFF, mLCOMB3, mRCOMB3, mLCOMB4, mRCOMB4,
-    dLDIFF, dRDIFF, mLAPF1, mRAPF1, mLAPF2, mRAPF2, vLIN, vRIN: int16
+  fifo: Deque[uint16]
+
+var
+  transferAddress {.saved.}: uint32
+
+proc spuReadDMA*: uint32 =
+  result = spuram.read32(transferAddress)
+  transferAddress += 4
+
+proc spuWriteDMA*(value: uint32) =
+  spuram.write32(transferAddress, value)
+  transferAddress += 4
 
 type
   Cell = object
@@ -110,6 +198,8 @@ type
 
 template rw(v: untyped): Cell =
   Cell(read: () => v.uint16, write: (val: uint16) => (v = typeof(v)(val)))
+template rwDiv8(v: untyped): Cell =
+  Cell(read: () => (v div 8).uint16, write: (val: uint16) => (v = typeof(v)(val) * 8))
 template ro(v: untyped): Cell =
   Cell(read: () => v.uint16, write: proc (val: uint16) = discard)
 
@@ -144,17 +234,17 @@ var ports: array[512, Cell]
 for i in 0..23:
   ports[i*8] = rw(voices[i].volumeLeft)
   ports[i*8 + 1] = rw(voices[i].volumeRight)
-  ports[i*8 + 2] = rw(voices[i].sampleRate)
-  ports[i*8 + 3] = rw(voices[i].startAddress)
-  ports[i*8 + 4] = rw(voices[i].adsr.lower)
-  ports[i*8 + 5] = rw(voices[i].adsr.upper)
-  ports[i*8 + 6] = rw(voices[i].adsrVolume)
-  ports[i*8 + 7] = rw(voices[i].repeatAddress)
+  ports[i*8 + 2] = rw(voices[i].sampleGenerator.sampleRate)
+  ports[i*8 + 3] = rw(voices[i].sampleGenerator.startAddress)
+  ports[i*8 + 4] = rw(voices[i].adsr.flags.lower)
+  ports[i*8 + 5] = rw(voices[i].adsr.flags.upper)
+  ports[i*8 + 6] = rw(voices[i].adsr.volume)
+  ports[i*8 + 7] = rw(voices[i].sampleGenerator.repeatAddress)
   ports[i*2 + 0x100] = rw(voices[i].currentVolumeLeft)
   ports[i*2 + 0x101] = rw(voices[i].currentVolumeRight)
 
-ports[0x190 div 2] = voiceBitLow(modulate)
-ports[0x192 div 2] = voiceBitHigh(modulate)
+# ports[0x190 div 2] = voiceBitLow(modulate)
+# ports[0x192 div 2] = voiceBitHigh(modulate)
 ports[0x180 div 2] = rw(volumeLeft)
 ports[0x182 div 2] = rw(volumeRight)
 ports[0x1b8 div 2] = rw(currentVolumeLeft)
@@ -200,13 +290,13 @@ ports[0x18e div 2] = Cell(
         discard
 )
 
-ports[0x19c div 2] = voiceBitLow(reachedLoopEnd)
-ports[0x19e div 2] = voiceBitHigh(reachedLoopEnd)
-ports[0x194 div 2] = voiceBitLow(noise)
-ports[0x196 div 2] = voiceBitHigh(noise)
+# ports[0x19c div 2] = voiceBitLow(reachedLoopEnd)
+# ports[0x19e div 2] = voiceBitHigh(reachedLoopEnd)
+# ports[0x194 div 2] = voiceBitLow(noise)
+# ports[0x196 div 2] = voiceBitHigh(noise)
 ports[0x1aa div 2] = rw(control)
 ports[0x1ae div 2] = ro(status)
-ports[0x1a6 div 2] = rw(transferAddressDiv8)
+ports[0x1a6 div 2] = rwDiv8(transferAddress)
 ports[0x1a8 div 2] = Cell(
   read: () => 0u16,
   write: (val: uint16) => fifo.addLast(val))
@@ -215,9 +305,9 @@ ports[0x1ac div 2] = Cell(
   write: proc(val: uint16) =
     if val != 4:
       warn "Unknown transfer control")
-ports[0x1a4 div 2] = rw(irqAddressDiv8)
-ports[0x198 div 2] = voiceBitLow(reverb)
-ports[0x19a div 2] = voiceBitHigh(reverb)
+ports[0x1a4 div 2] = rwDiv8(spuram.watchAddress)
+# ports[0x198 div 2] = voiceBitLow(reverb)
+# ports[0x19a div 2] = voiceBitHigh(reverb)
 
 # Reverb registers
 ports[0x184 div 2] = rw(vLOUT)
@@ -276,14 +366,16 @@ proc spuWrite*(address: uint32, value: uint16) =
   else:
     write(value)
 
-proc spuReadDMA*: uint32 =
-  discard
-
-proc spuWriteDMA*(value: uint32) =
-  discard
-
 proc processSPU =
-  discard
+  # TODO
+
+  # Update IRQ flag
+  if control.enable and control.irqEnable:
+    status.irq9 = status.irq9 or spuram.watchTriggered
+  else:
+    status.irq9 = false
+  spuram.watchTriggered = false
+  irqs.set 9, status.irq9
 
 events.every(() => 44100.hz, "SPU processing") do():
   processSPU()
