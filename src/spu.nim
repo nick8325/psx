@@ -142,6 +142,10 @@ proc keyOff(adsr: var Adsr) =
   adsr.waitFor = 0
   adsr.stepAfter = 0
 
+proc mute(adsr: var Adsr) =
+  adsr.keyOff()
+  adsr.volume = 0
+
 proc cycle(adsr: var Adsr) =
   if adsr.waitFor == 0:
     adsr.volume = (adsr.volume.int + adsr.stepAfter).clamp(0, 0x7fff).int16
@@ -184,9 +188,43 @@ type
     volumeLeft, volumeRight: int16
     currentVolumeLeft, currentVolumeRight: int16
     reachedLoopEnd: bool
+    counter: int
+
+proc sampleNumber(generator: SampleGenerator): int =
+  generator.counter shr 12
 
 proc keyOn(generator: var SampleGenerator) =
   generator.currentAddress = generator.startAddress
+
+proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
+  shouldMute = false
+
+  var step = generator.sampleRate
+  # TODO: pitch modulation
+  step = step.clamp(0, 0x3fff)
+  generator.counter += step.int
+
+  if generator.sampleNumber == 28:
+    generator.counter = 0
+    let flags = spuram.read8(generator.currentAddress + 1)
+    if flags.testBit 0:
+      generator.reachedLoopEnd = true
+      generator.currentAddress = generator.repeatAddress
+      if flags.testBit 1:
+        shouldMute = true
+    else:
+      generator.currentAddress += 16
+
+proc sample(generator: SampleGenerator): int16 =
+  var shift = spuram.read8(generator.currentAddress) and 0xf
+  if shift > 12: shift = 9
+  let bytePos = generator.sampleNumber div 2
+  let nybblePos = generator.sampleNumber mod 2
+  let byte = spuram.read8(generator.currentAddress + bytePos.uint16 + 2)
+  let nybble =
+    if nybblePos == 0: byte and 0xf
+    else: byte shr 8
+  nybble.int16 shl shift
 
 ######################################################################
 ## A single voice.
@@ -205,6 +243,17 @@ proc keyOn(voice: var Voice) =
 
 proc keyOff(voice: var Voice) =
   voice.adsr.keyOff()
+
+proc sample(voice: Voice): int =
+  (voice.sampleGenerator.sample().int * voice.adsr.volume.int) div 0x8000
+
+proc cycle(voice: var Voice) =
+  var shouldMute: bool
+  voice.sampleGenerator.cycle(shouldMute)
+  if shouldMute:
+    voice.adsr.mute()
+  else:
+    voice.adsr.cycle()
 
 var
   voices: array[24, Voice]
