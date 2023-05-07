@@ -71,14 +71,14 @@ type
   Direction = enum dIncrease, dDecrease
 
   AdsrPhase = enum apAttack, apDecay, apSustain, apRelease
-  AdsrSettings = object
+  RampSettings = object
     mode: Mode
     direction: Direction
     target: int16
     shift: int
     rawStep: int
 
-proc step(settings: AdsrSettings): int =
+proc step(settings: RampSettings): int =
   case settings.direction
   of dIncrease: 7 - settings.rawStep
   of dDecrease: -8 - settings.rawStep
@@ -97,24 +97,24 @@ AdsrFlags.bitfield sustainLevel, int, 0, 4
 AdsrFlags.bitfield lower, uint16, 0, 16
 AdsrFlags.bitfield upper, uint16, 16, 16
 
-proc settings(adsr: Adsr): AdsrSettings =
+proc settings(adsr: Adsr): RampSettings =
   case adsr.phase
   of apAttack:
-    AdsrSettings(
+    RampSettings(
       mode: adsr.flags.attackMode,
       direction: dIncrease,
       target: 0x7fff,
       shift: adsr.flags.attackShift,
       rawStep: adsr.flags.attackStep)
   of apDecay:
-    AdsrSettings(
+    RampSettings(
       mode: mExponential,
       direction: dDecrease,
       target: ((adsr.flags.sustainLevel)+1*0x800).int16,
       shift: adsr.flags.decayShift,
       rawStep: 0)
   of apSustain:
-    AdsrSettings(
+    RampSettings(
       mode: adsr.flags.sustainMode,
       direction: adsr.flags.sustainDirection,
       target:
@@ -124,12 +124,23 @@ proc settings(adsr: Adsr): AdsrSettings =
       shift: adsr.flags.sustainShift,
       rawStep: adsr.flags.sustainStep)
   of apRelease:
-    AdsrSettings(
+    RampSettings(
       mode: adsr.flags.releaseMode,
       direction: dDecrease,
       target: 0,
       shift: adsr.flags.attackShift,
       rawStep: 0)
+
+proc rampStep(volume: int16, settings: RampSettings): tuple[waitFor: int, stepAfter: int] =
+  var waitFor = 1 shl max(0, settings.shift - 11)
+  var stepAfter = settings.step shl max(0, 11 - settings.shift)
+  if settings.mode == mExponential:
+    case settings.direction
+    of dIncrease:
+      if volume > 0x6000: waitFor *= 4
+    of dDecrease:
+      stepAfter = (stepAfter * volume.int div 0x8000)
+  return (waitFor: waitFor, stepAfter: stepAfter)
 
 proc keyOn(adsr: var Adsr) =
   adsr.phase = apAttack
@@ -157,19 +168,13 @@ proc cycle(adsr: var Adsr) =
          newPhase = true
          adsr.phase.inc
 
-    let settings = adsr.settings
-    adsr.waitFor = 1 shl max(0, settings.shift - 11)
-    adsr.stepAfter = settings.step shl max(0, 11 - settings.shift)
-    if settings.mode == mExponential:
-      case settings.direction
-      of dIncrease:
-        if adsr.volume > 0x6000: adsr.waitFor *= 4
-      of dDecrease:
-        adsr.stepAfter = (adsr.stepAfter * adsr.volume.int div 0x8000)
+    let ramp = rampStep(adsr.volume, adsr.settings)
+    adsr.waitFor = ramp.waitFor
+    adsr.stepAfter = ramp.stepAfter
 
     if newPhase:
       debug fmt"new phase {adsr.phase}"
-      debug fmt"volume={adsr.volume}, settings={adsr.settings}, step={settings.step}, waitFor={adsr.waitFor}, stepAfter={adsr.stepAfter}"
+      debug fmt"volume={adsr.volume}, settings={adsr.settings}, step={adsr.settings.step}, waitFor={adsr.waitFor}, stepAfter={adsr.stepAfter}"
   else:
     adsr.waitFor.dec
 
@@ -177,16 +182,44 @@ proc cycle(adsr: var Adsr) =
 ## Sweep envelope (per-voice).
 
 type
-  Sweep = distinct uint16
+  Sweep = object
+    flags: SweepFlags
+    volume: int16
+    phase: AdsrPhase
+    waitFor: int
+    stepAfter: int
+  SweepFlags = distinct uint16
   SweepPhase = enum spPositive, spNegative
 
-Sweep.bitfield sweep, bool, 15, 1
-Sweep.bitfield volumeDiv2, int16, 0, 15
-Sweep.bitfield sweepMode, Mode, 14, 1
-Sweep.bitfield sweepDirection, Direction, 13, 1
-Sweep.bitfield sweepPhase, SweepPhase, 12, 1
-Sweep.bitfield sweepShift, int, 2, 5
-Sweep.bitfield sweepStep, int, 0, 2
+SweepFlags.bitfield sweep, bool, 15, 1
+SweepFlags.bitfield volumeDiv2, int16, 0, 15
+SweepFlags.bitfield sweepMode, Mode, 14, 1
+SweepFlags.bitfield sweepDirection, Direction, 13, 1
+SweepFlags.bitfield sweepPhase, SweepPhase, 12, 1
+SweepFlags.bitfield sweepShift, int, 2, 5
+SweepFlags.bitfield sweepStep, int, 0, 2
+
+proc settings(sweep: Sweep): RampSettings =
+  RampSettings(
+    mode: sweep.flags.sweepMode,
+    direction: sweep.flags.sweepDirection,
+    target:
+      case sweep.flags.sweepDirection
+      of dIncrease: 0x7fff
+      of dDecrease: 0,
+    shift: sweep.flags.sweepShift,
+    rawStep: sweep.flags.sweepStep)
+
+proc cycle(sweep: var Sweep) =
+  if not sweep.flags.sweep:
+    sweep.volume = sweep.flags.volumeDiv2 * 2
+  elif sweep.waitFor == 0:
+    sweep.volume = (sweep.volume.int + sweep.stepAfter).clampedConvert[:int16]
+    let ramp = rampStep(sweep.volume, sweep.settings)
+    sweep.waitFor = ramp.waitFor
+    sweep.stepAfter = ramp.stepAfter
+  else:
+    sweep.waitFor -= 1
 
 ######################################################################
 ## Sample generator (per-voice).
@@ -251,9 +284,7 @@ type
   Voice = object
     sampleGenerator: SampleGenerator
     adsr: Adsr
-    sweep: Sweep
-    volumeLeft, volumeRight: int16
-    currentVolumeLeft, currentVolumeRight: int16
+    volumeLeft, volumeRight: Sweep
 
 proc keyOn(voice: var Voice) =
   voice.adsr.keyOn()
@@ -263,7 +294,7 @@ proc keyOff(voice: var Voice) =
   voice.adsr.keyOff()
 
 proc sample(voice: Voice): int =
-  voice.sampleGenerator.sample().volume(voice.adsr.volume).volume(voice.volumeLeft) # TODO stereo
+  voice.sampleGenerator.sample().volume(voice.adsr.volume).volume(voice.volumeLeft.volume) # TODO stereo
 
 proc cycle(voice: var Voice) =
   var shouldMute: bool
@@ -272,6 +303,8 @@ proc cycle(voice: var Voice) =
     voice.adsr.mute()
   else:
     voice.adsr.cycle()
+  voice.volumeLeft.cycle()
+  voice.volumeRight.cycle()
 
 var
   voices: array[24, Voice]
@@ -289,11 +322,9 @@ var
 ## Main volume.
 
 var
-  sweepLeft, sweepRight: Sweep # Correct? Or just normal volume?
+  volumeLeft, volumeRight: Sweep
   cdVolumeLeft, cdVolumeRight: int16
   externalInputVolumeLeft, externalInputVolumeRight: int16
-  volumeLeft, volumeRight: int16
-  currentVolumeLeft, currentVolumeRight: int16
 
 ######################################################################
 ## Control flags and DMA.
@@ -427,23 +458,23 @@ var ports: array[512, Cell]
 
 for i in 0..23:
   capture i:
-    ports[i*8] = rw(voices[i].volumeLeft)
-    ports[i*8 + 1] = rw(voices[i].volumeRight)
+    ports[i*8] = rw(voices[i].volumeLeft.flags)
+    ports[i*8 + 1] = rw(voices[i].volumeRight.flags)
     ports[i*8 + 2] = rw(voices[i].sampleGenerator.sampleRate)
     ports[i*8 + 3] = rwDiv8(voices[i].sampleGenerator.startAddress)
     ports[i*8 + 4] = rw(voices[i].adsr.flags.lower)
     ports[i*8 + 5] = rw(voices[i].adsr.flags.upper)
     ports[i*8 + 6] = ro(voices[i].adsr.volume)
     ports[i*8 + 7] = rwDiv8(voices[i].sampleGenerator.repeatAddress)
-    ports[i*2 + 0x100] = rw(voices[i].currentVolumeLeft)
-    ports[i*2 + 0x101] = rw(voices[i].currentVolumeRight)
+    ports[i*2 + 0x100] = rw(voices[i].volumeLeft.volume)
+    ports[i*2 + 0x101] = rw(voices[i].volumeRight.volume)
 
 # ports[0x190 div 2] = voiceBitLow(modulate)
 # ports[0x192 div 2] = voiceBitHigh(modulate)
-ports[0x180 div 2] = rw(volumeLeft)
-ports[0x182 div 2] = rw(volumeRight)
-ports[0x1b8 div 2] = rw(currentVolumeLeft)
-ports[0x1ba div 2] = rw(currentVolumeRight)
+ports[0x180 div 2] = rw(volumeLeft.flags)
+ports[0x182 div 2] = rw(volumeRight.flags)
+ports[0x1b8 div 2] = rw(volumeLeft.volume)
+ports[0x1ba div 2] = rw(volumeRight.volume)
 ports[0x1b0 div 2] = rw(cdVolumeLeft)
 ports[0x1b2 div 2] = rw(cdVolumeRight)
 ports[0x1b4 div 2] = rw(externalInputVolumeLeft)
