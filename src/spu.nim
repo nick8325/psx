@@ -182,8 +182,8 @@ Sweep.bitfield sweepStep, int, 0, 2
 type
   SampleGenerator = object
     startAddress: uint16
-    currentAddress: uint16
-    repeatAddress: uint16
+    currentAddress: uint32
+    repeatAddress: uint32
     sampleRate: uint16
     volumeLeft, volumeRight: int16
     currentVolumeLeft, currentVolumeRight: int16
@@ -206,20 +206,19 @@ proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
   step = step.clamp(0, 0x3fff)
   generator.counter += step.int
 
+  let flags = spuram.read8(generator.currentAddress + 1)
+  if flags.testBit 2:
+    generator.repeatAddress = generator.currentAddress
+
   if generator.sampleNumber >= 28:
     generator.counter = 0
-    let flags = spuram.read8(generator.currentAddress + 1)
     if flags.testBit 0:
       generator.reachedLoopEnd = true
       generator.currentAddress = generator.repeatAddress
-      if flags.testBit 1:
+      if not flags.testBit 1:
         shouldMute = true
     else:
       generator.currentAddress += 16
-
-    let newFlags = spuram.read8(generator.currentAddress + 1)
-    if newFlags.testBit 2:
-      generator.repeatAddress = generator.currentAddress
 
 proc sample(generator: SampleGenerator): int16 =
   var shift = spuram.read8(generator.currentAddress) and 0xf
@@ -230,7 +229,7 @@ proc sample(generator: SampleGenerator): int16 =
   let nybble =
     if nybblePos == 0: byte and 0xf
     else: byte shr 8
-  nybble.int16 shl shift
+  nybble.int16 shl 12 shr shift
 
 ######################################################################
 ## A single voice.
@@ -252,7 +251,10 @@ proc keyOff(voice: var Voice) =
 
 proc sample(voice: Voice): int =
   #(voice.sampleGenerator.sample().int * voice.adsr.volume.int) div 0x8000
-  voice.sampleGenerator.sample().int
+  if voice.adsr.phase == apAttack:
+    voice.sampleGenerator.sample().int
+  else:
+    0
 
 proc cycle(voice: var Voice) =
   var shouldMute: bool
@@ -418,11 +420,11 @@ for i in 0..23:
     ports[i*8] = rw(voices[i].volumeLeft)
     ports[i*8 + 1] = rw(voices[i].volumeRight)
     ports[i*8 + 2] = rw(voices[i].sampleGenerator.sampleRate)
-    ports[i*8 + 3] = rw(voices[i].sampleGenerator.startAddress)
+    ports[i*8 + 3] = rwDiv8(voices[i].sampleGenerator.startAddress)
     ports[i*8 + 4] = rw(voices[i].adsr.flags.lower)
     ports[i*8 + 5] = rw(voices[i].adsr.flags.upper)
     ports[i*8 + 6] = ro(voices[i].adsr.volume)
-    ports[i*8 + 7] = rw(voices[i].sampleGenerator.repeatAddress)
+    ports[i*8 + 7] = rwDiv8(voices[i].sampleGenerator.repeatAddress)
     ports[i*2 + 0x100] = rw(voices[i].currentVolumeLeft)
     ports[i*2 + 0x101] = rw(voices[i].currentVolumeRight)
 
