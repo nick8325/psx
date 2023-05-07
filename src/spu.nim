@@ -195,6 +195,8 @@ proc sampleNumber(generator: SampleGenerator): int =
 
 proc keyOn(generator: var SampleGenerator) =
   generator.currentAddress = generator.startAddress
+  generator.reachedLoopEnd = false
+  generator.counter = 0
 
 proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
   shouldMute = false
@@ -204,7 +206,7 @@ proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
   step = step.clamp(0, 0x3fff)
   generator.counter += step.int
 
-  if generator.sampleNumber == 28:
+  if generator.sampleNumber >= 28:
     generator.counter = 0
     let flags = spuram.read8(generator.currentAddress + 1)
     if flags.testBit 0:
@@ -214,6 +216,10 @@ proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
         shouldMute = true
     else:
       generator.currentAddress += 16
+
+    let newFlags = spuram.read8(generator.currentAddress + 1)
+    if newFlags.testBit 2:
+      generator.repeatAddress = generator.currentAddress
 
 proc sample(generator: SampleGenerator): int16 =
   var shift = spuram.read8(generator.currentAddress) and 0xf
@@ -245,7 +251,8 @@ proc keyOff(voice: var Voice) =
   voice.adsr.keyOff()
 
 proc sample(voice: Voice): int =
-  (voice.sampleGenerator.sample().int * voice.adsr.volume.int) div 0x8000
+  #(voice.sampleGenerator.sample().int * voice.adsr.volume.int) div 0x8000
+  voice.sampleGenerator.sample().int
 
 proc cycle(voice: var Voice) =
   var shouldMute: bool
@@ -313,15 +320,6 @@ var
   transferAddressDiv8 {.saved.}: uint16
   transferAddress {.saved.}: uint32
 
-proc setControl(val: Control) =
-  control = val
-  if control.transferMode == tmManualWrite:
-    for value in fifo:
-      spuram[transferAddress] = value
-      transferAddress += 2
-    fifo.clear
-    control.transferMode = tmStop
-
 proc updateIRQ =
   if control.enable and control.irqEnable:
     status.irq9 = status.irq9 or spuram.watchTriggered
@@ -353,11 +351,13 @@ type
     write: proc(val: uint16)
 
 template rw(v: untyped): Cell =
-  Cell(read: () => v.uint16, write: (val: uint16) => (v = typeof(v)(val)))
+  assert v.sizeof == 2
+  Cell(read: () => cast[uint16](v), write: (val: uint16) => (v = cast[typeof(v)](val)))
 template rwDiv8(v: untyped): Cell =
   Cell(read: () => (v div 8).uint16, write: (val: uint16) => (v = typeof(v)(val) * 8))
 template ro(v: untyped): Cell =
-  Cell(read: () => v.uint16, write: proc (val: uint16) = discard)
+  assert v.sizeof == 2
+  Cell(read: () => cast[uint16](v), write: proc (val: uint16) = discard)
 
 template voiceBitLow(varname: untyped): Cell =
   Cell(
@@ -385,19 +385,46 @@ template voiceBitHigh(varname: untyped): Cell =
         voices[i].varname = val.testBit(i-16)
   )
 
+template generatorBitLow(varname: untyped): Cell =
+  Cell(
+    read: proc(): uint16 =
+      var res: uint16
+      for i in 0..15:
+        if voices[i].sampleGenerator.varname:
+          res.setBit(i)
+      res,
+    write: proc(val: uint16) =
+      for i in 0..15:
+        voices[i].sampleGenerator.varname = val.testBit(i)
+  )
+
+template generatorBitHigh(varname: untyped): Cell =
+  Cell(
+    read: proc(): uint16 =
+      var res: uint16
+      for i in 16..23:
+        if voices[i].sampleGenerator.varname:
+          res.setBit(i-16)
+      res,
+    write: proc(val: uint16) =
+      for i in 16..23:
+        voices[i].sampleGenerator.varname = val.testBit(i-16)
+  )
+
 var ports: array[512, Cell]
 
 for i in 0..23:
-  ports[i*8] = rw(voices[i].volumeLeft)
-  ports[i*8 + 1] = rw(voices[i].volumeRight)
-  ports[i*8 + 2] = rw(voices[i].sampleGenerator.sampleRate)
-  ports[i*8 + 3] = rw(voices[i].sampleGenerator.startAddress)
-  ports[i*8 + 4] = rw(voices[i].adsr.flags.lower)
-  ports[i*8 + 5] = rw(voices[i].adsr.flags.upper)
-  ports[i*8 + 6] = ro(voices[i].adsr.volume)
-  ports[i*8 + 7] = rw(voices[i].sampleGenerator.repeatAddress)
-  ports[i*2 + 0x100] = rw(voices[i].currentVolumeLeft)
-  ports[i*2 + 0x101] = rw(voices[i].currentVolumeRight)
+  capture i:
+    ports[i*8] = rw(voices[i].volumeLeft)
+    ports[i*8 + 1] = rw(voices[i].volumeRight)
+    ports[i*8 + 2] = rw(voices[i].sampleGenerator.sampleRate)
+    ports[i*8 + 3] = rw(voices[i].sampleGenerator.startAddress)
+    ports[i*8 + 4] = rw(voices[i].adsr.flags.lower)
+    ports[i*8 + 5] = rw(voices[i].adsr.flags.upper)
+    ports[i*8 + 6] = ro(voices[i].adsr.volume)
+    ports[i*8 + 7] = rw(voices[i].sampleGenerator.repeatAddress)
+    ports[i*2 + 0x100] = rw(voices[i].currentVolumeLeft)
+    ports[i*2 + 0x101] = rw(voices[i].currentVolumeRight)
 
 # ports[0x190 div 2] = voiceBitLow(modulate)
 # ports[0x192 div 2] = voiceBitHigh(modulate)
@@ -442,14 +469,11 @@ ports[0x18e div 2] = Cell(
         voices[i].keyOff()
 )
 
-# ports[0x19c div 2] = voiceBitLow(reachedLoopEnd)
-# ports[0x19e div 2] = voiceBitHigh(reachedLoopEnd)
+ports[0x19c div 2] = generatorBitLow(reachedLoopEnd)
+ports[0x19e div 2] = generatorBitHigh(reachedLoopEnd)
 # ports[0x194 div 2] = voiceBitLow(noise)
 # ports[0x196 div 2] = voiceBitHigh(noise)
-ports[0x1aa div 2] = Cell(
-  read: proc(): uint16 = control.uint16,
-  write: proc(val: uint16) =
-    setControl(val.Control))
+ports[0x1aa div 2] = rw(control)
 ports[0x1ae div 2] = ro(status)
 ports[0x1a6 div 2] = Cell(
   read: proc(): uint16 = transferAddressDiv8,
@@ -526,11 +550,35 @@ proc spuWrite*(address: uint32, value: uint16) =
     warn fmt"Write of {value:x} to unknown SPU address {address:x}"
   else:
     write(value)
+    warn fmt"Write of {value:x} to SPU address {address:x}"
+
+  if control.transferMode == tmManualWrite:
+    for value in fifo:
+      spuram[transferAddress] = value
+      transferAddress += 2
+    fifo.clear
+
+  status.dmaReadRequest = control.transferMode == tmDMARead
+  status.dmaWriteRequest = control.transferMode == tmDMAWrite
+  status.dmaRequest = status.dmaReadRequest or status.dmaWriteRequest
+  status.spuMode = control.int and 0x3f
 
   updateIRQ()
 
+######################################################################
+## Audio output.
+
+var
+  audioBuffer*: seq[int16]
+
 proc processSPU =
-  # TODO
+  var sum = 0
+  for i in 0..<24:
+    voices[i].cycle()
+    sum += voices[i].sample().clampedConvert[:int16]
+
+  audioBuffer.add sum.clampedConvert[:int16]
+
   updateIRQ()
 
 events.every(() => 44100.hz, "SPU processing") do():

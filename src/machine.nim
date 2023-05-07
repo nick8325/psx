@@ -235,7 +235,8 @@ for address in countup(0x1f801050u32, 0x1f80105cu32, 4):
 
 # SPU
 for address in countup(0x1f801c00u32, 0x1f801ffeu32, 2):
-  addressSpace.io16 address, SPU, () => spuRead(address), (value: uint16) => spuWrite(address, value)
+  capture address:
+    addressSpace.io16 address, SPU, () => spuRead(address), (value: uint16) => spuWrite(address, value)
 
 # MDEC
 addressSpace.io32 0x1f801820u32, MDEC, mdecResponse, mdecCommand

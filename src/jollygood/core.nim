@@ -1,7 +1,7 @@
 ## A Jolly Good core for the emulator.
 import jollygood/binding
 
-import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom, timer, cpu
+import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom, timer, cpu, spu
 import std/[options, strformat]
 
 type
@@ -114,6 +114,9 @@ proc step(): float =
           framebuffer[][i][j] = pixel.uint32
     render(0, 0, width, height)
 
+  playAudio(audioBuffer)
+  audioBuffer = @[]
+
   return (after - before).float / clockRate.float
 
 let
@@ -137,7 +140,7 @@ let
 
     audioSampleFormat: sfInt16,
     audioRate: 44100,
-    audioChannels: 2,
+    audioChannels: 1,
 
     inputs: @[debugInput],
     loadGame: loadGame,

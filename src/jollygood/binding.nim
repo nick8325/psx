@@ -125,8 +125,8 @@ var
 
 proc playAudio*(samples: seq[int16])
   ## Feed samples into the audio buffer
-proc playAudio*(samples: seq[float32])
-  ## Feed samples into the audio buffer
+# proc playAudio*(samples: seq[float32])
+#   ## Feed samples into the audio buffer
 
 proc buffer*: pointer
   ## The screen buffer, in the format requested in the "Core" record
@@ -388,7 +388,7 @@ proc registerCore*(core: Core) =
   audioInfo.sampfmt = core.audioSampleFormat.int.jg_sampfmt
   audioInfo.rate = core.audioRate.cuint
   audioInfo.channels = core.audioChannels.cuint
-  audioInfo.spf = 50 # We will make sure not to overfill the buffer
+  audioInfo.spf = 10000 # We will make sure not to overfill the buffer
 
   inputInfo = @[]
   inputs = @[]
@@ -404,9 +404,21 @@ proc log*(level: LogLevel, args: string) =
   callbackLog(level.cint, args.cstring)
 
 proc playAudio*(samples: seq[int16]) =
-  discard # TODO
-proc playAudio*(samples: seq[float32]) =
-  discard
+  let core = core()
+  assert core.audioSampleFormat == sfInt16 and core.audioChannels == 1
+  let buf = cast[ptr UncheckedArray[int16]](audioInfo.buf)
+  var i: cuint = 0
+  for sample in samples:
+    buf[i] = sample
+    i.inc
+    if i == audioInfo.spf:
+      callbackAudio(i)
+      i = 0
+  if i != 0:
+    callbackAudio(i)
+
+# proc playAudio*(samples: seq[float32]) =
+#   discard
 
 proc buffer*: pointer =
   videoInfo.buf
