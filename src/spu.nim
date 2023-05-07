@@ -339,6 +339,7 @@ proc spuReadDMA*: uint32 =
 
 proc spuWriteDMA*(value: uint32) =
   if control.transferMode == tmDMAWrite:
+    trace fmt"Writing {value:x} to {transferAddress:x}"
     spuram.write32(transferAddress, value)
     transferAddress += 4
   else:
@@ -444,6 +445,7 @@ ports[0x188 div 2] = Cell(
   write: proc(val: uint16) =
     for i in 0..15:
       if val.testBit(i):
+        debug fmt "key on {i}, {voices[i]}"
         voices[i].keyOn()
 )
 
@@ -452,6 +454,7 @@ ports[0x18a div 2] = Cell(
   write: proc(val: uint16) =
     for i in 16..23:
       if val.testBit(i-16):
+        debug fmt "key on {i}, {voices[i]}"
         voices[i].keyOn()
 )
 
@@ -460,6 +463,7 @@ ports[0x18c div 2] = Cell(
   write: proc(val: uint16) =
     for i in 0..15:
       if val.testBit(i):
+        debug fmt "key off {i}, {voices[i]}"
         voices[i].keyOff()
 )
 
@@ -468,6 +472,7 @@ ports[0x18e div 2] = Cell(
   write: proc(val: uint16) =
     for i in 16..23:
       if val.testBit(i-16):
+        debug fmt "key off {i}, {voices[i]}"
         voices[i].keyOff()
 )
 
@@ -552,10 +557,11 @@ proc spuWrite*(address: uint32, value: uint16) =
     warn fmt"Write of {value:x} to unknown SPU address {address:x}"
   else:
     write(value)
-    warn fmt"Write of {value:x} to SPU address {address:x}"
+    trace fmt"Write of {value:x} to SPU address {address:x}"
 
   if control.transferMode == tmManualWrite:
     for value in fifo:
+      trace fmt"Writing {value:x} to {transferAddress:x}"
       spuram[transferAddress] = value
       transferAddress += 2
     fifo.clear
