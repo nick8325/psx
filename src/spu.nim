@@ -149,6 +149,14 @@ proc mute(adsr: var Adsr) =
 proc cycle(adsr: var Adsr) =
   if adsr.waitFor == 0:
     adsr.volume = (adsr.volume.int + adsr.stepAfter).clamp(0, 0x7fff).int16
+
+    var newPhase = false
+    if adsr.phase in {apAttack, apDecay}:
+       if (adsr.settings.direction == dIncrease and adsr.volume >= adsr.settings.target) or
+          (adsr.settings.direction == dDecrease and adsr.volume <= adsr.settings.target):
+         newPhase = true
+         adsr.phase.inc
+
     let settings = adsr.settings
     adsr.waitFor = 1 shl max(0, settings.shift - 11)
     adsr.stepAfter = settings.step shl max(0, 11 - settings.shift)
@@ -158,6 +166,10 @@ proc cycle(adsr: var Adsr) =
         if adsr.volume > 0x6000: adsr.waitFor *= 4
       of dDecrease:
         adsr.stepAfter = (adsr.stepAfter * adsr.volume.int div 0x8000)
+
+    if newPhase:
+      debug fmt"new phase {adsr.phase}"
+      debug fmt"volume={adsr.volume}, settings={adsr.settings}, step={settings.step}, waitFor={adsr.waitFor}, stepAfter={adsr.stepAfter}"
   else:
     adsr.waitFor.dec
 
@@ -185,8 +197,6 @@ type
     currentAddress: uint32
     repeatAddress: uint32
     sampleRate: uint16
-    volumeLeft, volumeRight: int16
-    currentVolumeLeft, currentVolumeRight: int16
     reachedLoopEnd: bool
     counter: int
 
@@ -220,6 +230,9 @@ proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
     else:
       generator.currentAddress += 16
 
+proc volume(x, y: int16): int16 =
+  ((x.int * y.int) div 0x8000).int16
+
 proc sample(generator: SampleGenerator): int16 =
   var shift = spuram.read8(generator.currentAddress) and 0xf
   if shift > 12: shift = 9
@@ -250,11 +263,7 @@ proc keyOff(voice: var Voice) =
   voice.adsr.keyOff()
 
 proc sample(voice: Voice): int =
-  #(voice.sampleGenerator.sample().int * voice.adsr.volume.int) div 0x8000
-  if voice.adsr.phase == apAttack:
-    voice.sampleGenerator.sample().int
-  else:
-    0
+  voice.sampleGenerator.sample().volume(voice.adsr.volume).volume(voice.volumeLeft) # TODO stereo
 
 proc cycle(voice: var Voice) =
   var shouldMute: bool
