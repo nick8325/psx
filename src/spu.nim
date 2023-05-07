@@ -254,7 +254,7 @@ proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
     generator.repeatAddress = generator.currentAddress
 
   if generator.sampleNumber >= 28:
-    generator.counter = 0
+    generator.counter -= 28 shl 12
     if flags.testBit 0:
       generator.reachedLoopEnd = true
       generator.currentAddress = generator.repeatAddress
