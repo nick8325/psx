@@ -122,7 +122,7 @@ proc settings(adsr: Adsr): RampSettings =
       direction: adsr.flags.sustainDirection,
       target:
         case adsr.flags.sustainDirection
-        of dIncrease: 0x7ffff
+        of dIncrease: 0x7fff
         of dDecrease: 0,
       shift: adsr.flags.sustainShift,
       rawStep: adsr.flags.sustainStep)
@@ -142,7 +142,7 @@ proc rampStep(volume: int16, settings: RampSettings): tuple[waitFor: int, stepAf
     of dIncrease:
       if volume > 0x6000: waitFor *= 4
     of dDecrease:
-      stepAfter = (stepAfter * volume.int div 0x8000)
+      stepAfter = (stepAfter * volume.int) div 0x8000
   return (waitFor: waitFor, stepAfter: stepAfter)
 
 proc keyOn(adsr: var Adsr) =
@@ -235,7 +235,8 @@ type
     sampleRate: uint16
     reachedLoopEnd: bool
     counter: int
-    history: array[3, int16]
+    previous: int16
+    value: int16
 
 proc sampleNumber(generator: SampleGenerator): int =
   generator.counter shr 12
@@ -247,7 +248,8 @@ proc keyOn(generator: var SampleGenerator) =
   generator.currentAddress = generator.startAddress
   generator.reachedLoopEnd = false
   generator.counter = 0
-  generator.history = [0, 0, 0]
+  generator.value = 0
+  generator.previous = 0
 
 proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
   shouldMute = false
@@ -261,7 +263,7 @@ proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
   if flags.testBit 2:
     generator.repeatAddress = generator.currentAddress
 
-  if generator.sampleNumber >= 28:
+  while generator.sampleNumber >= 28:
     generator.counter -= 28 shl 12
     if flags.testBit 0:
       generator.reachedLoopEnd = true
@@ -275,10 +277,11 @@ proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
   if shift > 12: shift = 9
   let bytePos = generator.sampleNumber div 2
   let nybblePos = generator.sampleNumber mod 2
+  assert 0 <= bytePos and bytePos < 14 and 0 <= nybblePos and nybblePos < 2
   let byte = spuram.read8(generator.currentAddress + bytePos.uint16 + 2)
   let nybble =
     if nybblePos == 0: byte and 0xf
-    else: byte shr 8
+    else: byte shr 4
 
   var sample = (nybble.int16 shl 12 shr shift).int
 
@@ -287,15 +290,14 @@ proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
   const filterTableNeg = [0, 0, -52, -55, 60]
   let filterPos = filterTablePos[filter]
   let filterNeg = filterTableNeg[filter]
-  sample += (generator.history[0].int * filterPos) shr 6
-  sample += (generator.history[1].int * filterNeg) shr 6
+  sample += (generator.value.int * filterPos) shr 6
+  sample += (generator.previous.int * filterNeg) shr 6
 
-  for i in 0..1:
-    generator.history[i] = generator.history[i+1]
-  generator.history[2] = cast[int16](sample)
+  generator.previous = generator.value
+  generator.value = clampedConvert[int16](sample)
 
 proc sample(generator: SampleGenerator): int16 =
-  generator.history[2]
+  generator.value
 
 ######################################################################
 ## Gaussian interpolation.
@@ -566,8 +568,8 @@ ports[0x188 div 2] = Cell(
   write: proc(val: uint16) =
     for i in 0..15:
       if val.testBit(i):
-        debug fmt "key on {i}, {voices[i]}"
         voices[i].keyOn()
+        debug fmt "key on {i}, {voices[i]}"
 )
 
 ports[0x18a div 2] = Cell(
@@ -575,8 +577,8 @@ ports[0x18a div 2] = Cell(
   write: proc(val: uint16) =
     for i in 16..23:
       if val.testBit(i-16):
-        debug fmt "key on {i}, {voices[i]}"
         voices[i].keyOn()
+        debug fmt "key on {i}, {voices[i]}"
 )
 
 ports[0x18c div 2] = Cell(
@@ -584,8 +586,8 @@ ports[0x18c div 2] = Cell(
   write: proc(val: uint16) =
     for i in 0..15:
       if val.testBit(i):
-        debug fmt "key off {i}, {voices[i]}"
         voices[i].keyOff()
+        debug fmt "key off {i}, {voices[i]}"
 )
 
 ports[0x18e div 2] = Cell(
@@ -593,8 +595,8 @@ ports[0x18e div 2] = Cell(
   write: proc(val: uint16) =
     for i in 16..23:
       if val.testBit(i-16):
-        debug fmt "key off {i}, {voices[i]}"
         voices[i].keyOff()
+        debug fmt "key off {i}, {voices[i]}"
 )
 
 ports[0x19c div 2] = generatorBitLow(reachedLoopEnd)
@@ -704,7 +706,7 @@ proc processSPU =
   var sum = 0
   for i in 0..<24:
     voices[i].cycle()
-    sum += voices[i].sample().clampedConvert[:int16]
+    sum += voices[i].sample().int
 
   audioBuffer.add sum.clampedConvert[:int16]
 
