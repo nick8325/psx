@@ -131,7 +131,7 @@ proc settings(adsr: Adsr): RampSettings =
       mode: adsr.flags.releaseMode,
       direction: dDecrease,
       target: 0,
-      shift: adsr.flags.attackShift,
+      shift: adsr.flags.releaseShift,
       rawStep: 0)
 
 proc rampStep(volume: int16, settings: RampSettings): tuple[waitFor: int, stepAfter: int] =
