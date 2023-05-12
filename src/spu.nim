@@ -225,6 +225,79 @@ proc cycle(sweep: var Sweep) =
     sweep.waitFor -= 1
 
 ######################################################################
+## Sample generator (per-voice).
+
+type
+  SampleGenerator = object
+    startAddress: uint16
+    currentAddress: uint32
+    repeatAddress: uint32
+    sampleRate: uint16
+    reachedLoopEnd: bool
+    counter: int
+    history: array[3, int16]
+
+proc sampleNumber(generator: SampleGenerator): int =
+  generator.counter shr 12
+
+proc interpolationIndex(generator: SampleGenerator): int =
+  (generator.counter shr 4) and 0xff
+
+proc keyOn(generator: var SampleGenerator) =
+  generator.currentAddress = generator.startAddress
+  generator.reachedLoopEnd = false
+  generator.counter = 0
+  generator.history = [0, 0, 0]
+
+proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
+  shouldMute = false
+
+  var step = generator.sampleRate
+  # TODO: pitch modulation
+  step = step.clamp(0, 0x3fff)
+  generator.counter += step.int
+
+  let flags = spuram.read8(generator.currentAddress + 1)
+  if flags.testBit 2:
+    generator.repeatAddress = generator.currentAddress
+
+  if generator.sampleNumber >= 28:
+    generator.counter -= 28 shl 12
+    if flags.testBit 0:
+      generator.reachedLoopEnd = true
+      generator.currentAddress = generator.repeatAddress
+      if not flags.testBit 1:
+        shouldMute = true
+    else:
+      generator.currentAddress += 16
+
+  var shift = spuram.read8(generator.currentAddress) and 0xf
+  if shift > 12: shift = 9
+  let bytePos = generator.sampleNumber div 2
+  let nybblePos = generator.sampleNumber mod 2
+  let byte = spuram.read8(generator.currentAddress + bytePos.uint16 + 2)
+  let nybble =
+    if nybblePos == 0: byte and 0xf
+    else: byte shr 8
+
+  var sample = (nybble.int16 shl 12 shr shift).int
+
+  let filter = ((spuram.read8(generator.currentAddress) and 0x30) shr 4).clamp(0, 4)
+  const filterTablePos = [0, 60, 115, 98, 122]
+  const filterTableNeg = [0, 0, -52, -55, 60]
+  let filterPos = filterTablePos[filter]
+  let filterNeg = filterTableNeg[filter]
+  sample += (generator.history[0].int * filterPos) shr 6
+  sample += (generator.history[1].int * filterNeg) shr 6
+
+  for i in 0..1:
+    generator.history[i] = generator.history[i+1]
+  generator.history[2] = cast[int16](sample)
+
+proc sample(generator: SampleGenerator): int16 =
+  generator.history[2]
+
+######################################################################
 ## Gaussian interpolation.
 
 proc interpolate(index: int, samples: array[4, int16]): int16 =
@@ -267,68 +340,20 @@ proc interpolate(index: int, samples: array[4, int16]): int16 =
   result += cast[int16](table[0x100 + index]).mix(samples[2])
   result += cast[int16](table[index]).mix(samples[3])
 
-######################################################################
-## Sample generator (per-voice).
-
 type
-  SampleGenerator = object
-    startAddress: uint16
-    currentAddress: uint32
-    repeatAddress: uint32
-    sampleRate: uint16
-    reachedLoopEnd: bool
-    counter: int
+  Interpolator = object
     history: array[4, int16]
 
-proc sampleNumber(generator: SampleGenerator): int =
-  generator.counter shr 12
+proc keyOn(interpolator: var Interpolator) =
+  interpolator.history = [0, 0, 0, 0]
 
-proc interpolationIndex(generator: SampleGenerator): int =
-  (generator.counter shr 4) and 0xff
-
-proc keyOn(generator: var SampleGenerator) =
-  generator.currentAddress = generator.startAddress
-  generator.reachedLoopEnd = false
-  generator.counter = 0
-  generator.history = [0, 0, 0, 0]
-
-proc cycle(generator: var SampleGenerator, shouldMute: var bool) =
-  shouldMute = false
-
-  var step = generator.sampleRate
-  # TODO: pitch modulation
-  step = step.clamp(0, 0x3fff)
-  generator.counter += step.int
-
-  let flags = spuram.read8(generator.currentAddress + 1)
-  if flags.testBit 2:
-    generator.repeatAddress = generator.currentAddress
-
-  if generator.sampleNumber >= 28:
-    generator.counter -= 28 shl 12
-    if flags.testBit 0:
-      generator.reachedLoopEnd = true
-      generator.currentAddress = generator.repeatAddress
-      if not flags.testBit 1:
-        shouldMute = true
-    else:
-      generator.currentAddress += 16
-
-  var shift = spuram.read8(generator.currentAddress) and 0xf
-  if shift > 12: shift = 9
-  let bytePos = generator.sampleNumber div 2
-  let nybblePos = generator.sampleNumber mod 2
-  let byte = spuram.read8(generator.currentAddress + bytePos.uint16 + 2)
-  let nybble =
-    if nybblePos == 0: byte and 0xf
-    else: byte shr 8
-  var sample = nybble.int16 shl 12 shr shift
+proc cycle(interpolator: var Interpolator, sample: int16) =
   for i in 0..2:
-    generator.history[i] = generator.history[i+1]
-  generator.history[3] = sample
+    interpolator.history[i] = interpolator.history[i+1]
+  interpolator.history[3] = sample
 
-proc sample(generator: SampleGenerator): int16 =
-  interpolate(generator.interpolationIndex, generator.history)
+proc sample(interpolator: Interpolator, index: int): int16 =
+  interpolate(index, interpolator.history)
 
 ######################################################################
 ## A single voice.
@@ -336,22 +361,25 @@ proc sample(generator: SampleGenerator): int16 =
 type
   Voice = object
     sampleGenerator: SampleGenerator
+    interpolator: Interpolator
     adsr: Adsr
     volumeLeft, volumeRight: Sweep
 
 proc keyOn(voice: var Voice) =
-  voice.adsr.keyOn()
   voice.sampleGenerator.keyOn()
+  voice.interpolator.keyOn()
+  voice.adsr.keyOn()
 
 proc keyOff(voice: var Voice) =
   voice.adsr.keyOff()
 
 proc sample(voice: Voice): int =
-  voice.sampleGenerator.sample().mix(voice.adsr.volume).mix(voice.volumeLeft.volume) # TODO stereo
+  voice.interpolator.sample(voice.sampleGenerator.interpolationIndex).mix(voice.adsr.volume).mix(voice.volumeLeft.volume) # TODO stereo
 
 proc cycle(voice: var Voice) =
   var shouldMute: bool
   voice.sampleGenerator.cycle(shouldMute)
+  voice.interpolator.cycle(voice.sampleGenerator.sample)
   if shouldMute:
     voice.adsr.mute()
   else:
