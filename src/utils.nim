@@ -10,7 +10,7 @@ type
   Component* = enum
     logCPU, logMemory, logEventQueue, logGPU, logRasteriser,
     logDMA, logIRQ, logTimer, logCDROM, logMachine, logJoy, logGTE,
-    logMDEC, logSPU
+    logMDEC, logSPU, logCore
 
 func initialLevel(component: Component): Level {.inline.} =
   lvlInfo

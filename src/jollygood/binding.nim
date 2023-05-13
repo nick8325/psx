@@ -1,6 +1,9 @@
 ## A binding to the Jolly Good emulation API. For writing emulation cores.
 import jollygood/header
 import std/sequtils
+import utils
+
+const loggerComponent = logCore
 
 ######################################################################
 # The "Core" type. This is what the core author has to define.
@@ -388,7 +391,7 @@ proc registerCore*(core: Core) =
   audioInfo.sampfmt = core.audioSampleFormat.int.jg_sampfmt
   audioInfo.rate = core.audioRate.cuint
   audioInfo.channels = core.audioChannels.cuint
-  audioInfo.spf = 10000 # We will make sure not to overfill the buffer
+  audioInfo.spf = audioInfo.rate # We will make sure not to overfill the buffer
 
   inputInfo = @[]
   inputs = @[]
@@ -407,15 +410,10 @@ proc playAudio*(samples: seq[int16]) =
   let core = core()
   assert core.audioSampleFormat == sfInt16 and core.audioChannels == 1
   let buf = cast[ptr UncheckedArray[int16]](audioInfo.buf)
-  var i: cuint = 0
-  for sample in samples:
-    buf[i] = sample
-    i.inc
-    if i == audioInfo.spf:
-      callbackAudio(i)
-      i = 0
-  if i != 0:
-    callbackAudio(i)
+  let n = min(audioInfo.spf.int, samples.len)
+  if n != samples.len: warn "audio buffer underflow"
+  for i in 0..<n: buf[i] = samples[i]
+  callbackAudio(n.uint)
 
 # proc playAudio*(samples: seq[float32]) =
 #   discard

@@ -213,13 +213,12 @@ proc settings(sweep: Sweep): RampSettings =
 proc cycle(sweep: var Sweep) =
   if not sweep.flags.sweep:
     sweep.volume = sweep.flags.volumeDiv2 * 2
-  elif sweep.waitFor == 0:
+  if sweep.waitFor > 0: sweep.waitFor.dec
+  if sweep.waitFor == 0:
     sweep.volume = (sweep.volume.int + sweep.stepAfter).clampedConvert[:int16]
     let ramp = rampStep(sweep.volume, sweep.settings)
     sweep.waitFor = ramp.waitFor
     sweep.stepAfter = ramp.stepAfter
-  else:
-    sweep.waitFor -= 1
 
 ######################################################################
 ## Sample generator (per-voice).
