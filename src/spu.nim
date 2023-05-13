@@ -113,17 +113,14 @@ proc settings(adsr: Adsr): RampSettings =
     RampSettings(
       mode: mExponential,
       direction: dDecrease,
-      target: ((adsr.flags.sustainLevel)+1*0x800).int16,
+      target: ((adsr.flags.sustainLevel)+1*0x800).clampedConvert[:int16],
       shift: adsr.flags.decayShift,
       rawStep: 0)
   of apSustain:
     RampSettings(
       mode: adsr.flags.sustainMode,
       direction: adsr.flags.sustainDirection,
-      target:
-        case adsr.flags.sustainDirection
-        of dIncrease: 0x7fff
-        of dDecrease: 0,
+      target: 0, # not used
       shift: adsr.flags.sustainShift,
       rawStep: adsr.flags.sustainStep)
   of apRelease:
@@ -161,6 +158,8 @@ proc mute(adsr: var Adsr) =
   adsr.volume = 0
 
 proc cycle(adsr: var Adsr) =
+  if adsr.waitFor > 0: adsr.waitFor.dec
+
   if adsr.waitFor == 0:
     adsr.volume = (adsr.volume.int + adsr.stepAfter).clamp(0, 0x7fff).int16
 
@@ -178,8 +177,6 @@ proc cycle(adsr: var Adsr) =
     if newPhase:
       debug fmt"new phase {adsr.phase}"
       debug fmt"volume={adsr.volume}, settings={adsr.settings}, step={adsr.settings.step}, waitFor={adsr.waitFor}, stepAfter={adsr.stepAfter}"
-  else:
-    adsr.waitFor.dec
 
 ######################################################################
 ## Sweep envelope (per-voice).
@@ -366,6 +363,9 @@ type
     interpolator: Interpolator
     adsr: Adsr
     volumeLeft, volumeRight: Sweep
+    modulate: bool
+    noise: bool
+    reverb: bool
 
 proc keyOn(voice: var Voice) =
   voice.sampleGenerator.keyOn()
@@ -376,6 +376,7 @@ proc keyOff(voice: var Voice) =
   voice.adsr.keyOff()
 
 proc sample(voice: Voice): int =
+  if voice.noise: return 0
   voice.interpolator.sample(voice.sampleGenerator.interpolationIndex).mix(voice.adsr.volume).mix(voice.volumeLeft.volume) # TODO stereo
 
 proc cycle(voice: var Voice) =
@@ -552,8 +553,8 @@ for i in 0..23:
     ports[i*2 + 0x100] = rw(voices[i].volumeLeft.volume)
     ports[i*2 + 0x101] = rw(voices[i].volumeRight.volume)
 
-# ports[0x190 div 2] = voiceBitLow(modulate)
-# ports[0x192 div 2] = voiceBitHigh(modulate)
+ports[0x190 div 2] = voiceBitLow(modulate)
+ports[0x192 div 2] = voiceBitHigh(modulate)
 ports[0x180 div 2] = rw(volumeLeft.flags)
 ports[0x182 div 2] = rw(volumeRight.flags)
 ports[0x1b8 div 2] = rw(volumeLeft.volume)
@@ -601,8 +602,8 @@ ports[0x18e div 2] = Cell(
 
 ports[0x19c div 2] = generatorBitLow(reachedLoopEnd)
 ports[0x19e div 2] = generatorBitHigh(reachedLoopEnd)
-# ports[0x194 div 2] = voiceBitLow(noise)
-# ports[0x196 div 2] = voiceBitHigh(noise)
+ports[0x194 div 2] = voiceBitLow(noise)
+ports[0x196 div 2] = voiceBitHigh(noise)
 ports[0x1aa div 2] = rw(control)
 ports[0x1ae div 2] = ro(status)
 ports[0x1a6 div 2] = Cell(
@@ -619,8 +620,8 @@ ports[0x1ac div 2] = Cell(
     if val != 4:
       warn "Unknown transfer control")
 ports[0x1a4 div 2] = rwDiv8(spuram.watchAddress)
-# ports[0x198 div 2] = voiceBitLow(reverb)
-# ports[0x19a div 2] = voiceBitHigh(reverb)
+ports[0x198 div 2] = voiceBitLow(reverb)
+ports[0x19a div 2] = voiceBitHigh(reverb)
 
 # Reverb registers
 ports[0x184 div 2] = rw(vLOUT)
