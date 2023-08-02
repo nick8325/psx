@@ -1,5 +1,8 @@
 Accuracy:
 
+* Check: does PC get set correctly after J+RFE when an irq is waiting?
+  I.e., the rfe will immediately enable interrupts. Will the new PC
+  from the J instruction be loaded before the interrupt is handled?
 * Allow devices to pause (coroutine library)
 * Add device timings including GTE
 * Reimplement CDROM with proper timing
@@ -9,11 +12,10 @@ Bugs:
 
 * (current?) Find out why only some BIOSes are able to boot a CD
 * (current?) Find out why only some BIOSes are able to boot an EXE
-* Fix graphical glitch in memory card browser
 * Crash Bandicoot: why is it running at half speed? (Come back to this after audio is done)
-* Ridge Racer: why is the ground not drawn properly?
 * GPU: why are games flickering? Effect doesn't appear when viewing raw VRAM,
   so may be something to do with double buffering
+* Fix weird sound
 
 Features:
 
