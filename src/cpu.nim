@@ -572,6 +572,9 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     else:
       branchDelay = bdNotTaken
 
+  template set(r: Register, v: word) =
+    update = (reg: r, val: v)
+
   template link(r: Register) =
     r.set(cpu.nextPC + 4)
 
@@ -593,9 +596,6 @@ proc execute(cpu: var CPU, instr: word, time: var int64) {.inline.} =
     # twice in consecutive instructions, the first load never takes effect
     if unlikely(cpu.delayedUpdate.reg == r):
       cpu.delayedUpdate = (reg: r0, val: 0u32)
-
-  template set(r: Register, v: word) =
-    update = (reg: r, val: v)
 
   template checkCOPAccessible(i: 0..3) =
     if unlikely(not cpu.cop0.sr[cu.bit i]):
