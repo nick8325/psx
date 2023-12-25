@@ -12,7 +12,7 @@ type
     id: int64
     repeat: proc(): int64
     action: proc ()
-  EventQueue {.requiresInit.} = object
+  EventQueue = object
     ## A queue of events.
     now: int64
     id: int64
