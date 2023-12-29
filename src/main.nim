@@ -3,6 +3,8 @@ import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom, tim
 import std/os
 import std/[monotimes, times, options, heapqueue, tables, algorithm]
 #import std/strformat
+import imguin/[glad/gl,nimsdl2_opengl]
+include imguin/simple
 
 discard sdl2.init(INIT_EVERYTHING)
 
@@ -101,8 +103,22 @@ events.every(proc: int64 = clockRate, "histogram") do():
 #    echo fmt"  {pair.pc:8x}: {freq*100:.2f}% ({pair.count} times)"
 #  echo ""
 
+var showDemo = false
+var showMenu = false
+igCreateContext(nil)
+#defer: igDestroyContext(nil)
+
+doAssert ImGui_ImplSdl2_InitForSDLRenderer(cast[ptr SdlWindow](window) , cast[ptr SdlRenderer](render))
+#defer: ImGui_ImplSDL2_Shutdown()
+
+doAssert ImGui_ImplSdlRenderer2_Init(cast[ptr SdlRenderer](render))
+#defer: ImGui_ImplOpenGL3_Shutdown()
+
+igStyleColorsClassic(nil)
+
 while runGame:
   while pollEvent(evt):
+    ImGui_ImplSDL2_ProcessEvent(cast[ptr SdlEvent](addr evt))
     if evt.kind == QuitEvent:
       runGame = false
       break
@@ -140,8 +156,31 @@ while runGame:
         pauseOnPrimitive = not pauseOnPrimitive
         paused = false
 
+      of K_M:
+        showMenu = not showMenu
+
+      of K_D:
+        showDemo = not showDemo
+
       else:
         echo "unknown key"
+
+  ImGui_ImplSdlRenderer2_NewFrame()
+  ImGui_ImplSdl2_NewFrame()
+  igNewFrame()
+
+  if showDemo:
+    igShowDemoWindow(addr showDemo)
+  if showMenu:
+    if igBeginMainMenuBar():
+      if igBeginMenu("Options", true):
+        igMenuItemBoolPtr("Pause", "p", addr paused, true)
+        igMenuItemBoolPtr("Fast forward", "w", addr fastForward, true)
+        igMenuItemBoolPtr("Debug timers", "t", addr timerDebug, true)
+        igMenuItemBoolPtr("Show VRAM", "v", addr showVram, true)
+        igMenuItemBoolPtr("Show Dear ImGui demo", "d", addr showDemo, true)
+        igEndMenu()
+      igEndMainMenuBar()
 
   # TODO: this seems to be running slow. Clean up the vblank handling.
   runSystem(nextVBlankDelta())
@@ -175,16 +214,18 @@ while runGame:
           pixelSurface.blitSurface addr(srcRect), display, addr(destRect)
 
   let time = getMonoTime()
-  if (time - lastFrameTime).inNanoseconds >= 1000000000 div refreshRate[region].cint:
-    lastFrameTime = time
-    let texture = render.createTextureFromSurface(if showVRam: surface else: display)
-    discard render.setLogicalSize(if showVRam: 1024 else: width, if showVRam: 512 else: height)
-    render.setDrawColor 0, 0, 0, 255
-    render.clear
-    if displayEnabled() or showVRam:
-      render.copy texture, nil, nil
-    render.present
-    texture.destroy
+  lastFrameTime = time
+  let texture = render.createTextureFromSurface(if showVRam: surface else: display)
+#  discard render.setLogicalSize(if showVRam: 1024 else: width, if showVRam: 512 else: height)
+  render.setDrawColor 0, 0, 0, 255
+  render.clear
+  if displayEnabled() or showVRam:
+    render.copy texture, nil, nil
+  texture.destroy
+
+  igRender()
+  ImGui_ImplSdlRenderer2_RenderDrawData(igGetDrawData())
+  render.present
 
 destroy render
 destroy window
