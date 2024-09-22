@@ -466,7 +466,7 @@ proc execute*(gte: var GTE, op: word) =
 
   case op.opcode
   of RTPS.int, RTPT.int:
-    template perspectiveTransform(v: Vec3l, last: bool) =
+    template perspectiveTransform(v: Vec3l) =
       gte.setIR gte.matMulPlus(gte.RTM, v, gte.TR shl 12), rtps=true
 
       gte.pushS
@@ -474,15 +474,15 @@ proc execute*(gte: var GTE, op: word) =
       let divisor = gte.perspectiveDivisor
       gte.SX2 = gte.viaMAC0(divisor*gte.IR1 + gte.OFX) shr 16
       gte.SY2 = gte.viaMAC0(divisor*gte.IR2 + gte.OFY) shr 16
-      if last:
-        gte.IR0 = gte.viaMAC0(divisor*gte.DQA + gte.DQB) shr 12
 
     if op.opcode == RTPT.int:
-      perspectiveTransform gte.V0, false
-      perspectiveTransform gte.V1, false
-      perspectiveTransform gte.V2, true
+      perspectiveTransform gte.V0
+      perspectiveTransform gte.V1
+      perspectiveTransform gte.V2
     else:
-      perspectiveTransform gte.V0, true
+      perspectiveTransform gte.V0
+
+    gte.IR0 = gte.viaMAC0(gte.perspectiveDivisor*gte.DQA + gte.DQB) shr 12
 
   of MVMVA.int:
     let m =

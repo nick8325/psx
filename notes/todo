@@ -1,3 +1,8 @@
+gtkwave for viewing waveforms
+
+"Nocash was very likely fucking up something while measuring" - on
+"RGB Intensity Notes", section has been removed now
+
 Accuracy:
 
 * Check: does PC get set correctly after J+RFE when an irq is waiting?
