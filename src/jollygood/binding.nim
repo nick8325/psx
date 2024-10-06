@@ -352,7 +352,7 @@ proc jg_set_paths(paths: jg_pathinfo_t) {.api.} =
 
 # TODO: allow freeing a jg_inputinfo_t too
 proc toInputInfo(i: int, input: Input): jg_inputinfo_t =
-  result.`type` = input.kind.int.jg_inputtype
+  result.typ = input.kind.int.jg_inputtype
   result.index = i.cint
   result.name = input.name.cstring
   result.fname = input.fullName.cstring

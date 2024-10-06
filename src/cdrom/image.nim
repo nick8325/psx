@@ -47,7 +47,7 @@ type
     of pkBlank: discard
     of pkRawData: data: MemFile
 
-proc `=destroy`(part: var Part) =
+proc `=destroy`(part: var Part) {.raises: [OSError].} =
   if part.kind == pkRawData: part.data.close()
 
 proc openRawData(filename: string): Part =
