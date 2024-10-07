@@ -1,9 +1,9 @@
 import sdl2, sdl2/gfx
 import machine, rasteriser, basics, eventqueue, irq, gpu, savestates, cdrom, timer, cpu
 import std/os
-import std/[monotimes, times, options, heapqueue, tables, algorithm]
+import std/[monotimes, options, heapqueue, tables, algorithm]
 #import std/strformat
-import imguin/[glad/gl,nimsdl2_opengl]
+import imguin/nimsdl2_opengl
 include imguin/simple
 
 discard sdl2.init(INIT_EVERYTHING)

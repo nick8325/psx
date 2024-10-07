@@ -1,8 +1,8 @@
 docs
 tools
-nolibgs_hello_worlds
-zig-cache
-zig-out
+tests
+nim-stuff
+roms
 *.bin
 *.cue
 *.mcr

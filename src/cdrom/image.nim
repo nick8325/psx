@@ -45,14 +45,15 @@ type
     sectors*: int
     case kind: PartKind
     of pkBlank: discard
-    of pkRawData: data: MemFile
+    of pkRawData: data: ref MemFile
 
-proc `=destroy`(part: var Part) {.raises: [OSError].} =
-  if part.kind == pkRawData: part.data.close()
+proc `=destroy`(part: Part) {.raises: [OSError].} =
+  if part.kind == pkRawData: part.data[].close()
 
 proc openRawData(filename: string): Part =
   ## Open a BIN file using 2352-byte sectors.
-  let file = memfiles.open(filename)
+  let file = new(MemFile)
+  file[] = memfiles.open(filename)
   assert file.size mod rawSectorSize == 0
   let sectors = file.size div rawSectorSize
   Part(kind: pkRawData, sectors: sectors, data: file)
@@ -86,7 +87,7 @@ proc read*(part: Part, pos: Sector): seq[uint8] =
     result = newSeq[uint8](rawSectorSize)
   of pkRawData:
     let bytePos = rawSectorSize * pos
-    result = part.data[bytePos ..< bytePos + rawSectorSize]
+    result = part.data[][bytePos ..< bytePos + rawSectorSize]
 
 proc read*(cd: CD, pos: Sector): seq[uint8] =
   ## Read a given sector from a CD.
